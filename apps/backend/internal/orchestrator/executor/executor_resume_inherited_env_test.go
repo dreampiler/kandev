@@ -416,12 +416,14 @@ func newRetainedLocalFixture(t *testing.T, inherited bool, executorType string) 
 	task := &v1.Task{ID: "r3-child", WorkspaceID: "r3-workspace"}
 	session := &models.TaskSession{
 		ID: "r3-session", TaskID: task.ID, TaskEnvironmentID: "r3-environment",
+		ExecutorID:   "r3-local-executor",
 		RepositoryID: "r3-source", QueueIncarnationID: "r3-incarnation",
 		State: models.TaskSessionStateWaitingForInput, AgentProfileID: "profile-123",
 		Metadata: map[string]interface{}{"acp_session_id": "r3-native-history"},
 	}
 	env := &models.TaskEnvironment{
 		ID: session.TaskEnvironmentID, TaskID: task.ID,
+		ExecutorID:   session.ExecutorID,
 		ExecutorType: executorType, Status: models.TaskEnvironmentStatusReady,
 		WorkspacePath: t.TempDir(), OwnershipGeneration: 4,
 	}
@@ -430,6 +432,9 @@ func newRetainedLocalFixture(t *testing.T, inherited bool, executorType string) 
 		SourceType: "local", LocalPath: t.TempDir(), DefaultBranch: "main",
 	}
 	session.WorkspacePath = env.WorkspacePath
+	repo.executors[session.ExecutorID] = &models.Executor{
+		ID: session.ExecutorID, Type: models.ExecutorType(executorType), Status: models.ExecutorStatusActive,
+	}
 	repo.repositories[source.ID] = source
 	repo.tasks[task.ID] = &models.Task{ID: task.ID, WorkspaceID: task.WorkspaceID}
 	if inherited {
@@ -452,8 +457,7 @@ func newRetainedLocalFixture(t *testing.T, inherited bool, executorType string) 
 	repo.sessions[session.ID] = session
 	request := &LaunchAgentRequest{
 		TaskID: task.ID, ExecutorType: executorType, WorkspaceReuseRequired: true,
-		WorkspacePath: env.WorkspacePath,
-		Attachments:   []v1.MessageAttachment{{Type: "file", AttachmentID: "r3-attachment", Name: "history.txt"}},
+		Attachments: []v1.MessageAttachment{{Type: "file", AttachmentID: "r3-attachment", Name: "history.txt"}},
 	}
 	return &retainedLocalFixture{e, repo, task, session, request, env, source}
 }
@@ -470,6 +474,7 @@ func TestRetainedLocalDetachedResumeKeepsTaskWorkspace(t *testing.T) {
 			require.Empty(t, id, "historical detached source must not become a materialization request")
 			require.Empty(t, f.request.RepositoryID)
 			require.Empty(t, f.request.Branch)
+			require.Equal(t, f.environment.WorkspacePath, f.request.WorkspacePath)
 			require.Equal(t, "r3-source", f.session.RepositoryID)
 			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
 			require.Equal(t, attachments, f.request.Attachments)
@@ -569,6 +574,54 @@ func TestRetainedLocalInheritedExceptionRejectsOtherContexts(t *testing.T) {
 			}
 			require.Equal(t, "r3-source", f.session.RepositoryID)
 			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
+		})
+	}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalBuildResumeRequestKeepsWorkspace(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		t.Run(map[bool]string{false: "detached", true: "inherited"}[inherited], func(t *testing.T) {
+			for _, executorType := range []string{string(models.ExecutorTypeLocal), "local_pc"} {
+				t.Run(executorType, func(t *testing.T) {
+					for _, mode := range []struct {
+						name       string
+						startAgent bool
+						native     bool
+					}{
+						{"workspace_only", false, false},
+						{"without_native_conversation", true, false},
+						{"native_conversation", true, true},
+					} {
+						t.Run(mode.name, func(t *testing.T) {
+							f := newRetainedLocalFixture(t, inherited, executorType)
+							if mode.native {
+								f.session.DownstreamACPSessionID = "r3-native-history"
+							} else {
+								delete(f.session.Metadata, "acp_session_id")
+							}
+							raw, _ := newResumeLaunchRequest(f.task, f.session, mode.startAgent, ResumeOptions{})
+							require.Empty(t, raw.WorkspacePath, "production request construction supplies only the original path")
+							req, id, _, env, _, err := f.executor.buildResumeRequest(context.Background(), f.task, f.session, mode.startAgent)
+							require.NoError(t, err)
+							require.Equal(t, f.environment.WorkspacePath, req.WorkspacePath)
+							require.Equal(t, f.session.WorkspacePath, req.OriginalWorkspacePath)
+							require.Equal(t, f.environment.ID, env.ID)
+							require.Equal(t, f.environment.TaskID, env.TaskID)
+							require.Empty(t, id)
+							require.Empty(t, req.RepositoryID)
+							require.Empty(t, req.RepositoryPath)
+							if mode.native {
+								require.Equal(t, "r3-native-history", req.ACPSessionID)
+							} else {
+								require.Empty(t, req.ACPSessionID)
+							}
+							require.Equal(t, "r3-source", f.session.RepositoryID)
+							require.Empty(t, f.repo.createTaskEnvironmentCalls)
+						})
+					}
+				})
+			}
 		})
 	}
 }

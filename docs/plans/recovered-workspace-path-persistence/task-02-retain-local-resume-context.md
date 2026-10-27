@@ -86,3 +86,25 @@ scenario groups, covering local/local_pc, detached and inherited ownership,
 physical-inventory exclusions and unchanged history. No production test seam,
 framework or scheduled job is added. The persisted cases passed directly with
 fts5 and race detection: executor3.116s and final task/service4.637s.
+
+## Resume-request entry-point correction
+
+The original helper fixture pre-filled WorkspacePath, whereas
+newResumeLaunchRequest initializes only OriginalWorkspacePath. Without a
+native conversation ID, lifecycle does not consult the workspace-info provider
+and can select a scratch folder.
+
+The exact published-source overlay failed the production-shaped request
+matrix with an empty WorkspacePath (4.295s). The fixture no longer pre-fills
+that field, and the native positive control uses the canonical persisted
+DownstreamACPSessionID. A seventh existing-file group calls buildResumeRequest
+for detached/inherited, local/local_pc and workspace-only/no-native/native
+conversation modes.
+
+Both validated exceptions now bind WorkspacePath from the retained environment.
+OriginalWorkspacePath, ownership checks, session repository history and native
+conversation selection remain unchanged. The final request cases, prior
+positive/exclusion groups and selected existing environment/repository controls
+passed together with fts5 and race detection (4.860s). The service projection
+source is unchanged from its 4.637s validation above. Normal hooks and updated
+head CI are separate publication results.

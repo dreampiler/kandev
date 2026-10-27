@@ -397,3 +397,10 @@ The Files path component is shared by desktop and phone layouts. This repair
 changes backend state normalization, not layout, navigation, scrolling, or
 touch behavior, so the focused desktop recovery scenario plus existing shared
 component coverage provides mobile parity.
+
+The retained LOCAL repository-context exceptions bind the verified environment
+path into the launch request's WorkspacePath before returning. The separate
+OriginalWorkspacePath remains the native conversation's original CWD. This
+explicit request binding also applies when no native conversation is loaded:
+workspace-only and token-less resume cannot rely on the workspace-info provider
+to override the lifecycle scratch-folder fallback.
