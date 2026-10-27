@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 )
 
-// queuedTranscriptMessageIDs returns recorded transcript rows whose work the
+// queuedTranscriptMessageIDs returns transcript row IDs whose work the
 // queue still owns, including retained reservations and ordinary dispatch claims.
 // An unreadable inventory cannot attest that queued work is absent.
 func (s *Service) queuedTranscriptMessageIDs(ctx context.Context, sessionID string) (map[string]struct{}, error) {
@@ -42,9 +42,8 @@ func (s *Service) queuedTranscriptMessageIDs(ctx context.Context, sessionID stri
 }
 
 func addQueuedTranscriptMessageID(ids map[string]struct{}, queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) {
-	if recorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool); !recorded {
-		return
-	}
+	// The durable claim can predate recording. Match existing transcript rows by
+	// identity instead of trusting its stale, process-local recorded marker.
 	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
 		ids[transcriptID] = struct{}{}
 	}
