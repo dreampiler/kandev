@@ -60,3 +60,23 @@ with the same flags (2.822s). Documentation coverage reports `covered`.
 These are historical upstream source runs, not this Native integration's result.
 This integration records its own focused controls separately. The source runs
 do not claim full backend or live-provider validation.
+
+### Recorded-after-reservation correction
+
+The upstream PR #4848 follow-up identified that ordinary claim persistence precedes the transcript write;
+the recorded marker changes only in memory. The exact published runtime also
+replays that row after restoration from the stale claim. Both cases reproduce
+with the real transcript writer and SQLite storage (0.794s). Ownership now
+matches exact existing transcript IDs independently of that stale marker, with
+no additional metadata, persistence mutation, or identity algorithm. This
+follow-up does not cover the distinct multi-source `SendNowClaim` inventory or
+its combined-transcript identity; it is not a claim that Send All recovery is
+fully repaired.
+
+The two new real-writer cases and all thirteen ownership/read/capability
+variants, together with the prior queue-recovery and writer-idempotency
+controls, pass with `-trimpath -tags fts5 -race -count=1` (11.113s).
+
+These follow-up race figures are historical upstream source results. Native
+combined-source verification is recorded separately; Send All remains outside
+this correction.

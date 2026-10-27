@@ -62,6 +62,9 @@ func TestDynamicContinuationKeepsQueueOwnedTranscriptOutOfPrompts(t *testing.T) 
 				metaKeyUserMessageRecorded:                      mode != "unrecorded",
 				messagequeue.MetadataDurableTranscriptMessageID: "explicit-held-row",
 			}
+			if mode == "unrecorded" {
+				delete(metadata, messagequeue.MetadataDurableTranscriptMessageID)
+			}
 			if mode == "retained" {
 				metadata[messagequeue.MetadataLifecycleDurable] = true
 			}
@@ -84,6 +87,9 @@ func TestDynamicContinuationKeepsQueueOwnedTranscriptOutOfPrompts(t *testing.T) 
 			claimsBefore, err := queue.ListPendingQueueDispatches(ctx)
 			require.NoError(t, err)
 			stableID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("kandev:queued-transcript:held-task:"+sessionID+":"+queued.ID)).String()
+			if mode == "unrecorded" {
+				stableID = "unrelated-user-row"
+			}
 			now := time.Now().UTC()
 			require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "held-turn", TaskID: "held-task", TaskSessionID: "held-session", StartedAt: now}))
 			for index, row := range []struct{ id, content string }{
@@ -169,6 +175,54 @@ func TestDynamicContinuationUnreadableQueueRefusesPromptReconstruction(t *testin
 				require.True(t, ok)
 				require.Equal(t, "durable request", prompt.text)
 			}
+		})
+	}
+}
+
+func TestDynamicContinuationExcludesTranscriptRecordedAfterReservation(t *testing.T) {
+	for _, restore := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reserved", true: "restored-from-stale-claim"}[restore], func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "late-task", "late-session", "step-1")
+			queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+			t.Cleanup(func() { _ = db.Close() })
+			queued, err := queue.QueueMessage(ctx, "late-session", "late-task", "recorded after reservation", "", "", false, nil)
+			require.NoError(t, err)
+			reserved, ok := queue.ReserveQueued(ctx, queued.SessionID)
+			require.True(t, ok)
+			now := time.Now().UTC()
+			require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "late-turn", TaskID: queued.TaskID, TaskSessionID: queued.SessionID, StartedAt: now}))
+			svc := &Service{
+				repo: repo, messageQueue: queue, logger: testLogger(),
+				messageCreator: &repositoryBackedMessageCreator{mockMessageCreator: &mockMessageCreator{}, repo: repo},
+			}
+			svc.activeTurns.Store(queued.SessionID, "late-turn")
+			require.NoError(t, svc.recordQueuedUserMessage(ctx, reserved, nil))
+			require.Equal(t, true, reserved.Metadata[metaKeyUserMessageRecorded])
+			claims, err := queue.ListPendingQueueDispatches(ctx)
+			require.NoError(t, err)
+			require.Len(t, claims, 1)
+			require.NotEqual(t, true, claims[0].Message.Metadata[metaKeyUserMessageRecorded], "the durable claim predates transcript recording")
+			if restore {
+				_, err = queue.RestoreMessage(ctx, &claims[0].Message)
+				require.NoError(t, err)
+			}
+			before, _, err := queue.SnapshotSession(ctx, queued.SessionID)
+			require.NoError(t, err)
+			claimsBefore, err := queue.ListPendingQueueDispatches(ctx)
+			require.NoError(t, err)
+			input := &dynamicruntime.ContinuationInput{}
+			require.NoError(t, svc.addDynamicConversation(ctx, queued.SessionID, input))
+			require.Empty(t, input.UserMessages, "the real writer's row must remain owned by the queued delivery")
+			_, ok = svc.dynamicRelaunchPrompt(ctx, queued.SessionID)
+			require.False(t, ok, "a queue-only transcript cannot become a recovery prompt")
+			after, _, err := queue.SnapshotSession(ctx, queued.SessionID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			claimsAfter, err := queue.ListPendingQueueDispatches(ctx)
+			require.NoError(t, err)
+			require.Equal(t, claimsBefore, claimsAfter)
 		})
 	}
 }

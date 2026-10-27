@@ -103,9 +103,11 @@ require the current exclusive probe lease.
 
 - Before adding transcript-derived user rows to a new continuation or choosing
   a durable relaunch prompt, the orchestrator reads the complete session queue
-  snapshot and, when supported, ordinary pending dispatch claims. Only recorded
-  entries and same-session unaccepted claims exclude rows, using their explicit
-  transcript ID and the existing deterministic queued-message ID. Read errors
+  snapshot and, when supported, ordinary pending dispatch claims. Owned entries
+  and same-session unaccepted claims exclude existing rows by their explicit
+  transcript ID and the existing deterministic queued-message ID. The recorded
+  marker may predate the writer in durable claims and is not required for an
+  exact row-ID match. An absent transcript row has no context to exclude. Read errors
   stop reconstruction before launch. These reads do not ACK, restore, delete,
   or dispatch queued work. Saved continuation data and cached retry prompts
   keep their existing precedence.
