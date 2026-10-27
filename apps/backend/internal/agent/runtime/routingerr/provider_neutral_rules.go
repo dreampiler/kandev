@@ -4,6 +4,12 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	mustRule(
+		"provider.rate_limit.v1",
+		`(?i)temporarily\s+rate[-_\s]limited\s+upstream[^\n]*please\s+retry\s+shortly`,
+		CodeRateLimited,
+		ConfHigh,
+	),
 	// Some providers announce an exhausted quota as an ordinary assistant
 	// message and then never settle the prompt, so the notice is the only
 	// failure signal. The high-confidence rule is anchored to the whole text and
