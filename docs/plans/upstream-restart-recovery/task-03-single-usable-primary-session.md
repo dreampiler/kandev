@@ -98,7 +98,7 @@ the base).
 The original results above remain historical evidence. This follow-up extends
 AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.2 only: an open or unreadable canonical
 recovery block and an action-required route exclude a stop candidate; removal
-keeps a nonterminal blocked session as the final fallback. A live resume
+keeps a nonterminal blocked session as the final fallback. A live, unaccepted resume
 attempt's FAILED rollback keeps the primary. Cancelled/finished attempts,
 existing healthy rank/tie order and explicit primary selection retain their
 previous behavior. There are no queue-transfer, policy, schema or public-API
@@ -111,10 +111,24 @@ and removal controls with the race detector (2.343s). This includes the blocked
 removal fallback, cancelled attempt, explicit choice with unknown outcome and
 queue identity, and optional-store compatibility.
 
-Formatting completed. Eight focused scenario groups now extend the existing
+Formatting completed. Nine focused scenario groups now extend the existing
 primary-session candidate test file. No installed-provider operation was performed. Normal hooks and hosted CI are separate publication results.
 
-The committed existing-file recovery cases and existing primary-promotion
-stop/removal controls passed directly with fts5 and the race detector (2.139s).
+The initial eight committed existing-file recovery cases and existing
+primary-promotion stop/removal controls passed with fts5 and the race detector (2.139s).
 Unknown-outcome blocks, original queue identity, explicit selection and legacy
 store compatibility are retained.
+
+## Provider-acceptance ownership boundary
+
+Provider acceptance transfers startup ownership before the deferred resume
+operation returns. A still-registered accepted attempt must therefore allow
+normal failed-session promotion. The existing-file case uses the real registry
+acceptance method, proves the attempt is still live before finish, and checks
+healthy-peer promotion without moving the original queued message. The registry
+lookup reads the acceptance flag under its existing lock. The original
+unaccepted rollback, cancellation, removal and explicit-selection controls
+passed with the new case, existing promotion controls and acceptance/cancellation
+ordering checks under fts5 and the race detector (2.391s). The published source
+failed the accepted-before-finish case (1.753s), retaining the failed primary
+instead of promoting the healthy peer.

@@ -26,12 +26,15 @@ func (s *Service) sessionAwaitsRecoveryAction(ctx context.Context, session *mode
 	return block != nil
 }
 
-// resumeAttemptInFlight reports whether a live resume attempt still owns the
-// session's startup. Its FAILED rollback must not hand away the primary role.
+// resumeAttemptInFlight reports whether a live, unaccepted attempt still owns
+// startup. Provider acceptance transfers that ownership before deferred finish.
 func (s *Service) resumeAttemptInFlight(sessionID string) bool {
 	if sessionID == "" {
 		return false
 	}
-	attempt, ok := s.resumeAttemptStore().current(sessionID)
-	return ok && attempt != nil && attempt.ctx != nil && attempt.ctx.Err() == nil
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	attempt := registry.attempts[sessionID]
+	return attempt != nil && attempt.ctx != nil && attempt.ctx.Err() == nil && !attempt.accepted
 }

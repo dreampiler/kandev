@@ -81,9 +81,12 @@ stopped primary keeps the role. `promoteNextPrimaryAfterRemoval` passes
 `false, false`, excludes terminal sessions and keeps an awaiting-recovery
 nonterminal session as its final fallback.
 
-A FAILED rollback does not promote while `resumeAttemptInFlight` finds a live
-attempt in the existing registry. A cancelled or finished attempt does not
-retain that ownership. Both automatic paths still use `SetPrimarySession`;
+A FAILED rollback does not promote while the existing registry contains a live,
+unaccepted startup attempt. The lookup reads acceptance under the registry
+lock and releases it before promotion storage work. Provider acceptance
+transfers startup ownership even while the attempt remains registered until
+its deferred finish. Accepted, cancelled and finished attempts do not retain
+this suppression. Both automatic paths still use `SetPrimarySession`;
 explicit primary selection and its authorization remain unchanged. No queue
 is moved and no unknown prompt outcome is retried (`001.4`).
 

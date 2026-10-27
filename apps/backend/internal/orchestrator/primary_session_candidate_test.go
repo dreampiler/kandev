@@ -309,3 +309,31 @@ func TestPrimaryRecoveryLegacyStoreKeepsOrdinaryPromotion(t *testing.T) {
 	stopPrimary(t, svc, repo)
 	require.Equal(t, "recovery-legacy", primarySessionID(t, repo))
 }
+
+// @covers AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.2
+// @covers AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.4
+func TestPrimaryRecoveryAcceptedAttemptAllowsPromotionBeforeFinish(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "recovery-healthy", State: models.TaskSessionStateStarting},
+	)
+	ctx := context.Background()
+	queued, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID,
+		"accepted source queue", "", "user", false, nil)
+	require.NoError(t, err)
+	attempt := primaryRecoveryAttempt(t, svc)
+	registry := svc.resumeAttemptStore()
+	require.True(t, registry.accept(attempt, "recovery-accepted-execution"))
+	current, active := registry.current(primaryStoppedID)
+	require.True(t, active, "provider acceptance precedes deferred attempt finish")
+	require.Same(t, attempt, current)
+	require.NoError(t, attempt.ctx.Err())
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+
+	svc.maybePromotePrimary(ctx, primaryTaskID, primaryStoppedID, models.TaskSessionStateFailed)
+
+	require.Equal(t, "recovery-healthy", primarySessionID(t, repo))
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, primaryStoppedID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, queued.ID, entries[0].ID)
+}
