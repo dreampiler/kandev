@@ -1,6 +1,6 @@
 ---
 created: 2026-10-26
-status: in_progress
+status: implemented
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
@@ -192,10 +192,10 @@ claimed without an actual configured DSN and executed tests.
 ## Work orders
 
 - [x] [Task 01: Finalize cache aliases after physical cleanup](task-01-finalize-cache-aliases.md)
-- [ ] [Task 02: Report attachment rollback cleanup errors](task-02-report-attachment-rollback-errors.md)
+- [x] [Task 02: Report attachment rollback cleanup errors](task-02-report-attachment-rollback-errors.md)
 
-Task 01 is complete. Task 02 is in progress; normal hooks, CI, and publication
-remain pending.
+Task 01 and Task 02 are complete. Task 02 passed local validation and normal
+commit hooks and was submitted in #4842. Hosted CI remains a separate result.
 
 ## Related packages and overlap
 
@@ -264,8 +264,12 @@ expected (`1.073s`), each returning nil instead of the injected list/cleanup
 errors. Candidate overlay passed (`0.485s`). The public `-race` fixture overlay
 also passed (`1.258s`). These runs verify error reporting and existing public
 fixture behavior; they do not explain or resolve the separately observed active
-inventory row. Overlay files and logs remain outside the repository. No
-permanent tests were added. Normal hooks, CI, and publication are pending.
+inventory row. Overlay files and logs remain outside the repository. Three
+regression cases now extend the existing host-materialization test file and
+passed directly with fts5 and the race detector (2.278s). Normal commit hooks
+passed, and Task 02 was submitted in #4842. Hosted CI is tracked separately;
+a completed implementation and PR submission do not imply all hosted checks
+have finished.
 
 ## Risks
 
