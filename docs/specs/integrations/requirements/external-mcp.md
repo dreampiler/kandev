@@ -23,7 +23,7 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.2:** Users register Kandev as an MCP server in their external coding agent using one of:
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.3:** Streamable HTTP: `http://localhost:38429/mcp`
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.4:** SSE: `http://localhost:38429/mcp/sse`
-- **AC-INTEGRATIONS-EXTERNAL-MCP-001.5:** The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` (no plan tools, no `ask_user_question_kandev`).
+- **AC-INTEGRATIONS-EXTERNAL-MCP-001.5:** The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` and `update_task_kandev` (no plan tools, no `ask_user_question_kandev`). The [task-owned priority contract](../../tasks/requirements/mcp-task-priority.md) defines priority writes.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.6:** The endpoint requires a personal access token when Kandev authentication is enabled. It remains open when authentication is disabled.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.7:** The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.8:** The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.
@@ -68,13 +68,14 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 - Users register Kandev as an MCP server in their external coding agent using one of:
   - Streamable HTTP: `http://localhost:38429/mcp`
   - SSE: `http://localhost:38429/mcp/sse`
-- The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` (no plan tools, no `ask_user_question_kandev`).
+- The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` and `update_task_kandev` (no plan tools, no `ask_user_question_kandev`).
 - The endpoint requires a personal access token when Kandev authentication is enabled. It remains open when authentication is disabled.
 - The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.
 - The configuration and external tool surfaces expose `export_workflow_kandev`.
 - `export_workflow_kandev` requires one `workflow_id` and returns a JSON `WorkflowExport` document as MCP text content.
-- The document uses `version: 1` and `type: kandev_workflow`. It contains exactly one portable workflow and all of its steps.
+- The document uses the existing versioned `WorkflowExport` format and `type: kandev_workflow`. It contains exactly one portable workflow and all of its steps.
+- Each step includes its persisted `stage_type` (`work`, `review`, `approval`, or `custom`) in the existing version envelope. The field is optional for compatibility; older documents that omit it import new steps as `custom`.
 - The document omits instance IDs and timestamps. It keeps portable profile data and position-based step references from the existing export service.
 - A caller can pass the returned text unchanged as `document` to `import_workflow_kandev` when the document is within the import limit.
 - Workflow export is read-only. It does not change the workflow, its steps, or its workspace.
@@ -115,6 +116,7 @@ The tool does not return a workflow from another user's workspace. Authenticatio
 - **GIVEN** the user opens Kandev Settings → External MCP, **WHEN** they click "Copy Claude Code config", **THEN** they receive a JSON snippet they can paste into `~/.claude.json`.
 - **GIVEN** an external agent calls a session-scoped tool that does not exist on this endpoint, **THEN** the call returns a tool-not-found error and the rest of the session is unaffected.
 - **GIVEN** a caller can read a workflow, **WHEN** it calls `export_workflow_kandev` with that workflow ID, **THEN** it receives one valid portable workflow document with all workflow steps.
+- **GIVEN** a workflow step has a recognized `stage_type`, **WHEN** it is exported, previewed, and imported, **THEN** the resulting step retains that stage type.
 - **GIVEN** an exported document is within 1 MiB, **WHEN** the caller passes the result unchanged to `import_workflow_kandev`, **THEN** import accepts the document and applies existing deduplication rules.
 - **GIVEN** a caller cannot read a workflow, **WHEN** it calls `export_workflow_kandev` with that workflow ID, **THEN** the call returns an error without workflow data.
 - **GIVEN** a task or Office MCP surface, **WHEN** the client lists tools, **THEN** `export_workflow_kandev` is absent.
@@ -126,7 +128,7 @@ The tool does not return a workflow from another user's workspace. Authenticatio
 - Per-workspace scoping of the endpoint.
 - Exposing `agentctl`'s per-session MCP externally — architectural mismatch (per-session, ephemeral, no auth boundary).
 - A workspace-level `export_workflows_kandev` batch tool.
-- Changes to the portable workflow format or the 1 MiB import limit.
+- Other changes to the portable workflow fields or version semantics, and changes to the 1 MiB import limit.
 - Changes to the existing HTTP export endpoints or workflow export UI.
 - Saved prompt deletion over MCP. Create/update are specified in [shared prompt writes](shared-prompt-writes.md).
 - Automatic expansion of saved prompt references in workflow-step list results.

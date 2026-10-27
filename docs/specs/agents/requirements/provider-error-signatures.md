@@ -77,12 +77,30 @@ errors does not take its own healthy account out of rotation.
   route only with complete diagnostic identity, known pre-result evidence and
   no observed output or effect. Startup and later phases, ordinary manual
   recovery, typed-limit precedence and existing routing policy remain unchanged.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
+  opening `free usage limit reached` line without an error-envelope label shall
+  classify as a quota limit. This criterion covers only the unlabelled
+  provider-specific form.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
+  with `Rate limit exceeded: free-models-per-day...` or
+  `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
+  when sanitization masks the cadence token. The recorded excerpt remains
+  sanitized, and these signatures shall not outrank existing typed signals or
+  earlier payment, credit, and quota rules.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8:** An opening labeled JSON error
+  envelope containing `error_type` with the value `provider_unavailable`
+  shall classify as provider unavailable. Bare JSON examples and quoted
+  mid-sentence prose shall not trigger it.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.9:** OpenCode's opening
+  `Rate limit exceeded. Please try again later` line, optionally wrapped by
+  its provider error label, shall classify as rate limited without inferring a
+  daily reset period.
 
 ## Out of scope
 
-- Changing rule order, confidence levels, or classification flags.
-- Changing other provider-neutral rules or the runtime-environment rules. The
-  named prompt-send context-length signature in criterion 001.7 is in scope.
+- Changing rule order, confidence levels, or classification flags beyond the
+  narrow additions in criteria 001.6 through 001.10.
+- Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 
 ## Literal catalog follow-up
@@ -100,3 +118,19 @@ turn agent prose into an account failure. Request rejection may use only the
 existing exact pre-result repeated-failure policy, preserving no-output/effect
 and diagnostic-identity fences. Configuration and usage-account consumers
 remain responsible for quota-window and account-wide admission decisions.
+
+## Codex retry-exhaustion signature
+
+### REQ-AGENTS-CODEX-RATE-SIGNATURE-001: Recognize terminal Codex throttling
+
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.1:** A Codex error line beginning with
+  `exceeded retry limit, last status: 429 Too Many Requests` shall classify as
+  high-confidence `rate_limited`. Established error-label prefixes may precede it.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.2:** Mid-sentence quotations, other HTTP
+  statuses, unrelated providers, and incomplete signatures shall not match this rule.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.3:** Existing structured classification
+  precedence and explicit quota, authentication, and usage-limit classifications
+  shall remain unchanged. Classification alone shall not authorize prompt replay.
+
+[Design](../system-design/provider-error-signatures.md).
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

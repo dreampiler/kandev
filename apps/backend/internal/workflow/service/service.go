@@ -851,12 +851,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		existingNames[wf.Name] = true
 	}
 
-	result := &ImportResult{}
-	for _, pw := range export.Workflows {
-		if existingNames[pw.Name] {
-			result.Skipped = append(result.Skipped, pw.Name)
-			continue
-		}
+	selection := selectWorkflowImports(export, existingNames)
+	result := &ImportResult{Skipped: selection.skipped}
+	for _, index := range selection.indexes {
+		pw := export.Workflows[index]
 		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}
@@ -1012,12 +1010,17 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	existingProfileID string,
 	matchDirectProfile bool,
 ) *models.WorkflowStep {
+	stageType := sp.StageType
+	if stageType == "" {
+		stageType = models.StageTypeCustom
+	}
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
 		Name:                        sp.Name,
 		Position:                    sp.Position,
 		Color:                       sp.Color,
+		StageType:                   stageType,
 		Prompt:                      sp.Prompt,
 		Events:                      models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
 		IsStartStep:                 sp.IsStartStep,
@@ -1033,7 +1036,6 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
-		StageType:                   sp.StageType,
 	}
 	if matchDirectProfile && sp.AgentProfile != nil && matchProfile != nil {
 		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)

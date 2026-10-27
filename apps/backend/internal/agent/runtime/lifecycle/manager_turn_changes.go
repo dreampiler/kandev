@@ -121,15 +121,17 @@ func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agen
 	}
 	release()
 	cancel()
-	abandoned := finishErr != nil && permanentTurnChangeError(finishErr) && m.abandonTurnChange(execution, terminal, finishErr)
+	if finishErr != nil && permanentTurnChangeError(finishErr) {
+		m.startTurnChangeRetry(func() {
+			m.completeRetriedTurnChangeCapture(execution, terminal, finishErr)
+		})
+	}
 	execution.promptLifecycleMu.Lock()
-	if finishErr == nil || abandoned {
+	if finishErr == nil {
 		clearTurnChangeCaptureAnchor(execution, event.PromptGeneration)
 		finishTurnChangeCaptureLocked(execution, event.PromptGeneration)
 		execution.promptLifecycleMu.Unlock()
-		if !abandoned {
-			m.processTurnChangeSummaryBeforeTeardown(execution, terminal)
-		}
+		m.processTurnChangeSummaryBeforeTeardown(execution, terminal)
 		execution.promptLifecycleMu.Lock()
 	} else if !permanentTurnChangeError(finishErr) {
 		m.retryTurnChangeCapture(execution, terminal)
@@ -198,14 +200,18 @@ func (m *Manager) scheduleTurnChangeCapture(execution *AgentExecution, terminal 
 	}
 	m.startTurnChangeRetry(func() {
 		err := m.retryTurnChangeOperation(execution, terminal, completed, firstTimeout, m.turnChangeCaptureHandler.FinishTurnChanges)
-		if err != nil && !m.abandonTurnChange(execution, terminal, err) {
-			return
-		}
-		finishRetriedTurnChangeCapture(execution, terminal)
-		if err == nil {
-			m.scheduleTurnChangeSummary(execution, terminal)
-		}
+		m.completeRetriedTurnChangeCapture(execution, terminal, err)
 	})
+}
+
+func (m *Manager) completeRetriedTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal, captureErr error) {
+	if captureErr != nil && !m.settleTurnChangeCapture(execution, terminal, captureErr) {
+		return
+	}
+	finishRetriedTurnChangeCapture(execution, terminal)
+	// A durably abandoned interval needs the same stored-summary notification
+	// as a successful capture. Publication failures do not retain its fence.
+	m.scheduleTurnChangeSummary(execution, terminal)
 }
 
 func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal TurnChangeTerminal, completedAttempts ...int) {
