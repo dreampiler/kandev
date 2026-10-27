@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-14
+updated: 2026-10-26
 owners:
   - cfl12
 ---
@@ -362,13 +362,12 @@ implementation lands. See [delivery package](../../../plans/setup-recovery-ux/pl
 
 ### Quick Chat launch admission coverage
 
-For a newly allocated ephemeral session, the orchestrator retains the allocated
-identity through initial-prompt persistence and later launch admission failures.
-The prepared-launch failure helper invokes the executor's existing conditional typed
-failure transition, including sanitization, recovery actions and primary-aware
-task reconciliation. Already-settled sessions retain their original error history;
-intentional capacity deferral is not a launch failure. The HTTP handler returns
-the retained identity only after the launch path has attempted this bookkeeping.
+[Ordinary startup](quick-chat-opening-composer.md#startup-acceptance-amendment)
+accepts identity before preparation; background startup keeps it through prompt
+persistence and admission failure. Conditional typed failure projection preserves
+sanitization, recovery actions and primary-aware task reconciliation. Settled
+errors remain; capacity deferral is not failure. Any synchronous post-allocation
+failure is projected before return.
 
 Automatic recovery considers task-owned errors and this session's active error.
 A sibling session's error does not block this conversation. Rejecting a late

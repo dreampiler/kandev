@@ -60,13 +60,9 @@ func (s *Service) queuedTranscriptMessageIDs(ctx context.Context, sessionID stri
 	return ids, nil
 }
 
-// addQueuedTranscriptMessageID records the transcript row identities carried by
-// one queue-owned entry. Only entries whose user message was already recorded
-// can be replayed by prompt construction.
+// addQueuedTranscriptMessageID records the row identities of queue-owned work.
+// Durable claims can predate recording, so consumers match existing rows by ID.
 func addQueuedTranscriptMessageID(ids map[string]struct{}, queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) {
-	if recorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool); !recorded {
-		return
-	}
 	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
 		ids[transcriptID] = struct{}{}
 	}

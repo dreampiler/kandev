@@ -1,5 +1,7 @@
 "use client";
 
+import type { ComponentProps, ReactNode } from "react";
+
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { useTask } from "@/hooks/use-task";
@@ -19,6 +21,7 @@ import { QuickChatContent } from "./quick-chat-content";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
 import { ConfigChatRestartStatus } from "@/components/config-chat/config-chat-restart-status";
+import { isQuickChatStartupPending } from "./quick-chat-startup-state";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -103,8 +106,10 @@ function preventQuickChatAutoResume(
   taskId: string | null,
   taskSession: TaskSession | null,
   summary: TaskStatusSummary | null | undefined,
+  acceptedStartupPending: boolean,
 ): boolean {
   return Boolean(
+    acceptedStartupPending ||
     (taskId && !taskSession) ||
     (summary?.active_error &&
       (summary.active_error.scope === "task" || summary.active_error.session_id === sessionId)) ||
@@ -120,6 +125,31 @@ export function QuickChatSessionView(props: QuickChatSessionViewProps) {
     return <ConfigChatRestartStatus workspaceId={session.workspaceId} />;
   }
   return <ActiveQuickChatSessionView {...props} />;
+}
+
+function renderQuickChatSessionContent(
+  isPassthrough: boolean | undefined,
+  recoveryFeedback: ReactNode,
+  contentProps: ComponentProps<typeof QuickChatContent>,
+) {
+  return isPassthrough && !contentProps.readOnly ? (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {recoveryFeedback}
+      <div className="min-h-0 flex-1">
+        <PassthroughTerminal
+          key={contentProps.sessionId}
+          sessionId={contentProps.sessionId}
+          mode="agent"
+        />
+      </div>
+    </div>
+  ) : (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <QuickChatContent {...contentProps} />
+      </div>
+    </div>
+  );
 }
 
 function ActiveQuickChatSessionView({
@@ -153,6 +183,12 @@ function ActiveQuickChatSessionView({
     task,
     quickChatTaskId,
   );
+  const acceptedStartupPending =
+    session.kind === "chat" &&
+    isQuickChatStartupPending({
+      startupPending: session.startupPending,
+      sessionState: taskSession?.state,
+    });
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
     skipAutomaticRecovery: !automaticRecovery,
     preventAutoResume: preventQuickChatAutoResume(
@@ -160,6 +196,7 @@ function ActiveQuickChatSessionView({
       taskId,
       taskSession,
       statusSummary,
+      acceptedStartupPending,
     ),
   });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
@@ -174,35 +211,20 @@ function ActiveQuickChatSessionView({
       }
     />
   );
-  const sessionContent =
-    isPassthrough && !readOnly ? (
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {recoveryFeedback}
-        <div className="min-h-0 flex-1">
-          <PassthroughTerminal key={session.sessionId} sessionId={session.sessionId} mode="agent" />
-        </div>
-      </div>
-    ) : (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <QuickChatContent
-            loadSettings={loadSettings}
-            readOnly={readOnly}
-            sessionId={session.sessionId}
-            minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
-            placeholderOverride={
-              session.kind === "config" ? t("chat:configChatPlaceholder") : undefined
-            }
-            initialPrompt={session.initialPrompt}
-            onInitialPromptAttempted={onInitialPromptAttempted}
-            initialDraft={initialDraft}
-            transformOutgoing={transformOutgoing}
-            hideStartupRows={hideStartupRows}
-            activityDisplay={activityDisplay}
-          />
-        </div>
-      </div>
-    );
+  const sessionContent = renderQuickChatSessionContent(isPassthrough, recoveryFeedback, {
+    loadSettings,
+    readOnly,
+    sessionId: session.sessionId,
+    minimalToolbar: resolveMinimalToolbar(hideSessionSelectors, session.kind),
+    placeholderOverride: session.kind === "config" ? t("chat:configChatPlaceholder") : undefined,
+    initialPrompt: session.initialPrompt,
+    onInitialPromptAttempted,
+    startupPending: acceptedStartupPending,
+    initialDraft,
+    transformOutgoing,
+    hideStartupRows,
+    activityDisplay,
+  });
 
   if (!taskId) return sessionContent;
   const launchErrorValue = {
