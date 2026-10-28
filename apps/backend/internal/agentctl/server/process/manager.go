@@ -210,6 +210,11 @@ type Manager struct {
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
 
+	// Question image support
+	questionImageWorkDir string
+	questionImageOnce    sync.Once
+	questionImageSlots   chan struct{}
+
 	// baseBranchesMu guards mutations to cfg.BaseBranches so the
 	// UpdateBaseBranches writer doesn't race with the rescan-path and
 	// lazy-subpath readers that look up per-repo overrides via
