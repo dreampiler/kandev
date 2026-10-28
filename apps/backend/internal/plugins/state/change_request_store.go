@@ -208,10 +208,10 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 		ON CONFLICT(installation_id, workspace_id, provider_id, repository_id, number)
 		DO UPDATE SET task_id = excluded.task_id, provider_host = excluded.provider_host,
 			url = excluded.url, title = excluded.title,
-			state = CASE WHEN state = 'merged' THEN 'merged' ELSE excluded.state END,
+			state = CASE WHEN plugin_task_change_requests.state = 'merged' THEN 'merged' ELSE excluded.state END,
 			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
-			merged_at = CASE WHEN merged_at <> '' THEN merged_at ELSE excluded.merged_at END,
-			closed_at = CASE WHEN closed_at <> '' THEN closed_at ELSE excluded.closed_at END,
+			merged_at = CASE WHEN plugin_task_change_requests.merged_at <> '' THEN plugin_task_change_requests.merged_at ELSE excluded.merged_at END,
+			closed_at = CASE WHEN plugin_task_change_requests.closed_at <> '' THEN plugin_task_change_requests.closed_at ELSE excluded.closed_at END,
 			updated_at = excluded.updated_at
 	`), record.ID, record.InstallationID, record.WorkspaceID, record.TaskID, record.ProviderID, record.ProviderHost,
 		record.RepositoryID, record.Number, record.URL, record.Title, record.State, record.HeadBranch, record.BaseBranch,

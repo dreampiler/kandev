@@ -2622,6 +2622,7 @@ message TaskChangeRequest {
   optional string closed_at = 15;
   string resource_version = 16;
 }
+
 message TaskDirective {
   string id = 1;
   string workspace_id = 2;

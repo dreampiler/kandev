@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,19 +171,25 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		if record.Receipt.ResultStatus != string(pluginsdk.CommandApplied) {
 			return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
 		}
-		reported, err := ledger.ListChangeRequestsByTask(ctx, h.installationID, input.WorkspaceID, input.TaskID)
+		candidate, err := h.findReportedChangeRequest(ctx, ledger, input)
 		if err != nil {
 			return unavailableTaskChangeRequest("task_change_request_receipt_unavailable"), pluginsdk.TaskChangeRequest{}, nil
 		}
-		for _, candidate := range reported {
-			if candidate.ProviderID == strings.TrimSpace(input.ProviderID) &&
-				candidate.RepositoryID == strings.TrimSpace(input.RepositoryID) && candidate.Number == input.Number {
-				return commandResultFromRecord(record), taskChangeRequestToSDK(candidate), nil
-			}
+		if candidate != nil {
+			return commandResultFromRecord(record), taskChangeRequestToSDK(*candidate), nil
 		}
 		// The row may have been removed after the applied receipt. The durable
 		// receipt still makes the replay idempotent even when no row remains.
 		return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
+	}
+	if candidate, err := h.findReportedChangeRequest(ctx, ledger, input); err != nil {
+		return unavailableTaskChangeRequest("task_change_request_receipt_unavailable"), pluginsdk.TaskChangeRequest{}, nil
+	} else if candidate != nil && candidate.TaskID == input.TaskID {
+		completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", candidate.ID, changeRequestResourceVersion(*candidate))
+		if err != nil {
+			return uncertainTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(*candidate), nil
+		}
+		return commandResultFromRecord(completed), taskChangeRequestToSDK(*candidate), nil
 	}
 	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
 		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
@@ -207,6 +214,21 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		return uncertainTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(reported), nil
 	}
 	return commandResultFromRecord(completed), taskChangeRequestToSDK(reported), nil
+}
+
+func (h *pluginHost) findReportedChangeRequest(ctx context.Context, ledger *state.ChangeRequestStore, input pluginsdk.ExactTaskChangeRequestReport) (*state.ChangeRequestRecord, error) {
+	reported, err := ledger.ListChangeRequestsByTask(ctx, h.installationID, input.WorkspaceID, input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range reported {
+		candidate := &reported[index]
+		if candidate.ProviderID == strings.TrimSpace(input.ProviderID) &&
+			candidate.RepositoryID == strings.TrimSpace(input.RepositoryID) && candidate.Number == input.Number {
+			return candidate, nil
+		}
+	}
+	return nil, nil
 }
 
 //nolint:cyclop // The command admits, fences, and removes one plugin-reported change request.
@@ -360,7 +382,8 @@ func exactChangeRequestTargetError(err error) (pluginsdk.CommandStatus, string) 
 
 func changeRequestResourceVersion(record state.ChangeRequestRecord) string {
 	canonical := record.InstallationID + "\x00" + record.WorkspaceID + "\x00" + record.TaskID +
-		"\x00" + record.ProviderID + "\x00" + record.RepositoryID +
+		"\x00" + record.ProviderID + "\x00" + record.ProviderHost + "\x00" + record.RepositoryID +
+		"\x00" + record.ID + "\x00" + strconv.FormatInt(record.Number, 10) +
 		"\x00" + record.State + "\x00" + record.UpdatedAt
 	digest := sha256.Sum256([]byte(canonical))
 	return "sha256:" + hex.EncodeToString(digest[:])
