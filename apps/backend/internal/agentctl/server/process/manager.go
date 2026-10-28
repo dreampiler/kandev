@@ -2489,8 +2489,6 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				// A configured journal is the commit-before-publish boundary. Stop
 				// forwarding when it cannot commit so the backend never observes an
 				// event that cannot be replayed after a disconnect.
-				m.recordDeliveryStorageFailure(err)
-				m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
 				return
 			}
 			update = persisted
@@ -2524,7 +2522,6 @@ func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
-				m.recordDeliveryStorageFailure(err)
 				return
 			}
 			m.recordTerminalOutcome(&persisted)
@@ -2544,13 +2541,9 @@ func (m *Manager) closeDeliveryEventWriter() {
 	}
 }
 
-// persistDeliveryEvent establishes the journal commit-before-publish barrier.
-// The normalized event is kept as an opaque payload here; backend projection
-// remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
 	update = streams.BoundGenericToolEvent(update)
 	m.deliveryJournalMu.Lock()
-	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal
 	if deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
 		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
@@ -2558,9 +2551,6 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	}
 	writer := m.deliveryWriter
 	m.deliveryJournalMu.Unlock()
-	if !configured {
-		return update, nil
-	}
 	if deliveryJournal == nil {
 		_, err := m.DeliveryJournal()
 		return update, err

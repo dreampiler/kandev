@@ -120,6 +120,10 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// backgroundWorkEnabled is the effective shared background-work feature
+	// value resolved by the backend for this launch.
+	backgroundWorkEnabled bool
+
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
 
@@ -143,6 +147,12 @@ type Adapter struct {
 	// with nothing else holding the write side, and a plain read of the untyped
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
+
+	// claudeCodeAgent records that the initialize response advertised the
+	// `_meta.claudeCode` namespace, i.e. a Claude Code bridge that can emit
+	// native prompt suggestions. Negotiated, not named: custom ACP agents
+	// wrapping Claude Code qualify; other harnesses never do.
+	claudeCodeAgent bool
 
 	// Update channel
 	updatesCh chan AgentEvent
@@ -330,6 +340,8 @@ type Adapter struct {
 	// and wait for acknowledgment before reporting success.
 	promptTurnMu sync.Mutex
 	promptTurn   *promptTurnState
+	// suggestionOrigin is guarded by promptTurnMu.
+	suggestionOrigin promptSuggestionOrigin
 
 	// promptGate is a 1-slot ownership token for session/prompt calls. Calls are
 	// serialized by default so ScheduleWakeup cannot race a user prompt and
@@ -366,31 +378,35 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn                     context.CancelCauseFunc
-	rpcDone                     chan struct{}
-	abortCh                     chan struct{}
-	handoffCh                   chan struct{}
-	providerErrorCh             chan openCodeStderrDiagnostic
-	promptGeneration            uint64
-	evidenceMu                  sync.Mutex
-	codexSystemError            bool
-	codexCapacity               bool
-	codexUsageLimit             *streams.ProviderError
-	cursorRetriableMsg          string
-	cursorRetriableComplete     bool
-	cursorRetriableAt           time.Time
-	continuationTools           map[string]bool
-	continuationPermissions     uint16
-	continuationPermissionTools map[string]struct{}
-	continuationUnsafe          bool
-	capacityTools               map[string]capacityToolEvidence
-	capacityUnknown             bool
-	capacityBackground          bool
-	capacityPermissions         int
-	allowHandoff                bool
-	handedOff                   bool
-	gateOwned                   bool
-	finishing                   bool
+	endTurn                      context.CancelCauseFunc
+	rpcDone                      chan struct{}
+	abortCh                      chan struct{}
+	handoffCh                    chan struct{}
+	providerErrorCh              chan openCodeStderrDiagnostic
+	promptGeneration             uint64
+	evidenceMu                   sync.Mutex
+	codexSystemError             bool
+	codexCapacity                bool
+	codexUsageLimit              *streams.ProviderError
+	cursorRetriableMsg           string
+	cursorRetriableComplete      bool
+	cursorRetriableAt            time.Time
+	continuationTools            map[string]bool
+	continuationSupportOverride  streams.ContinuationSupport
+	continuationPermissions      uint16
+	continuationPermissionTools  map[string]struct{}
+	continuationPermissionUnsafe bool
+	continuationUnsafe           bool
+	capacityTools                map[string]capacityToolEvidence
+	capacityUnknown              bool
+	capacityBackground           bool
+	capacityPermissions          int
+	allowHandoff                 bool
+	handedOff                    bool
+	gateOwned                    bool
+	finishing                    bool
+	// suggestion is guarded by the adapter's promptTurnMu.
+	suggestion promptSuggestionTurn
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -505,7 +521,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		cfg:                       cfg,
 		logger:                    l,
 		agentID:                   cfg.AgentID,
-		normalizer:                NewNormalizer(cfg.AgentID),
+		backgroundWorkEnabled:     cfg.AgentBackgroundWorkEnabled,
+		normalizer:                NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
 		dialect:                   newACPDialect(cfg.AgentID),
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
@@ -578,6 +595,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 		acpclient.WithCursorTaskHandler(a.handleCursorTask),
+		acpclient.WithExtensionNotificationHandler(a.handleExtensionNotification),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -626,6 +644,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.capabilities = resp.AgentCapabilities
 	a.archivedSessionRestoreSupported = codexArchiveCapability(resp.Meta)
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
+	claudeCodeAgent := agentAdvertisesClaudeCode(resp.AgentCapabilities)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
@@ -645,16 +664,18 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
+	a.claudeCodeAgent = claudeCodeAgent
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods
 	a.sendUpdate(AgentEvent{
-		Type:                    streams.EventTypeAgentCapabilities,
-		SupportsImage:           a.capabilities.PromptCapabilities.Image,
-		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
-		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
-		SupportsPromptQueueing:  promptQueueing,
-		AuthMethods:             authMethods,
+		Type:                      streams.EventTypeAgentCapabilities,
+		SupportsImage:             a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:             a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext:   a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:    promptQueueing,
+		SupportsPromptSuggestions: a.cfg.PromptSuggestions && claudeCodeAgent,
+		AuthMethods:               authMethods,
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {
@@ -811,7 +832,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 }
 
 func (a *Adapter) sendUpdateNow(event AgentEvent) {
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -847,7 +868,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
-	event = streams.BoundGenericToolEvent(event)
+	event = streams.PrepareToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
