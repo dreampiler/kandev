@@ -40,12 +40,17 @@ part of the update.
 The service reads the current trigger from the writer connection, applies the
 requested fields, prepares the next fire with the existing trigger helper, and
 writes the next row with a compare-and-set on the trigger identity plus
-`cron_expression`, `timezone`, `enabled`, and `next_run_at`.
+`cron_expression`, `timezone`, `enabled`, and `next_run_at`. When the observed
+`next_run_at` is null, the predicate requires the stored value to still be null
+(`next_run_at IS NULL`); otherwise it requires the stored value to equal the
+observed value. A re-armed non-null value therefore cannot match a null
+observation, and a changed non-null value cannot match the old value.
 
-A scheduler claim clears `next_run_at`; the comparison then loses and the update
-returns 409 rather than overwriting the claimed fire. Disabling clears the next
-fire but does not cancel a fire already claimed. An enabled cron trigger with no
-next fire is treated as owned by a dispatch and also returns 409.
+A scheduler claim clears `next_run_at`; a stored value that no longer equals the
+observed value does not match and the update returns 409 rather than overwriting
+the claimed fire. An enabled cron trigger observed with no next fire is refused
+before the write. Disabling clears the next fire but does not cancel a fire
+already claimed.
 
 ## Failure and recovery
 

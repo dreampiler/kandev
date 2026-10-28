@@ -25,8 +25,10 @@ hard to change safely. This task adds `PATCH
 - `cron_expression`, `timezone`, and `enabled` are the only editable fields.
 - The trigger identity, routine, kind, webhook authentication, creation time,
   last fire, and past runs are preserved.
-- A scheduler claim clears `next_run_at`; the update then loses the comparison
-  and returns 409, as does a concurrent schedule edit.
+- The compare-and-set includes `next_run_at` (null or non-null): a scheduler
+  claim or concurrent schedule edit that changes the stored row makes the
+  comparison lose and returns 409. An enabled cron trigger observed with no next
+  fire is refused before the write.
 - Invalid cron expressions or timezones return 400; a missing trigger returns
   404.
 - Disabling clears the next fire but does not cancel an already claimed fire.

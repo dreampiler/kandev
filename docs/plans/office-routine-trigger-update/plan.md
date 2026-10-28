@@ -20,9 +20,9 @@ records the delivery of an in-place schedule update:
   `cron_expression`, `timezone`, and/or `enabled`.
 - The trigger ID, routine, kind, webhook authentication, creation time, last
   fire, and past runs are preserved.
-- The repository update compares the observed identity and schedule with the
-  stored row, so a scheduler claim or concurrent edit returns 409 instead of
-  overwriting a claimed fire.
+- The repository update compares the observed identity and schedule, including
+  `next_run_at`, with the stored row, so a scheduler claim or concurrent edit
+  returns 409 instead of overwriting a claimed fire.
 - Disabling clears the next fire but does not cancel an already claimed fire.
 
 The authoritative pair is

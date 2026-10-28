@@ -36,8 +36,10 @@ a claimed fire is not disturbed.
   shall change only `cron_expression`, `timezone`, and/or `enabled`. The trigger
   ID, routine, kind, webhook authentication, creation time, last fire, and past
   runs shall remain unchanged. Schedule fields apply only to cron triggers. The
-  update shall compare the observed trigger identity and schedule with the
-  stored row, and shall return 409 when a scheduler dispatch claimed the trigger
-  or another schedule edit won the race. Invalid cron expressions or timezones
-  shall return 400. Disabling a trigger clears its next fire but does not cancel
-  an already claimed fire.
+  update shall compare the observed trigger identity and schedule, including the
+  observed `next_run_at` (as a null or non-null value), with the stored row, and
+  shall return 409 when the stored row no longer matches the observed values,
+  including when a scheduler dispatch claimed the trigger or another schedule
+  edit won the race. Invalid cron expressions or timezones shall return 400.
+  Disabling a trigger clears its next fire but does not cancel an already
+  claimed fire.
