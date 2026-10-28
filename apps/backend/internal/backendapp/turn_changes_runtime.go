@@ -53,14 +53,10 @@ func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
 	}
 	if h.publisher != nil {
 		err := h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
-		// The coordinator also accepts an absent historical interval as done.
-		// It has no summary to publish, including after rejected admission.
-		for cause := err; cause != nil; cause = errors.Unwrap(cause) {
-			if cause == repoerrors.ErrTurnChangeSetNotFound {
-				return nil
-			}
+		// Uncaptured or removed turns have no summary to publish.
+		if !errors.Is(err, repoerrors.ErrTurnChangeSetNotFound) {
+			return err
 		}
-		return err
 	}
 	return nil
 }

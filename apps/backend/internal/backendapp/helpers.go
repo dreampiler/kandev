@@ -1820,6 +1820,10 @@ func configureMCPServices(
 	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
 	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	if profileReader, ok := p.agentSettingsRepo.(mcpUsageProfileReader); ok {
+		mcpSelectionService.SetUsageOwnerReader(mcpUsageOwnerReader(profileReader, p.taskSvc))
+	}
+	mcpSelectionService.SetAdditionValidator(mcpSelectionAdditionValidator(p))
 	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
 	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
 		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)

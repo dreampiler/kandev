@@ -6,12 +6,14 @@ import { SidebarTasksPage } from "../../pages/sidebar-tasks-page";
 import {
   archiveSidebarPaginationTasks,
   seedSidebarPaginationTasks,
+  unarchiveSidebarPaginationTask,
 } from "./sidebar-task-pagination-fixtures";
 
 test("desktop sidebar pages 101 matching tasks without changing the open conversation", async ({
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(120_000);
   const token = `Sidebar page ${Date.now()}`;
@@ -56,10 +58,10 @@ test("desktop sidebar pages 101 matching tasks without changing the open convers
   await apiClient.archiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(99, { timeout: 20_000 });
   await expect(controls).toBeHidden();
-  await apiClient.unarchiveTask(matchingTaskIds[1]);
+  await unarchiveSidebarPaginationTask(apiClient, backend.tmpDir, matchingTaskIds[1]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeHidden();
-  await apiClient.unarchiveTask(matchingTaskIds[0]);
+  await unarchiveSidebarPaginationTask(apiClient, backend.tmpDir, matchingTaskIds[0]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeVisible();
 

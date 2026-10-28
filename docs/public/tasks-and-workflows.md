@@ -67,8 +67,10 @@ stop that tunnel. **Other ports** lists detected and manually added ports that
 you can start forwarding. Each group sorts by target port number.
 
 A proxy URL is also available for each listed port. A proxy link alone does not
-mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
-group; stopping it keeps the port available to restart during that session visit.
+mean a dedicated tunnel is active. Dedicated tunnel URLs use HTTP on the returned
+port; proxy URLs use the configured backend URL and its scheme. Starting a tunnel
+moves the port to the top group; stopping it keeps the port available to restart
+during that session visit.
 Closing the port manager leaves active tunnels running.
 Reopening refreshes detected ports and current tunnel state while preserving
 your unfinished manual-port entry. Use **Refresh** to check for new listening
@@ -291,6 +293,23 @@ repository explicitly still requires its checkout to be available. If an
 existing local checkout's origin no longer matches the selected remote,
 Kandev reports a validation error. Correct its origin or select it explicitly
 as a local repository.
+
+### Recover an uncertain task creation
+
+A connection interruption can hide the result of **Start task**, **Start task in plan mode**, or **Create without starting agent**. The task can exist even when the dialog reports an error. Do not submit the same work again.
+
+When the dialog reports that creation is unconfirmed:
+
+1. Select **Check status**. Kandev checks the earlier submission and reports whether the task exists.
+2. If the task exists, select **Open task**. Review the task and its conversation.
+3. If no task exists and **Retry submission** is available, select it. Kandev sends the earlier values and keeps newer edits in the draft.
+4. Select **Close** to keep the unconfirmed submission for later. Closing does not cancel the agent or delete a task.
+
+An unconfirmed submission keeps its earlier values and start mode. A later error or an empty status check does not create a second task. After you open a recovered task, a new submission creates a new task.
+
+If **Check status** reports that creation is still in progress, open the task and wait. Recovery does not start or repair the task. If the task is no longer available, select **Close** and create a new task only when the work is still required.
+
+Phones show the same actions in the dialog footer. The status and actions stay above the safe area while the draft scrolls.
 
 ### Reduce downloads for a large remote repository
 
@@ -578,6 +597,10 @@ Task-session chat uploads files to the task's workspace. It also works when you 
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
+Open an image attachment or composer image to inspect it. The preview starts in
+**Fit**; select **Actual size** and scroll within the image to see fine detail.
+Select **Fit** to return to the whole image.
+
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
 
 </details>
@@ -618,6 +641,44 @@ background** after its foreground yields while a recognized async subagent,
 `run_in_background` shell, or Monitor remains active. A follow-up is then sent
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
+
+### Inspect background work
+
+When an agent reports a background shell command, subagent, or monitor, Kandev
+adds a content-width chip directly above the message box. The chip counts the
+jobs that are running, waiting, or of unknown activity. Select it to open a
+summary. Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all** opens the Background Work
+overview. Closing a tab or view does not stop the job.
+
+Background inspection is standard behavior in the shipped profiles. Operators
+can disable it with the `features.agentBackgroundWork` runtime toggle
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
+job controls are unavailable, and existing chat behavior is unchanged. The
+toggle is separate from the Claude background prompt handoff experiment.
+
+The chip never changes how a prompt is admitted. A foreground that is still
+generating keeps its normal **Queue** behavior. An idle foreground accepts an
+ordinary new prompt while earlier jobs continue, and those jobs keep their
+identity and history across the new turn.
+
+What a job row can show depends on the agent runtime:
+
+- **Running and waiting** counts come from a runtime that reports current job
+  activity and later completion.
+- **Unknown** means Kandev identified the launch but cannot establish current
+  activity, for example after a reconnect or when the runtime ends delivery with
+  the foreground prompt. Unknown is neither success nor verified running work.
+- **Completed** and **Failed** rows stay reachable after the active count reaches
+  zero. A failed row keeps its exit status and retained output when the runtime
+  reports them.
+
+Controls appear only when the runtime advertises them and the job is currently
+actionable. Runs that provide observation only, such as a detached OpenCode
+shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
+or input controls, and their output is labeled unavailable rather than shown as
+live logs. The launch banner in the original tool message is not live command
+output.
 
 ### Prevent auto-start on open
 
@@ -677,22 +738,40 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
-For a supported interactive task, Kandev can continue an unfinished request
-in the same live conversation after the normal retry delay when the model is
-at capacity and at least one tool has a confirmed result. Kandev keeps those
-actions in the conversation and asks the agent to continue without repeating
-them. This does not guarantee exactly-once execution. Eligible capacity recovery
-uses up to 11 additional attempts within 30 minutes, with waits increasing from
-5 seconds to at most 5 minutes. The inline notice shows the attempt count, next
-retry, recovery deadline, and **Cancel** action. Sending a new message, changing
-the session configuration, or cancelling stops pending recovery. A backend
-restart also stops automatic recovery; it does not restore the retry schedule.
-The deadline prevents another retry but does not interrupt a turn already running.
-Kandev leaves the
-error for you to handle when a tool or permission is still pending, an outcome
-is uncertain, background work is unaccounted for, the provider does not
-support live continuation, or the runtime is no longer usable. The composer
-remains available for a new message.
+## Recover from provider errors
+
+### Connection loss
+
+After a recognized connection loss, Kandev can continue an unfinished request
+on the same live Cursor runtime when conversation evidence is valid. A
+foreground tool can remain pending after its permission is resolved. Cursor
+inspects this pending work and chooses what to do next. Kandev sends a hidden
+`continue` prompt. It does not resend the original prompt or replay pending tool
+calls. Cursor can repeat an action, so this policy does not promise exactly-once
+effects. Failed, cancelled, unknown, or background tool work still requires
+your review. If the runtime is unavailable or evidence is incomplete, Kandev
+leaves the session waiting for you. A new message, a session change, **Cancel**,
+or a backend restart stops pending automatic recovery.
+
+### Model capacity
+
+For interactive tasks, Kandev retries a model-capacity error when the runtime
+supports live continuation and at least one tool has a confirmed result. Kandev
+keeps confirmed actions in the conversation. It asks the agent to continue
+without repeating those actions. This does not guarantee exactly-once effects.
+
+Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
+from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
+count, next retry, deadline, and **Cancel** action. A new message, a session
+configuration change, or **Cancel** stops pending recovery. A backend restart
+also stops automatic recovery. It does not restore the retry schedule. The
+deadline does not stop a turn that is already running.
+
+Kandev leaves a model-capacity error for you to handle when a tool or permission
+is pending, an outcome is uncertain, background work is unaccounted for, the
+provider does not support live continuation, or the runtime is unavailable.
+The composer stays available for a new message. These limits apply to capacity
+recovery. Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
@@ -853,6 +932,8 @@ The **TASKS** list in the left sidebar can combine up to ten sort rules. Each la
 On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. Drag a rule by its grip to change its priority, or open **More** and choose **Move up** or **Move down**. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies. Automatic color rules and task-row details use the same grip and **More** menu. Color-rule changes apply immediately; sort and task-row changes follow the view's save or discard controls.
 
 When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
+
+Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
@@ -1130,7 +1211,11 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For first-startup prompt replay and session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
-If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+Quick Chat creation can take longer than the request. If the result is uncertain, the setup keeps your submitted draft and shows **Check status**. Checking status does not start another chat or send the opening message.
+
+If Kandev has not found the creation, select **Retry creation** to continue the same creation. Kandev opens only the matching conversation and shows its preparation progress. Use the recovery controls in that conversation if startup or message delivery needs attention.
+
+After a reload, Quick Chat checks the saved creation status but does not submit the request again or replay an opening message whose delivery was already attempted. If creation is incomplete and has no prepared session, Kandev keeps the draft and requires the existing delete confirmation before you discard the task.
 
 <details>
 <summary>Worktree recovery after archive</summary>
@@ -1188,6 +1273,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
+- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
