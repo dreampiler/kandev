@@ -14,26 +14,34 @@ func (s *Service) queuedTranscriptMessageIDs(ctx context.Context, sessionID stri
 	if s.messageQueue == nil {
 		return nil, nil
 	}
-	ids := make(map[string]struct{})
-	entries, _, err := s.messageQueue.SnapshotSession(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("snapshot session queue for held transcript ids: %w", err)
-	}
-	for index := range entries {
-		addQueuedTranscriptMessageID(ids, &entries[index], []string{entries[index].ID})
-	}
-	if s.messageQueue.PendingQueueDispatchPersistenceAvailable() {
-		reserved, err := s.messageQueue.ListPendingQueueDispatches(ctx)
+	var ids map[string]struct{}
+	err := s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		// Keep both ownership reads under one gate while restoration moves a claim into the queue.
+		ids = make(map[string]struct{})
+		entries, _, err := s.messageQueue.SnapshotSession(admittedCtx, sessionID)
 		if err != nil {
-			return nil, fmt.Errorf("list reserved queue dispatches for held transcript ids: %w", err)
+			return fmt.Errorf("snapshot session queue for held transcript ids: %w", err)
 		}
-		for index := range reserved {
-			claim := &reserved[index]
-			if claim.Accepted || claim.Message.SessionID != sessionID {
-				continue
+		for index := range entries {
+			addQueuedTranscriptMessageID(ids, &entries[index], []string{entries[index].ID})
+		}
+		if s.messageQueue.PendingQueueDispatchPersistenceAvailable() {
+			reserved, err := s.messageQueue.ListPendingQueueDispatches(admittedCtx)
+			if err != nil {
+				return fmt.Errorf("list reserved queue dispatches for held transcript ids: %w", err)
 			}
-			addQueuedTranscriptMessageID(ids, &claim.Message, []string{claim.Message.ID})
+			for index := range reserved {
+				claim := &reserved[index]
+				if claim.Accepted || claim.Message.SessionID != sessionID {
+					continue
+				}
+				addQueuedTranscriptMessageID(ids, &claim.Message, []string{claim.Message.ID})
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if len(ids) == 0 {
 		return nil, nil

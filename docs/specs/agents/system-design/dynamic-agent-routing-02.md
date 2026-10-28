@@ -101,7 +101,9 @@ require the current exclusive probe lease.
 
 - Before adding transcript-derived user rows to a new continuation or choosing
   a durable relaunch prompt, the orchestrator reads the complete session queue
-  snapshot and, when supported, ordinary pending dispatch claims. Owned entries
+  snapshot and, when supported, ordinary pending dispatch claims under the same
+  session admission gate. A concurrent restore cannot move a claim into the
+  queue between these ownership reads. Owned entries
   and same-session unaccepted claims exclude existing rows by their explicit
   transcript ID and the existing deterministic queued-message ID. The recorded
   marker may predate the writer in durable claims and is not required for an

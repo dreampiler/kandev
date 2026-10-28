@@ -71,3 +71,17 @@ fully repaired.
 The two new real-writer cases and all thirteen ownership/read/capability
 variants, together with the prior queue-recovery and writer-idempotency
 controls, pass with `-trimpath -tags fts5 -race -count=1` (11.113s).
+
+### Concurrent restore correction
+
+The complete queue snapshot and ordinary dispatch claims are now read under one
+existing session admission gate. A restore cannot move ownership between the
+two reads and make an undelivered transcript appear eligible for either recovery
+consumer. This uses the existing reentrant admitted context and does not mutate
+queued work.
+
+The maintainer's two deterministic concurrency cases were integrated into the
+existing `dynamic_launch_plan_injection_test.go`. Both consumers failed on the
+published helper (2.500s). After the admission correction, the concurrency cases
+and related continuation, transcript and relaunch controls passed with
+`-trimpath -tags fts5 -race -count=1` (6.215s). Hosted CI remains separate.
