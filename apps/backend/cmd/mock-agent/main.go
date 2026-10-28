@@ -61,6 +61,7 @@ type mockAgent struct {
 	sessionModes                   map[acp.SessionId]acp.SessionModeId
 	commandsEmitted                map[acp.SessionId]bool
 	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
+	promptSuggestionSessions       map[acp.SessionId]bool
 	nextSessionID                  uint64
 	mu                             sync.Mutex
 }
@@ -192,6 +193,7 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	}
 	a.sessionMCPServers[sid] = cloneMCPServerDefs(sessionMCPServers)
 	a.mu.Unlock()
+	a.recordPromptSuggestionRequest(sid, req.Meta)
 
 	primeKandevMCPToolCatalog(ctx)
 	// Emit available commands asynchronously after the session/new response
@@ -396,6 +398,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 		}
 	}
 	sessionMCPServers := registerACPMcpServers(req.McpServers)
+	a.recordPromptSuggestionRequest(req.SessionId, req.Meta)
 	a.mu.Lock()
 	if a.sessions == nil {
 		a.sessions = make(map[acp.SessionId]bool)
@@ -478,7 +481,13 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
 		}
 		<-cancelHold
-		time.Sleep(mockCancelHoldDuration())
+		if release := os.Getenv("E2E_MOCK_AGENT_CANCEL_RELEASE_FILE"); release != "" {
+			if err := waitForCancelHoldRelease(release); err != nil {
+				return acp.PromptResponse{}, err
+			}
+		} else {
+			time.Sleep(mockCancelHoldDuration())
+		}
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	// Dynamic unclassified fallback scenarios must return a terminal ACP
@@ -498,6 +507,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// This synthetic terminal ACP error follows the same projection path as a
+	// provider failure and exercises the Codex signature end to end.
+	if resp, err, handled := a.handleCodexRateLimit(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// Same rationale as /overloaded above: /transport-lost must also surface a
 	// real prompt-time ACP error, so it is intercepted here rather than routed
 	// through handlePrompt's emitter.
@@ -515,6 +529,7 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
+	go a.emitPromptSuggestionAfterResponse(req.SessionId, prompt)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: mockPromptUsage(prompt)}, nil
 }
 
@@ -691,6 +706,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 		}
 	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
@@ -714,7 +730,8 @@ func (a *mockAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (
 }
 
 // ResumeSession is not supported by the mock; LoadSession is used instead.
-func (a *mockAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+func (a *mockAgent) ResumeSession(_ context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	a.recordPromptSuggestionRequest(req.SessionId, req.Meta)
 	return acp.ResumeSessionResponse{}, nil
 }
 
@@ -945,4 +962,12 @@ func mockCancelHoldDuration() time.Duration {
 		}
 	}
 	return 8 * time.Second
+}
+
+func waitForCancelHoldRelease(release string) error {
+	// ACP cancels the request context before acknowledgement. The fixture keeps
+	// that boundary pending until explicit release, bounded by the browser test budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return waitForScriptFile(ctx, release)
 }

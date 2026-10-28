@@ -36,7 +36,10 @@ import {
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
-import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import {
+  isStaleSessionStateEvent,
+  sessionStateConfirmsAgentctlExecutionReady,
+} from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 import {
@@ -559,7 +562,7 @@ function seedHydrationSettledBoundaries(
 ): void {
   seedSettledSessionBoundaries(
     draft.turns.settledBoundaryBySession,
-    Object.values(taskSessions?.items ?? {}),
+    Object.keys(taskSessions?.items ?? {}).map((id) => draft.taskSessions.items[id]),
   );
 }
 
@@ -582,6 +585,10 @@ function hydrateTaskSessions(
 
   for (const [sessionId, session] of Object.entries(incomingItems)) {
     const existing = draft.taskSessions.items[sessionId];
+    if (isStaleSessionStateEvent(existing, session.updated_at)) {
+      delete items[sessionId];
+      continue;
+    }
     const requestEpoch = requestEpochs?.[sessionId];
     const currentEpoch = draft.taskSessions.readCursorEpochBySession?.[sessionId] ?? 0;
     previousCursors.set(sessionId, existing?.last_read_message_id);
@@ -613,11 +620,11 @@ function hydrateTaskSessionsByTask(
     Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
       taskId,
       sessions.map((session) => {
-        const canonical = hydratedSessionIds.has(session.id)
-          ? draft.taskSessions.items[session.id]
-          : undefined;
-        return canonical
-          ? { ...session, last_read_message_id: canonical.last_read_message_id }
+        const canonical = draft.taskSessions.items[session.id];
+        return canonical &&
+          (hydratedSessionIds.has(session.id) ||
+            isStaleSessionStateEvent(canonical, session.updated_at))
+          ? canonical
           : session;
       }),
     ]),

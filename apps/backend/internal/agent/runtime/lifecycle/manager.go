@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -49,9 +50,17 @@ type Manager struct {
 	ownerAdmission        OwnerAdmission
 	worktreeMgr           *worktree.Manager
 	mcpProvider           McpConfigProvider
+	mcpResolver           MCPResolutionProvider
+	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
 	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
 	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
-	logger                *logger.Logger
+	// copilotPlugins is the bounded native inventory runner. Tests inject a
+	// fake so plugin resolution never requires an installed Copilot runtime.
+	copilotPlugins copilotplugins.Runner
+	// passthroughRunnerOverride is a test seam for the interactive process
+	// boundary. Production always resolves the executor-backed runner.
+	passthroughRunnerOverride executionPassthroughRunner
+	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -255,6 +264,9 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
+	promptSuggestionsPreference PromptSuggestionsPreference
+
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
 	comparisonTargetProvider ComparisonTargetProvider
@@ -341,6 +353,12 @@ func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPComm
 	m.cursorNativeMCPRunner = runner
 }
 
+// SetCopilotPluginRunner installs the bounded runner used to resolve Copilot
+// plugin directories for new local processes. Production uses the exec runner.
+func (m *Manager) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	m.copilotPlugins = runner
+}
+
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
 // Task launches keep their existing task/session admission when no owner gate
 // is configured.
@@ -363,6 +381,18 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.

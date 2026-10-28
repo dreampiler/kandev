@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   createContinuationFixture,
+  hasAttestedContinuationRefusal,
   waitForContinuationMessage,
   waitForNativeContinuationPrompt,
   assertNativeContinuationTrace,
@@ -8,6 +9,7 @@ import {
   assertContinuationSettingRetired,
 } from "../../helpers/provider-interruption-continuation";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -17,6 +19,7 @@ for (const scenario of [
   "read",
   "write",
   "shell",
+  "pending-v3",
   "output",
   "read-restore-transient",
   "read-restore-hard",
@@ -108,6 +111,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
   seedData,
 }) => {
   const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const gateway = watchWs(testPage);
   try {
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
@@ -160,7 +164,15 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     } finally {
       await viewer.close();
     }
+    const cancelResponse = gateway.waitForResponse("session.recover", {
+      timeout: 35_000,
+      requestWhere: (payload) =>
+        payload.action === "cancel_retry" &&
+        payload.task_id === fixture.taskId &&
+        payload.session_id === fixture.sessionId,
+    });
     await session.recoveryCancelRetryButton().click();
+    expect((await cancelResponse).payload.cancelled).toBe(true);
     const cancelled = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -187,7 +199,12 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       fixture.sessionId,
       (message) => message.author_type === "user" && message.content === "continue",
     );
-    await expect(session.activeChat().getByText("continue", { exact: true })).toBeVisible();
+    await expect(
+      session
+        .activeChat()
+        .getByTestId("user-message-bubble")
+        .getByText("continue", { exact: true }),
+    ).toBeVisible();
     await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -229,7 +246,10 @@ for (const scenario of ["pending", "unknown"]) {
         fixture.sessionId,
         (message) => message.metadata?.runtime_retained === true,
       );
-      expect(failure.metadata?.attempts_started ?? 0).toBe(0);
+      expect(hasAttestedContinuationRefusal(failure, "unsafe_work", 0)).toBe(true);
+      await expect(session.activeChat()).toContainText(
+        "Kandev cannot continue automatically because a tool is pending or its outcome is uncertain.",
+      );
       await expect(session.recoveryResumeButton()).toHaveCount(0);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.transientRetryCard()).toBeHidden();

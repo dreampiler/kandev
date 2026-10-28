@@ -680,11 +680,13 @@ func startAgentInfrastructure(
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, err := provideLifecycleManager(
+		ctx,
 		cfg,
 		agentRuntimeAvailability,
 		log,
 		eventBus,
 		repos.AgentSettings,
+		services.Task,
 		agentRegistry,
 		repos.Secrets,
 		services.Task.TaskBaseBranches,
@@ -1224,6 +1226,7 @@ func startGatewayAndServe(
 		return ok
 	})
 	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
+	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
@@ -2153,6 +2156,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	if services.Task != nil {
+		orchScheduler.SetTaskCreationAttachmentReader(services.Task)
+	}
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)

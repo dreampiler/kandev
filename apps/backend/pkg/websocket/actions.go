@@ -292,6 +292,7 @@ const (
 	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
+	ActionSessionPromptSuggestion       = "session.prompt_suggestion"
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
@@ -515,7 +516,6 @@ const (
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
-
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
 	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
