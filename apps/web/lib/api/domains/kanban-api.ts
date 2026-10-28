@@ -116,6 +116,7 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    mcp_server_ids?: string[];
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
@@ -567,6 +568,7 @@ export async function listTasksByWorkspace(
     query?: string;
     includeArchived?: boolean;
     onlyArchived?: boolean;
+    commandPanelVisible?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -580,6 +582,7 @@ export async function listTasksByWorkspace(
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.onlyArchived) url.searchParams.set("only_archived", "true");
+  if (params.commandPanelVisible) url.searchParams.set("command_panel_visible", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

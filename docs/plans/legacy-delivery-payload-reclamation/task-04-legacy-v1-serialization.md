@@ -77,3 +77,17 @@ Product path validation and conformance assertions are unchanged. PostgreSQL
 test DSN is not configured in this execution environment, so this records SQLite
 coverage rather than a PostgreSQL run.
 The unchanged full SQL guard also passed for this candidate.
+
+## Current upstream CI baseline
+
+A normal main merge adopts the upstream version-scoped update-notification
+localization oracle after CI found two matches under one generic-title
+locator. The upstream oracle exercises distinct versions and preserves the
+localization assertion. The incoming
+CI/cache changes keep their existing budgets; the old Windows persistence
+compile-only job had missed both caches and hit its 10-minute deadline.
+
+On the merged source, legacy output-byte/mixed-reader/receipt controls passed
+with race detection (streams 1.059s, SQLite 1.180s); existing normalization,
+snapshot and ordinary hash controls passed separately (1.052s/1.168s). The
+normal merge hooks remain required before publishing this baseline update.
