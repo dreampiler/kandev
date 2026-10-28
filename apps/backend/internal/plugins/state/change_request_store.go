@@ -175,9 +175,9 @@ func normalizeChangeRequestRecord(record ChangeRequestRecord, now string) Change
 // ReportChangeRequest upserts one plugin-reported task change request. The
 // owning installation, workspace, provider, repository, and number identify
 // the row; the latest report updates the descriptive fields. The created,
-// merged, and closed instants are latched and a merged row stays merged, so a
-// stale poll cannot unmerge it. The second return reports whether the row
-// already existed.
+// merged, and closed instants are latched, and merged and closed are terminal
+// states, so a stale poll cannot reopen or unmerge a row. The second return
+// reports whether the row already existed.
 func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record ChangeRequestRecord) (ChangeRequestRecord, bool, error) {
 	if err := validateChangeRequestRecord(record); err != nil {
 		return ChangeRequestRecord{}, false, err
@@ -208,7 +208,8 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 		ON CONFLICT(installation_id, workspace_id, provider_id, repository_id, number)
 		DO UPDATE SET task_id = excluded.task_id, provider_host = excluded.provider_host,
 			url = excluded.url, title = excluded.title,
-			state = CASE WHEN plugin_task_change_requests.state = 'merged' THEN 'merged' ELSE excluded.state END,
+			state = CASE WHEN plugin_task_change_requests.state IN ('merged', 'closed')
+				THEN plugin_task_change_requests.state ELSE excluded.state END,
 			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
 			merged_at = CASE WHEN plugin_task_change_requests.merged_at <> '' THEN plugin_task_change_requests.merged_at ELSE excluded.merged_at END,
 			closed_at = CASE WHEN plugin_task_change_requests.closed_at <> '' THEN plugin_task_change_requests.closed_at ELSE excluded.closed_at END,

@@ -559,6 +559,8 @@ func (s *Service) deletePluginAgentConversations(ctx context.Context, id string)
 // change-request store was never wired) is a no-op - a plugin that never
 // reported has nothing to clean up.
 func (s *Service) deletePluginChangeRequests(ctx context.Context, installationID string) error {
+	s.approvalEffectMu.Lock()
+	defer s.approvalEffectMu.Unlock()
 	ledger := s.changeRequestStoreDep()
 	if ledger == nil {
 		return nil

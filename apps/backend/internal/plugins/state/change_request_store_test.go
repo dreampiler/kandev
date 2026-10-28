@@ -165,3 +165,27 @@ func TestChangeRequestStoreDeleteByInstallation(t *testing.T) {
 		t.Fatalf("removed rows = %d, want 0", len(removed))
 	}
 }
+
+func TestChangeRequestStoreClosedStateIsTerminal(t *testing.T) {
+	store := newChangeRequestTestStore(t)
+	ctx := context.Background()
+	closedAt := time.Now().UTC().Add(-time.Minute).Format(changeRequestTimestampLayout)
+	if _, _, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 8,
+		State: ChangeRequestStateClosed, ClosedAt: closedAt,
+	}); err != nil {
+		t.Fatalf("report closed: %v", err)
+	}
+	reopened, existed, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 8,
+		State: ChangeRequestStateOpen,
+	})
+	if err != nil {
+		t.Fatalf("stale reopen report: %v", err)
+	}
+	if !existed || reopened.State != ChangeRequestStateClosed || reopened.ClosedAt != closedAt {
+		t.Fatalf("stale reopen report = %+v, want closed with latched closed_at", reopened)
+	}
+}
