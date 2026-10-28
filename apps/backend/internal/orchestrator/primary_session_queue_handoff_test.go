@@ -2,14 +2,126 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+func TestTerminalPrimaryHandoffRechecksTransferAdmission(t *testing.T) {
+	for _, mode := range []string{
+		"source recovered", "source startup pending", "source unreadable",
+		"receiver route blocked", "receiver recovery blocked", "receiver unreadable",
+		"accepted startup", "cancelled startup", "old source recovery block",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				assertTerminalHandoffAdmissionMutation(t, mode)
+			})
+		})
+	}
+}
+
+func assertTerminalHandoffAdmissionMutation(t *testing.T, mode string) {
+	t.Helper()
+	ctx := context.Background()
+	const receiverID = "session-handoff-admission-receiver"
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: receiverID, State: models.TaskSessionStateStarting})
+	require.NoError(t, svc.SetPrimarySession(ctx, receiverID))
+	entry, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, primaryStoppedID, false))
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, receiverID, false))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	result := make(chan error, 1)
+	require.NoError(t, svc.messageQueue.WithSessionAdmission(ctx, primaryStoppedID, func(context.Context) error {
+		go func() { result <- svc.transferTerminalSessionQueue(ctx, primaryTaskID, primaryStoppedID, receiverID) }()
+		synctest.Wait()
+		mutateTerminalHandoffAdmission(t, svc, repo, receiverID, mode)
+		return nil
+	}))
+	transferErr := <-result
+	if mode == "accepted startup" || mode == "cancelled startup" || mode == "old source recovery block" {
+		require.NoError(t, transferErr)
+		require.Empty(t, queuedContents(t, svc, primaryStoppedID))
+		require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, receiverID))
+		return
+	}
+	require.Error(t, transferErr)
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, primaryStoppedID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, entry.ID, entries[0].ID)
+	require.Equal(t, primaryStoppedID, entries[0].SessionID)
+	require.Empty(t, queuedContents(t, svc, receiverID))
+	require.False(t, svc.messageQueue.GetStatus(ctx, primaryStoppedID).AutoRun)
+	require.False(t, svc.messageQueue.GetStatus(ctx, receiverID).AutoRun)
+}
+
+func mutateTerminalHandoffAdmission(t *testing.T, svc *Service, repo *sqliterepo.Repository, receiverID, mode string) {
+	t.Helper()
+	ctx := context.Background()
+	switch mode {
+	case "source recovered":
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateWaitingForInput, ""))
+	case "source startup pending", "accepted startup", "cancelled startup":
+		attemptCtx, cancel := context.WithCancel(ctx)
+		if mode == "cancelled startup" {
+			cancel()
+		}
+		attempt := &resumeAttempt{sessionID: primaryStoppedID, ctx: attemptCtx, cancel: cancel,
+			done: make(chan struct{}), accepted: mode == "accepted startup"}
+		registry := svc.resumeAttemptStore()
+		registry.mu.Lock()
+		registry.attempts[primaryStoppedID] = attempt
+		registry.mu.Unlock()
+		t.Cleanup(func() {
+			cancel()
+			registry.mu.Lock()
+			delete(registry.attempts, primaryStoppedID)
+			registry.mu.Unlock()
+			close(attempt.done)
+		})
+	case "source unreadable":
+		svc.repo = &terminalHandoffUnreadableSessionRepo{Repository: repo, sessionID: primaryStoppedID}
+	case "receiver unreadable":
+		svc.repo = &terminalHandoffUnreadableSessionRepo{Repository: repo, sessionID: receiverID}
+	case "receiver route blocked":
+		receiver, err := repo.GetTaskSession(ctx, receiverID)
+		require.NoError(t, err)
+		receiver.RouteState = dynamicRouteStatusActionRequired
+		require.NoError(t, repo.UpdateTaskSession(ctx, receiver))
+	case "receiver recovery blocked", "old source recovery block":
+		sessionID := receiverID
+		if mode == "old source recovery block" {
+			sessionID = primaryStoppedID
+		}
+		require.NoError(t, svc.recordSessionRecoveryBlock(ctx, sessionID, "handoff-test",
+			&sessionRecoveryRequiredError{Block: &models.SessionRecoveryBlock{Reason: "unknown_prompt_outcome"}}))
+		block, err := svc.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		require.NoError(t, err)
+		require.NotNil(t, block)
+	}
+}
+
+type terminalHandoffUnreadableSessionRepo struct {
+	*sqliterepo.Repository
+	sessionID string
+}
+
+func (r *terminalHandoffUnreadableSessionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	if sessionID == r.sessionID {
+		return nil, errors.New("handoff session read unavailable")
+	}
+	return r.Repository.GetTaskSession(ctx, sessionID)
+}
 
 // enableTerminalPrimaryQueueHandoff also starts the service-owned worker
 // lifetime that production Start creates, and joins it when the test ends.

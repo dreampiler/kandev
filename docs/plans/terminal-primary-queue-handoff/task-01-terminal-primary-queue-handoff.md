@@ -36,9 +36,28 @@ to the new primary and drains it when Auto-run allows.
 
 ## Verification
 
-`go test ./internal/orchestrator/ -run 'TestPrimary|TestExplicitPrimary'` covers
+`go test ./internal/orchestrator/ -run 'TestPrimary|TestExplicitPrimary|TestTerminalPrimary|TestSuccessiveTerminalPromotions'` covers
 automatic promotion, an explicit choice, a live previous primary, the
 flag-off default, a paused previous primary with an enabled receiver,
 successive terminal promotions, no hand-off after `Stop`, a promotion that
 lands between receiver resolution and transfer, and a receiver Auto-run pause
 made during the hand-off.
+
+## Transfer admission follow-up
+
+Revalidate terminal source retirement and receiver recovery eligibility inside
+the existing transfer admission, before attachment preparation. The existing
+primary selector is not replaced. Shared recovery/startup predicates use the
+same source file as the related selection follow-up, preserving compatible
+merges in either order. The feature stays off by default, and queue IDs,
+receiver Auto-run, lock ordering, bounded worker lifetime and attachment
+compensation keep their existing contracts.
+
+Nine deterministic admission mutation/control cases are retained in the
+existing primary_session_queue_handoff_test.go. Original decision-path overlay
+reproduced all six unsafe admission mutations (0.500s). The candidate race
+selection passed (2.006s), including the three acceptance/cancellation/history
+controls and existing primary cases. The five remaining existing handoff,
+receiver Auto-run/pause, worker-stop and successive-promotion controls passed
+separately (1.822s). The selector above now includes their actual test names.
+Documentation coverage is covered; publication uses the normal commit hooks.

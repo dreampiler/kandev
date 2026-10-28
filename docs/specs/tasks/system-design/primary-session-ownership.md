@@ -95,7 +95,16 @@ hand-off also confirms the receiver still holds the primary role, holding the
 read side of `primarySwitchMu` until the transfer returns; `SetPrimarySession`
 takes the write side only around its repository write. If the role moved
 first, the transfer rolls back and the hand-off resolves the primary again (up
-to five attempts). It then offers the new primary to
+to five attempts). Immediately before attachment preparation, while both queue
+admissions and the primary-role read lock are held, it re-reads the source and
+receiver. A source that became nonterminal or owns a live unaccepted startup
+keeps its queue. An unreadable session or a receiver with an open recovery block
+or action-required route also refuses transfer. Accepted or cancelled startup
+attempts no longer own startup; an old source recovery block alone does not
+prevent retiring that source. These refusals preserve queue IDs, attachments
+and both Auto-run settings and do not schedule new retries. The predicates are
+shared with the primary selection follow-up without importing its selector
+changes or introducing a second flag. It then offers the new primary to
 `DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
 the queue on the terminal session. The flag is read once at startup into the
 orchestrator service config.

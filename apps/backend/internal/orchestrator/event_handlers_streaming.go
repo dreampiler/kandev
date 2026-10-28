@@ -2132,6 +2132,11 @@ func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID stri
 // lost the primary role before the transfer was admitted.
 var errTerminalQueueReceiverChanged = errors.New("terminal queue hand-off receiver is no longer primary")
 
+var (
+	errTerminalQueueSourceNotRetired    = errors.New("terminal queue hand-off source is no longer retired")
+	errTerminalQueueReceiverUnavailable = errors.New("terminal queue hand-off receiver awaits recovery")
+)
+
 // terminalQueueHandOffAttempts bounds re-resolving the receiver when the
 // primary role keeps moving while a hand-off waits for admission.
 const terminalQueueHandOffAttempts = 5
@@ -2217,6 +2222,12 @@ func (s *Service) transferTerminalSessionQueue(ctx context.Context, taskID, from
 			if s.currentPrimarySessionID(admittedCtx, taskID) != toSessionID {
 				return errTerminalQueueReceiverChanged
 			}
+			if !s.terminalQueueSourceRetired(admittedCtx, fromSessionID) {
+				return errTerminalQueueSourceNotRetired
+			}
+			if s.terminalQueueReceiverAwaitsRecovery(admittedCtx, toSessionID) {
+				return errTerminalQueueReceiverUnavailable
+			}
 			attachmentsPrepared = true
 			return prepareAttachments(admittedCtx, attachmentIDs)
 		},
@@ -2246,6 +2257,16 @@ func (s *Service) currentPrimarySessionID(ctx context.Context, taskID string) st
 		}
 	}
 	return ""
+}
+
+func (s *Service) terminalQueueSourceRetired(ctx context.Context, sessionID string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err == nil && session != nil && isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID)
+}
+
+func (s *Service) terminalQueueReceiverAwaitsRecovery(ctx context.Context, sessionID string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err != nil || session == nil || s.sessionAwaitsRecoveryAction(ctx, session)
 }
 
 func isTerminalSessionState(s models.TaskSessionState) bool {

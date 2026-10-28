@@ -6112,7 +6112,7 @@ func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID str
 		return nil
 	}
 	for _, previous := range sessions {
-		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) {
+		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) && !s.resumeAttemptInFlight(previous.ID) {
 			return previous
 		}
 	}

@@ -67,7 +67,10 @@ return to an earlier conversation.
   the messages move, so successive or concurrent promotions do not strand
   messages. The flag is off in every
   shipped profile; with it off, queued messages keep their session target. A
-  live previous primary always keeps its queue.
+  live previous primary always keeps its queue. At transfer admission, a source
+  that recovered or still owns an unaccepted startup shall keep its queue; an
+  unreadable session or a recovery-blocked receiver shall refuse transfer
+  without changing either session's queue or Auto-run policy.
 
 ## Out of scope
 
