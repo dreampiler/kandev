@@ -41,8 +41,29 @@ func newParkedRunFixtureForTask(t *testing.T, projectID string) parkedRunFixture
 	if err := svc.CreateAgentInstance(context.Background(), agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, project_id, title, created_at, updated_at)
-		VALUES ('task-parked', 'ws-1', ?, 'Routine task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, projectID)
+	// The canonical Office projection reads workflows even when project_id
+	// decides the result. Keep that task-owned schema local to this fixture.
+	svc.ExecSQL(t, `CREATE TABLE IF NOT EXISTS workflows (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		workflow_template_id TEXT NOT NULL DEFAULT '',
+		is_system INTEGER NOT NULL DEFAULT 0
+	)`)
+	officeWorkflowID := ""
+	if projectID != "" {
+		officeWorkflowID = "wf-parked"
+	}
+	svc.ExecSQL(t, `INSERT INTO workspaces (id, office_workflow_id) VALUES ('ws-1', ?)`, officeWorkflowID)
+	svc.ExecSQL(t, `INSERT INTO workflows (id, workspace_id, workflow_template_id, is_system)
+		VALUES ('wf-parked', 'ws-1', 'routine', 0)`)
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, agent_profile_id, stage_type)
+		VALUES ('step-parked', ?, 'custom')`, agent.ID)
+	insertTestTask(t, svc, "task-parked", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = ?, workflow_id = 'wf-parked',
+		workflow_step_id = 'step-parked', title = 'Routine task' WHERE id = 'task-parked'`, projectID)
+	setTestTaskAssignee(t, svc, "task-parked", agent.ID)
+	insertTestTaskSession(t, svc, "session-launched", "task-parked", agent.ID)
+	svc.ExecSQL(t, `UPDATE task_sessions SET state = 'IDLE' WHERE id = 'session-launched'`)
 	claimedAt := time.Now().UTC().Add(-time.Minute)
 	svc.ExecSQL(t, `
 		INSERT INTO runs (
@@ -132,40 +153,54 @@ func TestParkedSessionSettlementIgnoresFailuresAndForeignSessions(t *testing.T) 
 	}
 }
 
-// An Office turn that never reaches a stopping teardown — a cancelled turn,
-// a session without an agent execution, or a session relaunched for the next
-// run — would otherwise leave its claimed run stuck and hold the agent
-// ceiling. The park is the turn's only completion signal in every case, so it
-// settles the run; the Office IDLE teardown's later AgentStopped is then a
-// no-op.
-func TestParkedOfficeSessionRunSettlesOnPark(t *testing.T) {
-	f := newParkedRunFixtureForTask(t, "proj-office")
+// Office keeps its claim while a parked turn still owns teardown. Successful
+// stops and explicit no-stop completion confirmations release the same claim;
+// the early park alone must not admit another run onto a live agent process.
+func TestParkedOfficeSessionRunWaitsForRuntimeSettlement(t *testing.T) {
+	for _, subject := range []string{events.AgentStopped, events.OfficeTurnSettled} {
+		t.Run(subject, func(t *testing.T) {
+			f := newParkedRunFixtureForTask(t, "proj-office")
+			f.publishSessionState(t, "session-launched", "RUNNING", "WAITING_FOR_INPUT", "")
 
-	f.publishSessionState(t, "session-launched", "RUNNING", "WAITING_FOR_INPUT", "")
+			if got := f.runStatus(t); got != service.RunStatusClaimed {
+				t.Fatalf("run status = %q, want claimed while Office teardown is pending", got)
+			}
+			free, err := f.svc.CheckoutTask(context.Background(), "task-parked", "agent-other")
+			if err != nil {
+				t.Fatalf("checkout before teardown: %v", err)
+			}
+			if free {
+				t.Fatal("early Office park released its task checkout")
+			}
 
-	if got := f.runStatus(t); got != service.RunStatusFinished {
-		t.Fatalf("run status = %q, want finished after the Office session parked", got)
-	}
-	free, err := f.svc.CheckoutTask(context.Background(), "task-parked", "agent-other")
-	if err != nil {
-		t.Fatalf("checkout after settle: %v", err)
-	}
-	if !free {
-		t.Fatal("task checkout is still held after the Office run settled")
-	}
-
-	// The Office IDLE teardown still fires AgentStopped afterwards; it must not
-	// error or re-settle the already finished run.
-	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
-		"task_id":          "task-parked",
-		"session_id":       "session-launched",
-		"agent_profile_id": f.agent.ID,
-		"run_id":           "run-parked",
-	})
-	if err := f.eb.Publish(context.Background(), events.AgentStopped, event); err != nil {
-		t.Fatalf("publish agent stopped: %v", err)
-	}
-	if got := f.runStatus(t); got != service.RunStatusFinished {
-		t.Fatalf("run status = %q, want finished after the late AgentStopped", got)
+			event := bus.NewEvent(subject, "test", map[string]string{
+				"task_id":          "task-parked",
+				"session_id":       "session-launched",
+				"agent_profile_id": f.agent.ID,
+				"run_id":           "run-parked",
+				"turn_id":          "completed-turn",
+				"turn_started_at":  time.Now().UTC().Add(-30 * time.Second).Format(time.RFC3339Nano),
+				"updated_at":       time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			if err := f.eb.Publish(context.Background(), subject, event); err != nil {
+				t.Fatalf("publish runtime settlement: %v", err)
+			}
+			if got := f.runStatus(t); got != service.RunStatusFinished {
+				t.Fatalf("run status = %q, want finished after runtime settlement", got)
+			}
+			free, err = f.svc.CheckoutTask(context.Background(), "task-parked", "agent-other")
+			if err != nil {
+				t.Fatalf("checkout after settlement: %v", err)
+			}
+			if !free {
+				t.Fatal("task checkout is still held after runtime settlement")
+			}
+			if err := f.eb.Publish(context.Background(), subject, event); err != nil {
+				t.Fatalf("duplicate runtime settlement: %v", err)
+			}
+			if got := f.runStatus(t); got != service.RunStatusFinished {
+				t.Fatalf("duplicate settlement changed finished outcome: %q", got)
+			}
+		})
 	}
 }
