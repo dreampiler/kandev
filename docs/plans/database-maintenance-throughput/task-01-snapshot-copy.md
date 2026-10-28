@@ -128,3 +128,20 @@ privacy check fails identically on pristine and candidate code on Windows.
 That assertion was not weakened and no pass is claimed for it. Original
 verification records above remain intact. No standing test, live backup, retry
 timer or new setting was added; the original job's writer remains unproved.
+
+## Retained WAL regression coverage
+
+The maintainer's five focused cases are retained in a cgo-only
+`internal/db/sqlite_backup_test.go`: independent commits during incremental
+copy, source reuse after success and cancellation, schema-read setup failure,
+caller-owned transaction preservation and non-WAL mode preservation. A separate
+cgo test file keeps non-CGO compilation independent of the native driver API.
+The cases passed under fts5/race detection (1.147s). They use temporary databases
+and deterministic native copy steps, with no live backup or new product setting.
+
+SQL guard now records the exact `pinSQLiteWALSnapshot` SQLite catalog boundary,
+consistent with the existing native-copy declaration. The function accepts only
+the native SQLite driver before its journal/schema queries; no general SQL
+rule or repository boundary is weakened. Hosted CI remains a separate result.
+The unchanged full `go run ./cmd/sqlguard ./internal` check passed after adding
+this symbol-specific declaration.
