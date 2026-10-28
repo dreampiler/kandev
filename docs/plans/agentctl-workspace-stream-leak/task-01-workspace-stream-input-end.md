@@ -68,3 +68,17 @@ CI remains a separate result.
 
 The change has no dependency on URL lease recovery, cancelled-resume handling,
 instance teardown changes, new endpoints, configuration or other feature PRs.
+
+## Current upstream CI baseline
+
+The normal upstream merge retains the existing input-close implementation and
+endpoint regressions while adopting current backend dependencies and CI/cache
+configuration. The workspace stream selection passed on the merged source
+with race detection (2.802s), including idle client close, shell input, ping,
+ignored messages and tracker forwarding.
+
+The hosted Windows persistence compile-only step missed both caches and
+reached its 10-minute deadline. A separate mobile clone-recovery failure and
+its cleanup/reset errors do not establish an input-close regression; their
+backend artifact needs baseline comparison if the current-base CI repeats it.
+No recovery refusal, timeout or assertion is weakened.
