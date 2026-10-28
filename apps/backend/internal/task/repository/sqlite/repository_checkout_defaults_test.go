@@ -30,6 +30,16 @@ func checkoutStoredVersion(t *testing.T, r *Repository, id string, version time.
 	return row
 }
 
+func TestNextRepositoryUpdatedAtAdvances(t *testing.T) {
+	for _, previous := range []time.Time{
+		time.Now().UTC(),
+		time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		next := nextRepositoryUpdatedAt(previous)
+		require.True(t, next.After(previous), "next=%s previous=%s", next.Format(time.RFC3339Nano), previous.Format(time.RFC3339Nano))
+	}
+}
+
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.20, AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.21
 func TestRepositoryCheckoutDefaultsStorage(t *testing.T) {
 	r, stale := checkoutStoreFixture(t)
