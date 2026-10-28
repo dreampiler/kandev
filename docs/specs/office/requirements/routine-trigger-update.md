@@ -15,9 +15,9 @@ trigger and deleting the old one. That replaced the trigger identity, discarded
 its creation time and fire history, and made a scheduler-claimed cron slot
 awkward to edit without disturbing the claimed fire.
 
-Operators need to change a trigger's schedule or enabled state in place, from the
-API and from config tooling, while the scheduler keeps ownership of a claimed
-fire and its re-arm.
+Operators need to change a trigger's schedule or enabled state in place through
+the routine API, while the scheduler keeps ownership of a claimed fire and its
+re-arm.
 
 ## Requirements
 
