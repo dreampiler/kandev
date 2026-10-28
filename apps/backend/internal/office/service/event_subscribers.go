@@ -474,6 +474,23 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
 	run, err := s.resolveLifecycleRun(ctx, *data)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A ceiling replay whose settlement write failed leaves the Office run
+		// parked until its ready event recovers it. Completion can run first:
+		// finish the exact parked row now so it does not become claimed after
+		// its execution has already stopped, with no later event to finish it.
+		finished, finishErr := s.finishCeilingDeferredRunOnCompletion(ctx, data)
+		if finishErr != nil {
+			return finishErr
+		}
+		if finished {
+			return nil
+		}
+		// The ready recovery may have claimed the run between the first
+		// lookup and this completion fallback; retry the claimed-run lookup
+		// once so that ordering also reaches the normal finish path.
+		run, err = s.resolveLifecycleRun(ctx, *data)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if exactRunSessionEvent(data) {

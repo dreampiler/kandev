@@ -214,6 +214,79 @@ func (r *Repository) FailCeilingDeferredRun(
 	return &run, nil
 }
 
+// ListCeilingDeferredRunsForTaskAndAgent returns the queued runs a ceiling
+// deferral parked for one task and Office agent. The caller verifies the
+// durable deferral marker and refuses to guess when more than one row matches.
+func (r *Repository) ListCeilingDeferredRunsForTaskAndAgent(
+	ctx context.Context, taskID, agentProfileID string,
+) ([]runsmodels.Run, error) {
+	if taskID == "" || agentProfileID == "" {
+		return nil, nil
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT * FROM runs
+		WHERE status = 'queued'
+		  AND routing_blocked_status = ?
+		  AND agent_profile_id = ?
+		  AND %s = ?
+		ORDER BY requested_at DESC
+		LIMIT 2
+	`, dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id"))),
+		runsmodels.RoutingBlockedActionRequired, agentProfileID, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: list ceiling deferrals: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]runsmodels.Run, 0, 2)
+	for rows.Next() {
+		var run runsmodels.Run
+		if err := rows.StructScan(&run); err != nil {
+			return nil, fmt.Errorf("run_routing: scan ceiling deferral: %w", err)
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// FinishCeilingDeferredRunOnCompletion atomically finishes the exact parked run
+// whose completion event arrived before the ready-recovery claim. The row must
+// still be the queued ceiling-deferred run for this task and Office agent.
+func (r *Repository) FinishCeilingDeferredRunOnCompletion(
+	ctx context.Context, runID, sessionID, taskID, agentProfileID, outcome string,
+) (*runsmodels.Run, error) {
+	if runID == "" || taskID == "" || agentProfileID == "" {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var run runsmodels.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(fmt.Sprintf(`
+		UPDATE runs
+		SET status = 'finished',
+		    outcome = ?,
+		    session_id = CASE WHEN ? = '' THEN session_id ELSE ? END,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    claimed_at = COALESCE(claimed_at, ?),
+		    finished_at = ?
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?
+		  AND agent_profile_id = ?
+		  AND %s = ?
+		RETURNING *
+	`, dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id"))),
+		outcome, sessionID, sessionID, now, now, runID,
+		runsmodels.RoutingBlockedActionRequired, agentProfileID, taskID).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: finish ceiling deferral: %w", err)
+	}
+	return &run, nil
+}
+
 // ParkRunForSessionRecovery preserves a pending Office run after its session
 // cannot be restored. It intentionally clears all retry timestamps so the
 // scheduler's timed wake-up path cannot turn an operator decision into an

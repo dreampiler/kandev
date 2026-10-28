@@ -74,6 +74,65 @@ func (s *Service) settleCeilingDeferredLaunchOnReady(
 	)
 }
 
+// finishCeilingDeferredRunOnCompletion handles the ordering where the
+// replayed launch's completion event arrives before the ready recovery has
+// claimed the run. It finishes the exact parked row atomically; if the ready
+// recovery won the race, it returns false so the caller retries the normal
+// claimed-run path instead of leaving a claimed run with no later event.
+func (s *Service) finishCeilingDeferredRunOnCompletion(
+	ctx context.Context, data *AgentLifecycleData,
+) (bool, error) {
+	if data == nil || data.TaskID == "" || data.AgentProfileID == "" || data.SessionID == "" {
+		return false, nil
+	}
+	runs, err := s.repo.ListCeilingDeferredRunsForTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	if err != nil {
+		return false, err
+	}
+	// No parked run, or more than one: do not guess which launch this
+	// completion belongs to.
+	if len(runs) != 1 {
+		return false, nil
+	}
+	run := runs[0]
+	if data.CausingRunID != "" && data.CausingRunID != run.ID {
+		return false, nil
+	}
+	deferred, err := s.isCeilingDeferredRun(ctx, run.ID)
+	if err != nil {
+		return false, err
+	}
+	if !deferred {
+		return false, nil
+	}
+	finished, err := s.repo.FinishCeilingDeferredRunOnCompletion(
+		ctx, run.ID, data.SessionID, data.TaskID, data.AgentProfileID, RunOutcomeProcessed,
+	)
+	if err != nil {
+		return false, err
+	}
+	if finished == nil {
+		return false, nil
+	}
+	outcome := RunOutcomeProcessed
+	s.AppendRunEvent(ctx, finished.ID, "complete", "info", map[string]interface{}{
+		"task_id":    data.TaskID,
+		"session_id": data.SessionID,
+	})
+	s.recordTerminalShape(ctx, finished, RunStatusFinished, &outcome)
+	s.publishRunProcessed(ctx, finished.ID, RunStatusFinished, finished)
+	s.markRoutingSuccess(ctx, finished)
+	s.recordRunOutputSummary(ctx, finished, *data)
+	s.warnIfReviewDecisionMissing(ctx, finished)
+	s.releaseTaskCheckoutForRun(ctx, finished)
+	s.stampRunFinished(ctx, finished)
+	s.logger.Info("office run finished from ceiling replay completion",
+		zap.String("run_id", finished.ID),
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID))
+	return true, nil
+}
+
 // isCeilingDeferredRun reports whether the run's latest event is the durable
 // ceiling-deferral marker. The ready recovery accepts only this marker, so a
 // normal launch's ready event cannot release a run parked for another reason.
