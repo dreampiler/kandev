@@ -72,6 +72,12 @@ Additional bounded signatures:
   shared sanitizer masks its distinguishing token. `RawExcerpt` remains the
   sanitized excerpt, and existing structured, payment, credit, and quota
   precedence is preserved.
+  At the shared ACP message projection, recognized daily reasons that would be
+  redacted are reduced to fixed public labels before credential redaction.
+  Opaque suffixes are discarded; already-safe text and its complete diagnostic
+  identity remain unchanged. The JSON envelope carries the sanitized message
+  through the existing fields, so the routing reader can retain the specific
+  rule without receiving raw error Data or a new wire field.
 - OpenCode Zen's opening `Rate limit exceeded. Please try again later` is a
   generic rate limit; it carries no inferred reset period.
 - A labeled opening JSON envelope containing the exact field
