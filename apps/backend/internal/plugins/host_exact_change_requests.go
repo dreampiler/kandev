@@ -88,7 +88,20 @@ func validTaskChangeRequestReport(input pluginsdk.ExactTaskChangeRequestReport) 
 		!validOptionalChangeRequestTimestamp(input.ClosedAt) {
 		return false
 	}
-	return input.State != state.ChangeRequestStateMerged || input.MergedAt != ""
+	return validChangeRequestStateTimestamps(input.State, input.MergedAt, input.ClosedAt)
+}
+
+func validChangeRequestStateTimestamps(stateValue, mergedAt, closedAt string) bool {
+	switch stateValue {
+	case state.ChangeRequestStateOpen:
+		return mergedAt == "" && closedAt == ""
+	case state.ChangeRequestStateMerged:
+		return mergedAt != "" && closedAt == ""
+	case state.ChangeRequestStateClosed:
+		return closedAt != "" && mergedAt == ""
+	default:
+		return false
+	}
 }
 
 func validTaskChangeRequestRemove(input pluginsdk.ExactTaskChangeRequestRemove) bool {
@@ -167,6 +180,12 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 	if ledger == nil {
 		return unavailableTaskChangeRequest("task_change_requests_unsupported"), pluginsdk.TaskChangeRequest{}, nil
 	}
+	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
+		if record.Receipt.State == exactReceiptStateCompleted {
+			return &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "repository_provider_not_owned"}, pluginsdk.TaskChangeRequest{}, nil
+		}
+		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
+	}
 	if record.Receipt.State == exactReceiptStateCompleted {
 		if record.Receipt.ResultStatus != string(pluginsdk.CommandApplied) {
 			return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
@@ -181,9 +200,6 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		// The row may have been removed after the applied receipt. The durable
 		// receipt still makes the replay idempotent even when no row remains.
 		return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
-	}
-	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
-		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
 	}
 	if err := h.validateChangeRequestTarget(ctx, input.WorkspaceID, input.TaskID); err != nil {
 		resultStatus, reason := exactChangeRequestTargetError(err)
@@ -244,11 +260,14 @@ func (h *pluginHost) removeTaskChangeRequestExact(ctx context.Context, input plu
 	if ledger == nil {
 		return unavailableTaskChangeRequest("task_change_requests_unsupported"), nil
 	}
+	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
+		if record.Receipt.State == exactReceiptStateCompleted {
+			return &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "repository_provider_not_owned"}, nil
+		}
+		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", "", ""), nil
+	}
 	if record.Receipt.State == exactReceiptStateCompleted {
 		return commandResultFromRecord(record), nil
-	}
-	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
-		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", "", ""), nil
 	}
 	if err := ledger.RemoveChangeRequest(ctx, h.installationID, input.WorkspaceID,
 		strings.TrimSpace(input.ProviderID), strings.TrimSpace(input.RepositoryID), input.Number); err != nil {

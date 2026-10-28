@@ -412,11 +412,13 @@ manifest-declared `repository_providers`; the task must exist in the same
 workspace and must not be archived. The identity is the owning installation,
 workspace, provider, immutable repository id, and change-request number. The
 first report fixes the task association; another task cannot take over the row
-and must remove and report it instead. State
-is `open`, `merged`, or `closed`; merged and closed are terminal and their
-timestamps latch, so a stale report cannot reopen or unmerge a row. To reopen a
-change request, remove it and report it again. Every command carries an idempotency key and
-returns the normal `HostCommandResult`. A disabled installation is denied. If
+and must remove and report it instead. State is `open`, `merged`, or `closed`;
+merged and closed are terminal and their timestamps latch, so a stale report
+cannot reopen or unmerge a row. An open report carries no terminal timestamp, a
+merged report carries only `merged_at`, and a closed report carries only
+`closed_at`. To reopen a change request, remove it and report it again. Every
+command carries an idempotency key and returns the normal `HostCommandResult`. A
+disabled installation is denied. If
 the ledger write succeeds but the receipt cannot be completed, the result is
 `UNCERTAIN`; retrying the same idempotency key reconciles the receipt and the
 row instead of creating a second record.

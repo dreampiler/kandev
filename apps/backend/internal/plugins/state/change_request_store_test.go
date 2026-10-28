@@ -44,11 +44,11 @@ func TestChangeRequestStoreReportAndLatch(t *testing.T) {
 	if first.MergedAt != mergedAt {
 		t.Fatalf("merged_at = %q, want %q", first.MergedAt, mergedAt)
 	}
-	// A stale re-report without merged_at must not clear the latch.
+	// A later report may update descriptive fields while keeping the row merged.
 	second, existed, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
 		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
 		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 7,
-		Title: "Fix it (updated)", State: ChangeRequestStateMerged,
+		Title: "Fix it (updated)", State: ChangeRequestStateMerged, MergedAt: mergedAt,
 	})
 	if err != nil {
 		t.Fatalf("re-report: %v", err)
@@ -134,6 +134,18 @@ func TestChangeRequestStoreRejectsInvalidTimestamp(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("new merged row without merged_at must be rejected")
+	}
+	valid := time.Now().UTC().Format(changeRequestTimestampLayout)
+	for name, record := range map[string]ChangeRequestRecord{
+		"open with merged":   {State: ChangeRequestStateOpen, MergedAt: valid},
+		"merged with closed": {State: ChangeRequestStateMerged, MergedAt: valid, ClosedAt: valid},
+		"closed with merged": {State: ChangeRequestStateClosed, MergedAt: valid, ClosedAt: valid},
+	} {
+		record.InstallationID, record.WorkspaceID, record.TaskID = "inst-1", "ws-1", "task-1"
+		record.ProviderID, record.RepositoryID, record.Number = "forgejo", "repo-1", 3
+		if _, _, err := store.ReportChangeRequest(context.Background(), record); err == nil {
+			t.Errorf("%s must be rejected", name)
+		}
 	}
 }
 

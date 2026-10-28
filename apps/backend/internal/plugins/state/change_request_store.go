@@ -152,9 +152,34 @@ func validateChangeRequestRecord(record ChangeRequestRecord) error {
 	if !validChangeRequestState(record.State) {
 		return errors.New("plugin task change request: state is invalid")
 	}
-	for _, value := range []string{record.CreatedAt, record.MergedAt, record.ClosedAt} {
+	if err := validateChangeRequestTimestamps(record.CreatedAt, record.MergedAt, record.ClosedAt); err != nil {
+		return err
+	}
+	return validateChangeRequestStateTimestamps(record.State, record.MergedAt, record.ClosedAt)
+}
+
+func validateChangeRequestTimestamps(values ...string) error {
+	for _, value := range values {
 		if err := validateChangeRequestTimestamp(value); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateChangeRequestStateTimestamps(state, mergedAt, closedAt string) error {
+	switch state {
+	case ChangeRequestStateOpen:
+		if mergedAt != "" || closedAt != "" {
+			return errors.New("plugin task change request: open state cannot carry terminal timestamps")
+		}
+	case ChangeRequestStateMerged:
+		if mergedAt == "" || closedAt != "" {
+			return errors.New("plugin task change request: merged state requires merged_at only")
+		}
+	case ChangeRequestStateClosed:
+		if closedAt == "" || mergedAt != "" {
+			return errors.New("plugin task change request: closed state requires closed_at only")
 		}
 	}
 	return nil
@@ -201,9 +226,6 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 	if !created && existing.TaskID != record.TaskID {
 		return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
 	}
-	if record.State == ChangeRequestStateMerged && record.MergedAt == "" && (created || existing.MergedAt == "") {
-		return ChangeRequestRecord{}, false, errors.New("plugin task change request: merged state requires merged_at")
-	}
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO plugin_task_change_requests (
 			id, installation_id, workspace_id, task_id, provider_id, provider_host,
@@ -235,6 +257,9 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 	if err := tx.GetContext(ctx, &stored, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
 		record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number); err != nil {
 		return ChangeRequestRecord{}, false, err
+	}
+	if stored.TaskID != record.TaskID {
+		return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
 	}
 	if err := tx.Commit(); err != nil {
 		return ChangeRequestRecord{}, false, err
