@@ -37,7 +37,7 @@ Out of scope: Cleaning/resetting/moving checkouts, adopting conflicting slots, b
 
 ## Files and dependencies
 
-The source files are the existing PR #4722 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate or permanent test.
+The source files are the existing PR #4722 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate. The review follow-up retains the minimum regression cases in existing test files.
 
 - [System design](../../specs/agents/system-design/retained-checkout-preparation-reconciliation.md)
 - [Plan](plan.md)
@@ -83,3 +83,28 @@ AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.13. Its wording is unchanged from
 this PR's earlier proposed 008.11; current upstream already owns 008.11 and
 008.12 for attested branch evolution. Only the colliding identifier is corrected;
 both behavior requirements and the earlier commits remain preserved.
+
+## Review follow-up: rollback ownership and canonical holders
+
+Multi-repository rollback tracks directories physically created by this request,
+including a partially completed creation, rather than inferring ownership from a
+new registration ID. Registering a retained checkout does not fire the physical
+creation callback. A later repository failure preserves its existing files,
+index, branch and registration while still removing newly created directories.
+Canonical checkout-slot selection shares inventory eligibility checks and exact
+workspace placement; deleted, failed and worktree-less historical rows do not
+compete with an eligible live holder. Ambiguous holders and sibling collisions
+remain refusals.
+
+The original product overlay reproduced all three reviewed failures: retained
+checkout deletion during rollback (lifecycle 4.729s), deleted-history slot refusal
+(executor 0.154s), and a physical-creation callback during reuse (worktree 3.964s).
+Candidate race results passed: executor 1.240s, worktree 57.431s, and lifecycle
+67.223s, including the retained checkout, fresh-directory rollback, canonical
+holder and registration/refusal controls. The first lifecycle run also selected
+two existing shell-script fixtures that failed because bare sh was absent from
+the Windows process PATH; the original product reproduced the same failures
+(11.115s). Supplying native Git/bin only to the test process made the unchanged
+fixtures pass. No product or assertion, global PATH or Git setting was changed.
+The minimum regressions are retained in existing test files. Documentation
+coverage is covered. Publication uses the normal commit hooks.

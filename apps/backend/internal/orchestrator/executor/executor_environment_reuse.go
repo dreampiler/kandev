@@ -112,7 +112,7 @@ func checkoutBranchCanonicalSlot(spec RepoSpec, siblings []RepoSpec, rows []*mod
 	}
 	var holder *models.TaskEnvironmentRepo
 	for _, row := range rows {
-		if row == nil || row.RepositoryID != spec.RepositoryID || row.WorktreeBranch != spec.CheckoutBranch {
+		if !checkoutBranchHolderMatches(row, spec) {
 			continue
 		}
 		if holder != nil {
@@ -136,6 +136,11 @@ func checkoutBranchCanonicalSlot(spec RepoSpec, siblings []RepoSpec, rows []*mod
 		}
 	}
 	return holder.BranchSlug, true
+}
+
+func checkoutBranchHolderMatches(row *models.TaskEnvironmentRepo, spec RepoSpec) bool {
+	return canonicalEnvironmentRepoRowEligible(row, true) && row.RepositoryID == spec.RepositoryID &&
+		row.WorktreeBranch == spec.CheckoutBranch && row.WorkspaceRelativePath == spec.WorkspaceRelativePath
 }
 
 // claimSharedTaskEnvironmentTaskDirName records the first stable task-root
@@ -210,15 +215,17 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
-		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath {
-			continue
-		}
-		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
+		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath || !canonicalEnvironmentRepoRowEligible(row, useWorktree) {
 			continue
 		}
 		matched = append(matched, row)
 	}
 	return matched
+}
+
+func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
+	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
+		row.Status != taskEnvironmentRepoStatusDeleted && (!useWorktree || row.WorktreeID != "")
 }
 
 // pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated

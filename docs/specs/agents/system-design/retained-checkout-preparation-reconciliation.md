@@ -43,6 +43,17 @@ the request. Registration failure is returned with the retained checkout
 untouched. Successful registration uses the ordinary session/repository/branch
 cache key. No new receipt, owner claim or metadata-repair loop is introduced.
 
+## Rollback ownership and canonical holder eligibility
+
+Only a physical creation callback marks a worktree as created by this request.
+Retained registration never emits that callback. Multi-repository rollback uses
+that explicit result, including partially completed creation, so later failure
+removes new directories and preserves retained checkout contents and identity.
+
+Canonical slot selection uses the same active inventory eligibility as reuse,
+including deletion, failed status and worktree presence, with exact workspace
+placement. Multiple eligible holders or a sibling slot collision remain unsafe.
+
 ## Preserved outcomes
 
 Reuse does not fetch, create or reset a branch, rerun setup, copy configured

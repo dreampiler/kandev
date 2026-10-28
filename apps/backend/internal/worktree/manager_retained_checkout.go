@@ -70,9 +70,6 @@ func (m *Manager) reuseRetainedCheckoutAtPath(ctx context.Context, req CreateReq
 	if err = m.registerRetainedCheckout(ctx, req, wt); err != nil {
 		return nil, true, err
 	}
-	if req.OnWorktreeCreated != nil {
-		req.OnWorktreeCreated(wt)
-	}
 	return wt, true, nil
 }
 

@@ -360,6 +360,9 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 		if wt.Status == worktree.StatusActive {
 			t.Errorf("expected no active worktrees after rollback; found %s in %s", wt.ID, wt.Path)
 		}
+		if _, statErr := os.Stat(wt.Path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("newly-created worktree path %q remains after rollback: stat error = %v", wt.Path, statErr)
+		}
 	}
 }
 
