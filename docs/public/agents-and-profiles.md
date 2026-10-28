@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, plugins, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -51,6 +51,18 @@ Kandev currently uses `@openai/codex` version `0.154.0` as its managed default. 
 Native sessions show response and turn token usage in the chat footer. A provider thread usage estimate may appear when Codex reports one. It is an estimate, not a promise of the billed charge. Kandev keeps provider estimates separate from calculated cost.
 
 After a completed turn, use **Fork conversation** to create another session through that turn. The new session keeps the task and executor, and files remain shared in the workspace. It does not create a branch or worktree. Native Codex subagents and background commands stay within the session; they do not become separate Kandev tasks.
+
+### Inspect agent background work
+
+Agents that report background shell commands, subagents, or monitors feed the shared background-work chip above the message box. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
+
+Provider support differs, and Kandev shows only what the connected runtime verifies:
+
+- **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
+- **OpenCode ACP** reports a detached shell launch with its native shell identity. The supported OpenCode versions end their ACP subscription with the foreground prompt, so Kandev keeps the launch inspectable but marks its later activity unknown instead of promising completion, live output, or controls. The original launch banner stays in the tool message.
+- **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
+
+A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
 
@@ -930,6 +942,57 @@ The shared auth file is keyed by MCP server name. Kandev does not compare server
 
 To stop sharing, clear the option and launch that profile again. That launch removes only the Kandev-created link for its project. Running processes keep credentials they already loaded. Cursor may refresh credentials through the link, but Kandev does not copy refreshed credentials back to source projects. A later launch rebuilds the shared file from those source projects. Kandev preserves a native-refreshed credential while its original source remains unchanged. Changed or removed source credentials invalidate that preservation; Kandev does not treat an old shared snapshot as an independent source.
 
+### Load Copilot plugins for a profile
+
+On a saved Copilot profile, open **Plugins** and choose **Refresh plugins**.
+Kandev runs the profile's selected Copilot CLI with its effective home, path,
+and resolved secret references. The list shows installed plugins, their
+marketplace and version, and the CLI's own enabled status. A plugin that the CLI
+has disabled is still selectable here: this checkbox means "load this plugin
+for this Kandev profile", not "enable it globally".
+
+Kandev can discover installed plugins and save a selection on a profile. Native
+plugin mounting is currently fail-closed: a new local or worktree process with
+a nonempty saved selection returns `policy_unverified`. Kandev has not yet
+established with authenticated native fixtures that an explicit
+`--plugin-dir` mount preserves Copilot's MCP disables and managed prohibitions.
+Discovery, save, Reset, and removal remain available while that qualification
+is outstanding.
+
+When native mounting is enabled, a selection will load the whole plugin through
+Copilot's native `--plugin-dir` support. A plugin can run MCP servers, skills,
+agents, commands, hooks, and other executable components. Loading is additive.
+Copilot can still load other plugins that its own configuration enables, so
+this is not an exclusive whitelist. Review a plugin's publisher and contents
+before selecting it.
+
+Selections are stored on the profile and apply when the next Copilot process
+starts. Saving a profile does not reload or stop a running process; that
+process keeps the plugins it started with. Missing plugins stay visible and can
+be unchecked. A new process does not start while a saved selection is missing,
+unresolvable, or policy-unqualified.
+
+Profile plugin loading is limited to local and worktree executions. Profiles
+with a nonempty selection cannot start on Docker, SSH, Kubernetes, Sprites, or
+another isolated executor; clear the selection or use a local executor.
+Profiles with no selected plugins keep their existing behavior on every
+executor.
+
+Copilot's native authentication, MCP disables, tool permissions, and managed
+policy remain authoritative. Kandev does not copy credentials, start a login,
+install, enable, disable, or update plugins, or reuse plugin MCP definitions as
+Kandev-managed servers. Use Copilot's own commands for plugin management.
+
+Kandev currently qualifies inventory discovery for managed Copilot 1.0.88 and
+1.0.104. Another selected runtime shows an unsupported message instead of
+falling back to an unrelated global CLI. The command preview shows the base
+command and marks it incomplete when plugin mounts are deferred to process
+start; it never shows resolved host directories.
+
+If refresh fails, Kandev keeps your saved choices and says availability was not
+checked. You can still remove a choice. The profile's normal **Save**, **Reset**,
+and external-change recovery flow applies to plugin changes.
+
 <details>
 <summary>Configure workspace MCP servers</summary>
 
@@ -948,6 +1011,33 @@ Add non-secret settings and bind required values to workspace secrets. Saving a 
 The **Marketplace** view combines Kandev-curated templates with cached public Registry discovery. Registry metadata is publisher supplied and is not a Kandev security review. Review the publisher, transport, endpoint or exact package version, requested settings, and secret bindings before selecting **Add MCP server**. A marketplace action stores the reviewed workspace definition only; it does not install or start the server.
 
 If public Registry discovery is unavailable, Kandev shows the most recent successful cache and marks it stale or degraded. Deprecated or deleted entries cannot be added from the marketplace. Existing configured servers remain available until you edit or disable them.
+
+After registration, **Done** leaves the definition saved without selecting it.
+Choose **Use in** from the saved confirmation or a catalog card to find a
+repository, an enabled profile, or an existing task session in this workspace.
+Review the scope before opening its MCP settings. Opening settings highlights
+an available definition once; it never checks its box or saves a selection.
+Global profiles still require this explicit workspace context. If discovery or
+navigation fails, the saved definition remains in **Configured** for another
+attempt. A session destination waits for you to open the plug menu and
+**Customize**. Repository and profile changes use **Save changes**; explicit
+session selections save automatically and retain normal provider timing.
+
+## Find where a server is selected
+
+In **Configured**, choose **Used in** on a saved server. The list names the
+profiles, repositories, tasks, and sessions you can access that directly select
+that definition. Open an owner to reach its existing settings or conversation.
+Opening a link does not change any selection. A session link opens that exact
+conversation; use its composer plug to customize MCP servers. A workspace-owned
+profile opens its MCP selection card in that workspace, even when it is absent
+from the global agent-profile list. These choices use the shared **Save changes**
+control. Other profile configuration stays in its existing settings surface.
+
+Use **Load more** for further results. If refreshing fails, retry before opening
+an owner from the old list. No visible selections does not mean no other owner
+uses the server: access permissions can limit the list. Inherited use and
+connection evidence remain in the session.
 
 ## Select workspace MCP servers for agents
 
@@ -999,7 +1089,39 @@ is idle. Providers without safe reconnection apply saved changes when the agent
 starts again. The state notice tells you which timing applies. If reconnect
 fails, the previous applied selection remains active and the UI offers retry.
 
-Existing legacy profile MCP JSON is imported into workspace definitions when possible. During migration, the legacy profile configuration remains the fallback for a profile-workspace pair that has not imported successfully. New persistent profile selections use the workspace catalog.
+If another editor changes the saved choices, Kandev rejects your stale save.
+Choose **Reload choices**, review your retained draft against the latest saved
+choices, then save again. A save whose response is lost also requires a reload
+before another attempt.
+
+Repository and profile editors use **Save changes**. Session Customize saves
+after an explicit selection change.
+
+Application retry remains available for a saved session setup that failed to apply.
+The pending-change list continues to describe the saved choices while a rejected
+checkbox draft remains visible.
+
+In the existing task editor, a failed MCP save also exposes **Reload choices**.
+Reload keeps your task fields and MCP draft. Submit the task again only after
+you review those choices.
+
+
+For a saved global profile, **Workspace** selects the catalog context without
+changing your active workspace. If settings have unsaved changes, switching
+workspaces offers Save and leave, Discard and leave, or continued editing.
+A failed save keeps the current workspace and draft. Repository and profile
+choices still use the shared **Save changes** action. If a Used in list cannot
+refresh, its retained rows stay unavailable until Retry succeeds. A failed
+Load more request keeps earlier accepted links available. Opening a session
+link after a temporary read failure offers Retry for that same conversation. Profile MCP choices appear
+as one searchable checkbox list below the workspace selector on desktop and
+phone. To edit catalog definitions, open **Settings > Workspaces > _workspace_ >
+MCP servers**.
+
+Existing legacy profile MCP JSON is imported into workspace definitions when possible. During migration, the legacy profile configuration remains the fallback for a profile-workspace pair that has not imported successfully. New persistent profile selections use the workspace catalog. If import is not
+confirmed, callers with global configuration permission can open **Global profile
+legacy configuration**. Those settings apply to the global profile and save
+separately from workspace selections.
 
 </details>
 
@@ -1040,8 +1162,11 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
   omitted, such as an unsupported HTTP transport. The desktop hover and phone
   drawer separate **Saved changes** from **Current agent** evidence.
   Red identifies an explicit sanitized error. **Delivered, connection
-  unverified** applies to a profile server that connects directly to the agent.
-  Kandev cannot inspect that server's tools. Inspect the affected session
+  unverified** uses neutral styling: configuration reached the agent, but
+  connection has not been observed. A configured server without delivery
+  evidence remains **Unknown**, even beside an active server. These
+  neutral states can appear alongside saved changes waiting to apply. For a
+  profile server that connects directly to the agent, Kandev cannot inspect its tools. Inspect the affected session
   because each report belongs to one session and execution.
 - **Automation cannot select a profile:** passthrough agent profiles and Local executor profiles are intentionally omitted from the automation selectors.
 

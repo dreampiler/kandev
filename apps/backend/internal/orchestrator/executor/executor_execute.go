@@ -2260,7 +2260,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if hasRunning {
 			result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 				launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-				opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+				opts.OnExecutionAdmitted, opts.OnStartAttemptClaimed, opts.BeforeInitialPromptDispatch,
 				opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 				opts.RefuseIfAgentRunning, opts.TurnID,
 			)
@@ -2541,7 +2541,7 @@ func (e *Executor) handleLaunchFailure(
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr,
+		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
@@ -2559,8 +2559,24 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
+	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
+	if loadErr != nil || session == nil || session.TaskID != taskID {
+		if loadErr != nil {
+			e.logger.Warn("failed to load session before recording early launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(loadErr))
+		}
+		return routingerr.SanitizeError(launchErr)
+	}
+	switch session.State {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput:
+	default:
+		return routingerr.SanitizeError(launchErr)
+	}
+	expectedState := session.State
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, "", launchErr,
+		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
 		return safeErr
@@ -2610,6 +2626,7 @@ func (e *Executor) transitionLaunchFailure(
 	failCtx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
+	expectedState *models.TaskSessionState,
 ) (error, bool) {
 	safeErr := routingerr.SanitizeError(launchErr)
 	e.logger.Error("failed to launch agent",
@@ -2627,7 +2644,7 @@ func (e *Executor) transitionLaunchFailure(
 		}
 	}
 	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, nil, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+		failCtx, taskID, sessionID, expectedState, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
@@ -3116,7 +3133,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -3129,6 +3146,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	onStartAttemptClaimed func(string),
 	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
@@ -3227,6 +3245,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		return nil, err
+	}
+	if onStartAttemptClaimed != nil {
+		onStartAttemptClaimed(startAttemptID)
 	}
 	if prompt != "" || len(request.Attachments) > 0 {
 		if err := e.registerInitialPromptCallbacks(

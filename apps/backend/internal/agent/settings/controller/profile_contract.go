@@ -29,6 +29,7 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
 		MCPSelectionMode:        request.MCPSelectionMode,
 		MCPSelectedServers:      request.MCPSelectedServers,
+		CopilotSelectedPlugins:  request.CopilotSelectedPlugins.Pointer(),
 		Dynamic:                 request.Dynamic,
 	}
 }
@@ -61,6 +62,7 @@ func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfile
 		CursorPluginsMCPEnabled: request.CursorPluginsMCPEnabled,
 		MCPSelectionMode:        request.MCPSelectionMode,
 		MCPSelectedServers:      request.MCPSelectedServers,
+		CopilotSelectedPlugins:  request.CopilotSelectedPlugins.Pointer(),
 		Dynamic:                 request.Dynamic,
 		Force:                   request.Force,
 	}

@@ -82,6 +82,10 @@ const (
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
+	// EventTypePromptSuggestion carries the agent's native prediction of the
+	// user's next prompt, emitted after a turn completes. Text holds it.
+	EventTypePromptSuggestion = "prompt_suggestion"
+
 	// EventTypeResponseAttemptReset indicates that the provider abandoned its
 	// current response attempt and will continue the active prompt with a new one.
 	EventTypeResponseAttemptReset = "response_attempt_reset"
@@ -238,6 +242,10 @@ type AgentEvent struct {
 	// RecoveredActivityAt is replay context, excluded from durable payload identity.
 	RecoveredActivityAt *time.Time `json:"-"`
 
+	// CanonicalMessageBaseID is the stable identity before segment-boundary
+	// resolution. Retries always derive from this value, never a resolved ID.
+	CanonicalMessageBaseID string `json:"canonical_message_base_id,omitempty"`
+
 	// CanonicalMessageID is assigned by the backend inbox projector for output
 	// events. It is stable across reconnects and is not a transport cursor.
 	CanonicalMessageID string `json:"canonical_message_id,omitempty"`
@@ -292,6 +300,10 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
+
+	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
+	// New producers leave this read-compatibility field unset.
+	ToolOutputBytes *uint64 `json:"tool_output_bytes,omitempty"`
 
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.
@@ -460,6 +472,10 @@ type AgentEvent struct {
 	// does not by itself promise the agent will fold that prompt into the running
 	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
+
+	// SupportsPromptSuggestions indicates this session asked a Claude Code agent
+	// for native next-prompt suggestions. Only such sessions show suggestions.
+	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`

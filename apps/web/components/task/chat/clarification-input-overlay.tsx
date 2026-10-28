@@ -30,7 +30,7 @@ import {
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { QuestionImages } from "./question-images";
-import { useQuestionImageDraft } from "./question-image-draft-context";
+import { useClarificationDraft } from "./clarification-draft-context";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -39,6 +39,7 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  previewsEnabled?: boolean;
   /** True when the session no longer has a live clarification waiter. */
   agentDisconnected?: boolean;
   // Called when the user presses Escape. Unlike Skip, this must not answer or
@@ -47,6 +48,10 @@ type ClarificationInputOverlayProps = {
   onDismiss: () => void;
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
+  onExpandPanel?: () => void;
+  onResetPanel?: () => void;
+  canExpandPanel?: boolean;
+  canResetPanel?: boolean;
   collapseContentId?: string;
   // Additive: reports every settled submission outcome, distinct from
   // onResolved's narrower "this caller's own answer landed" signal. The
@@ -123,6 +128,7 @@ function computeAllAnswered(
 }
 
 type CardProps = {
+  previewsEnabled: boolean;
   onInspectionChange: (open: boolean) => void;
   meta: SingleQuestionMeta;
   index: number;
@@ -181,19 +187,20 @@ function ClarificationCard(props: CardProps) {
           )}
         </div>
       )}
-      <QuestionImages
-        pendingId={metadata.pending_id}
-        questionId={meta.questionId}
-        sessionId={meta.message.session_id}
-        images={question.images}
-        onInspectionChange={props.onInspectionChange}
-      />
       <ClarificationMarkdown
         variant="block"
         className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       >
         {question.prompt}
       </ClarificationMarkdown>
+      <QuestionImages
+        pendingId={metadata.pending_id}
+        questionId={meta.questionId}
+        sessionId={meta.message.session_id}
+        images={question.images}
+        enabled={props.previewsEnabled}
+        onInspectionChange={props.onInspectionChange}
+      />
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
@@ -207,6 +214,7 @@ function ClarificationCard(props: CardProps) {
               questionId={meta.questionId}
               sessionId={meta.message.session_id}
               images={option.images}
+              enabled={props.previewsEnabled}
               onInspectionChange={props.onInspectionChange}
             />
           ) : null
@@ -407,6 +415,7 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 }
 
 type CarouselBodyProps = {
+  previewsEnabled: boolean;
   onInspectionChange: (open: boolean) => void;
   sortedMessages: Message[];
   meta: SingleQuestionMeta | null;
@@ -548,6 +557,7 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
   };
 }
 function ClarificationCarouselBody({
+  previewsEnabled,
   onInspectionChange,
   sortedMessages,
   meta,
@@ -598,6 +608,7 @@ function ClarificationCarouselBody({
   return (
     <>
       <ClarificationCard
+        previewsEnabled={previewsEnabled}
         onInspectionChange={onInspectionChange}
         meta={meta}
         index={activeIndex}
@@ -650,9 +661,14 @@ export function ClarificationInputOverlay({
   initialAnswers,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  previewsEnabled = true,
   agentDisconnected = false,
   onDismiss,
   onCollapse,
+  onExpandPanel,
+  onResetPanel,
+  canExpandPanel,
+  canResetPanel,
   collapseContentId,
   lateAnswerState,
 }: ClarificationInputOverlayProps) {
@@ -681,19 +697,9 @@ export function ClarificationInputOverlay({
   const draftKey = group.pendingId
     ? JSON.stringify([sortedMessages[0]?.session_id, group.pendingId, mode])
     : null;
-  const retainDraft =
-    !lateMode &&
-    sortedMessages.some((message) => {
-      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      return Boolean(
-        metadata?.question?.images?.length ||
-        metadata?.question?.options?.some((option) => option.images?.length),
-      );
-    });
   const { customDrafts, setCustomDrafts, rawActiveIndex, setActiveIndex, savedAnswers } =
-    useQuestionImageDraft(
+    useClarificationDraft(
       draftKey,
-      retainDraft,
       group.answers,
       group.submitState === "ok" || group.submitState === "expired",
     );
@@ -833,6 +839,10 @@ export function ClarificationInputOverlay({
         lateMode={lateInteraction}
         onLateClose={onDismiss}
         onCollapse={onCollapse}
+        onExpandPanel={onExpandPanel}
+        onResetPanel={onResetPanel}
+        canExpandPanel={canExpandPanel}
+        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
       />
       {group.submitState === "error" && (
@@ -844,14 +854,12 @@ export function ClarificationInputOverlay({
           <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
         )}
       {sharedContext && (
-        <div
-          data-testid="clarification-context"
-          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap text-[13px]"
-        >
-          {sharedContext}
+        <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
+          <ClarificationMarkdown variant="context">{sharedContext}</ClarificationMarkdown>
         </div>
       )}
       <ClarificationCarouselBody
+        previewsEnabled={previewsEnabled}
         onInspectionChange={setInspectingImage}
         sortedMessages={sortedMessages}
         meta={meta}

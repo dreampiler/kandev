@@ -95,6 +95,8 @@ tabs or close the view.
 
 Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.
 
+If Kandev recognizes a terminal rate-limit error that it can retry safely, Quick Chat retries the accepted message up to five times. A status card shows progress and lets you cancel.
+
 Configuration Chat does not use repository selections. Its existing workspace permissions and Settings entry point remain in effect.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
@@ -155,7 +157,17 @@ Set a global **Default utility agent profile** by choosing an enabled, global, A
 
 You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
 
+Disabling a custom utility blocks new calls until it is re-enabled; calls already admitted continue.
+
 Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
+
+### Prompt suggestions
+
+Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** to see the reply you are most likely to send next as dimmed text in the empty chat composer of a task or Quick Chat. Press **Tab** (or tap **Use reply** on a phone) to fill it in for editing, press your submit shortcut to send it as is, or press **Escape** to dismiss it. Typing hides the suggestion; clearing the composer shows it again until the next turn.
+
+Suggestions come only from agents with native support. Today that means sessions that run Claude Code, whether the Claude agent or a custom ACP agent that wraps Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache. Kandev detects Claude Code from the agent's ACP handshake, so the model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a Claude session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
+
+Kandev never generates a suggestion of its own. For agents without native support, and for turns where Claude Code stays silent, the composer works as usual.
 
 ### Configuration Chat
 
@@ -294,6 +306,8 @@ For an idle, non-archived task with a prepared workspace, **Files → + → Add 
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
+On desktop and tablet, renaming or moving a file or its containing folder in **Files** keeps an open editor's unsaved text attached to the new path. Save writes that text to the renamed file. The editor's undo history may reset after a rename. If the destination is already open in a different editor, close that editor and retry. Renames made outside **Files** are not tracked by this behavior. The phone file viewer is read-only.
+
 In the desktop file editor, an agent change detected while you have local edits
 keeps your text and offers **Reload** to use the detected agent version. If a
 save is still finishing, its receipt does not dismiss a newer detected version.
@@ -326,7 +340,7 @@ Open the context menu on any file or folder in the Files tree: right-click on de
 
 **VS Code (Embedded)** runs code-server inside the active task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local, Kubernetes, and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported execution platform and access to the [code-server release](https://github.com/coder/code-server/releases/tag/v4.130.0). Native Windows Local and Worktree sessions do not support this integration. Linux-backed Local Docker, Kubernetes, Sprites, and supported SSH sessions can offer it even when the Kandev app runs on Windows. The task-detail topbar follows the active session's executor capability, never the visitor's browser platform; other configured editors remain available. Use the panel error and task-environment logs when installation, startup, or proxying fails.
 
-Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
+Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder. External-editor file actions use the file's repository worktree when it can be identified. If the repository target is unavailable or ambiguous, those editor actions are disabled until it can be resolved.
 
 Open **Settings > Preferences > Terminal & Editors** (`/settings/preferences/terminal-editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
 
@@ -397,6 +411,8 @@ to the selected executor instead. The environment is fixed when the PTY starts, 
 terminal after a session resume or credential-policy change.
 
 On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions can appear in the same menu for reopening. The tab context menu offers **Rename** and **Terminate**, not a separate Close action. Selecting the tab's **X** deletes the terminal and asks for confirmation when it is busy. Removing the panel through layout management can instead park it and keep its PTY alive; terminating a live terminal or deleting a parked entry destroys it. On mobile, select **Terminal** in task navigation and use the terminal picker to create another.
+
+When you scroll up in a task terminal or desktop dev-server output, select **Jump to latest output** to return to the newest output. The action disappears at the bottom. New output does not pull you away from the scrollback you are reading.
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
 
