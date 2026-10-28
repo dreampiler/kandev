@@ -27,6 +27,10 @@ func parkCeilingDeferredRun(t *testing.T, svc *service.Service) *runsmodels.Run 
 	require.NoError(t, svc.RepoForTest().ParkRunForProviderCapacity(
 		context.Background(), run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
 	))
+	svc.AppendRunEvent(context.Background(), run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
 	return run
 }
 
@@ -98,6 +102,37 @@ func TestAgentReadyMismatchedAgentDoesNotSettleCeilingDeferredRun(t *testing.T) 
 		TaskID:         "t-cap",
 		SessionID:      "session-1",
 		AgentProfileID: "other-agent",
+		CausingRunID:   run.ID,
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
+}
+
+func TestAgentReadyWithoutCeilingDeferralMarkerDoesNotSettle(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := &runsmodels.Run{
+		AgentProfileID: "missing-agent",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"t-cap"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	require.NoError(t, svc.RepoForTest().CreateRun(ctx, run))
+	require.NoError(t, svc.RepoForTest().ParkRunForProviderCapacity(
+		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
+	))
+
+	// No ceiling-deferral marker was recorded: a normal task-owned ready event
+	// must not release this generic action-required park.
+	require.NoError(t, eb.Publish(ctx, events.AgentReady, bus.NewEvent(events.AgentReady, "test", lifecycle.AgentEventPayload{
+		TaskID:         "t-cap",
+		SessionID:      "session-1",
+		AgentProfileID: "missing-agent",
 		CausingRunID:   run.ID,
 	})))
 

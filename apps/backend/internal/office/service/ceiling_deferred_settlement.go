@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -61,9 +62,38 @@ func (s *Service) settleCeilingDeferredLaunchOnReady(
 	if data == nil || data.TaskID == "" || data.CausingRunID == "" || data.SessionID == "" {
 		return nil
 	}
+	deferred, err := s.isCeilingDeferredRun(ctx, data.CausingRunID)
+	if err != nil {
+		return err
+	}
+	if !deferred {
+		return nil
+	}
 	return s.settleCeilingDeferredRun(
 		ctx, data.TaskID, data.CausingRunID, data.SessionID, data.TurnID, data.AgentProfileID,
 	)
+}
+
+// isCeilingDeferredRun reports whether the run's latest event is the durable
+// ceiling-deferral marker. The ready recovery accepts only this marker, so a
+// normal launch's ready event cannot release a run parked for another reason.
+func (s *Service) isCeilingDeferredRun(ctx context.Context, runID string) (bool, error) {
+	events, err := s.repo.ListRunEvents(ctx, runID, -1, 0)
+	if err != nil {
+		return false, err
+	}
+	if len(events) == 0 {
+		return false, nil
+	}
+	latest := events[len(events)-1]
+	if string(latest.EventType) != "adapter.invoke" {
+		return false, nil
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(latest.Payload), &payload); err != nil {
+		return false, nil
+	}
+	return payload["phase"] == "deferred" && payload["reason"] == "session_ceiling", nil
 }
 
 // CeilingDeferredLaunchDropped fails the Office run whose deferred launch the
