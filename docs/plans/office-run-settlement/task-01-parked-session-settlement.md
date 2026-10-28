@@ -83,3 +83,10 @@ repository 5.705s. The selection includes the original park, cancellation,
 missing-execution, stale teardown, duplicate launch, error extraction, retained
 failure and task-state ownership controls. Documentation coverage is covered;
 publication uses the normal commit hooks.
+
+After the normal upstream merge, the focused race selection passed again on
+the updated backend and dependencies: Office service 2.135s, orchestrator
+2.506s and SQLite repository 2.900s. The configuration conflict retains both
+the existing Office verdict flag and the incoming background-work flag. The
+new merged packages also prepared their normal fts5/e2e test exports before
+the normal merge hooks; this preparation does not execute test assertions.

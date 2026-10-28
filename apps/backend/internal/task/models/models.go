@@ -1159,6 +1159,10 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // attempt identity.
 const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
+// SessionMetaKeyQuickChatStartAttemptID identifies the request-level owner of
+// a deferred Quick Chat start until its accepted lifecycle transition settles.
+const SessionMetaKeyQuickChatStartAttemptID = "quick_chat_start_attempt_id"
+
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
@@ -1361,12 +1365,13 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
-	StepID     string    `json:"step_id"`
-	Source     string    `json:"source"`
-	Summary    string    `json:"summary"`
-	Handoff    string    `json:"handoff,omitempty"`
-	Blockers   string    `json:"blockers,omitempty"`
-	SignaledAt time.Time `json:"signaled_at"`
+	WorkflowStepTransitionID *int64    `json:"workflow_step_transition_id,omitempty"`
+	StepID                   string    `json:"step_id"`
+	Source                   string    `json:"source"`
+	Summary                  string    `json:"summary"`
+	Handoff                  string    `json:"handoff,omitempty"`
+	Blockers                 string    `json:"blockers,omitempty"`
+	SignaledAt               time.Time `json:"signaled_at"`
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
@@ -1486,7 +1491,7 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 	}
 	switch v := raw.(type) {
 	case PendingStepCompletionSignal:
-		return v, true
+		return v, v.StepID != "" && (v.WorkflowStepTransitionID == nil || *v.WorkflowStepTransitionID >= 0)
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
 			StepID:   StringFromAny(v["step_id"]),
@@ -1494,6 +1499,13 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 			Summary:  StringFromAny(v["summary"]),
 			Handoff:  StringFromAny(v["handoff"]),
 			Blockers: StringFromAny(v["blockers"]),
+		}
+		if raw, present := v["workflow_step_transition_id"]; present {
+			entry, valid := WorkflowEntryIDFromAny(raw)
+			if !valid {
+				return PendingStepCompletionSignal{}, false
+			}
+			out.WorkflowStepTransitionID = &entry
 		}
 		if ts, ok := v["signaled_at"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
@@ -1628,6 +1640,21 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+
+	// CreationAttachmentClaim carries the authenticated file-backed set that
+	// must be claimed in the same transaction as this task row. It is internal
+	// insertion input: public metadata can never populate it.
+	CreationAttachmentClaim *TaskCreationAttachmentClaim `json:"-"`
+}
+
+// TaskCreationAttachmentClaim is the ordered, authenticated creation
+// attachment set admitted with a task insert. Only identity, ownership, and
+// order live here; canonical metadata and bytes stay in the attachment
+// registry.
+type TaskCreationAttachmentClaim struct {
+	OwnerID     string
+	WorkspaceID string
+	IDs         []string
 }
 
 const (

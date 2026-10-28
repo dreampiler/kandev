@@ -881,13 +881,18 @@ type mcpRepositoryInput struct {
 
 // handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
+	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them.
 	var req mcpCreateTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+	if req.Priority != "" {
+		if err := service.ValidateTaskPriority(req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 	}
 	if req.AssigneeAgentProfileID != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "assignee_agent_profile_id is office-only and cannot be set via create_task_kandev", nil)
@@ -1049,24 +1054,27 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		})
 	}
 	createReq := &service.CreateTaskRequest{
-		ParentID:               req.ParentID,
-		WorkspaceID:            req.WorkspaceID,
-		WorkflowID:             req.WorkflowID,
-		WorkflowStepID:         resolvedStepID,
-		Title:                  req.Title,
-		Description:            req.Description,
-		Autopilot:              req.Autopilot,
-		Repositories:           repos,
-		BlockedBy:              req.BlockedBy,
-		StartWhenUnblocked:     req.StartWhenUnblocked,
-		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
-		Metadata:               metadata,
-		DeferredLaunch:         deferredLaunch,
-		StartAgent:             startAgent,
-		ExecutorID:             launchConfig.ExecutorID,
-		ExecutorProfileID:      launchConfig.ExecutorProfileID,
-		ExternalID:             req.ExternalID,
-		WorkspacePolicy:        &workspacePolicy,
+		ParentID:                  req.ParentID,
+		WorkspaceID:               req.WorkspaceID,
+		WorkflowID:                req.WorkflowID,
+		WorkflowStepID:            resolvedStepID,
+		Title:                     req.Title,
+		Description:               req.Description,
+		Priority:                  req.Priority,
+		Autopilot:                 req.Autopilot,
+		Repositories:              repos,
+		BlockedBy:                 req.BlockedBy,
+		StartWhenUnblocked:        req.StartWhenUnblocked,
+		AssigneeAgentProfileID:    req.AssigneeAgentProfileID,
+		Metadata:                  metadata,
+		DeferredLaunch:            deferredLaunch,
+		StartAgent:                startAgent,
+		ExecutorID:                launchConfig.ExecutorID,
+		ExecutorProfileID:         launchConfig.ExecutorProfileID,
+		ExecutorProfileIDExplicit: req.ExecutorProfileID != "",
+		ExternalID:                req.ExternalID,
+		WorkspacePolicy:           &workspacePolicy,
+		MCPServerIDs:              req.MCPServerIDs,
 	}
 	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
@@ -2113,6 +2121,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		TaskID               string  `json:"task_id"`
 		Title                *string `json:"title"`
 		Description          *string `json:"description"`
+		Priority             *string `json:"priority"`
 		State                *string `json:"state"`
 		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
@@ -2122,16 +2131,16 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-
-	// Applied before the ordinary field update so a rejected prompt edit does
-	// not half-apply the call: a caller correcting a stale brief needs to know
-	// the prompt did not change, and a partially applied update hides that.
-	if req.DeferredLaunchPrompt != nil {
-		if errResp := h.applyDeferredLaunchPromptUpdate(ctx, msg, req.TaskID, *req.DeferredLaunchPrompt); errResp != nil {
-			return errResp, nil
+	if req.Priority != nil {
+		if err := service.ValidateTaskPriority(*req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 	}
-
+	if req.Title != nil {
+		if err := service.ValidateTaskTitle(*req.Title); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
 	var state *v1.TaskState
 	if req.State != nil {
 		normalized := normalizeTaskState(*req.State)
@@ -2141,9 +2150,18 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		state = &normalized
 	}
 
+	// All handler-owned validation runs first. Keep this write before the
+	// ordinary update so a rejected prompt edit does not apply other fields.
+	if req.DeferredLaunchPrompt != nil {
+		if errResp := h.applyDeferredLaunchPromptUpdate(ctx, msg, req.TaskID, *req.DeferredLaunchPrompt); errResp != nil {
+			return errResp, nil
+		}
+	}
+
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
+		Priority:    req.Priority,
 		State:       state,
 	})
 	if err != nil {
@@ -2595,7 +2613,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	launchStepID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	launchStepID, launchEntryID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
@@ -2616,23 +2634,27 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
 	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
-		StepID:     launchStepID,
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    boundedHandoff,
-		Blockers:   boundedBlockers,
-		SignaledAt: time.Now().UTC(),
+		WorkflowStepTransitionID: launchEntryID,
+		StepID:                   launchStepID,
+		Source:                   models.StepCompletionSourceAgent,
+		Summary:                  strings.TrimSpace(req.Summary),
+		Handoff:                  boundedHandoff,
+		Blockers:                 boundedBlockers,
+		SignaledAt:               time.Now().UTC(),
 	}
-	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
+	signal, stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
 		h.logger.Error("failed to persist step-completion signal",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
+		if errors.Is(err, taskrepo.ErrStepCompletionStale) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow entry changed before signal was recorded. No signal was recorded. Retrying in this turn cannot recover. End this turn and ask the user to resume this session for the current step. Do not move the task solely to bypass this error.", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
-		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, signal)
 	}
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
@@ -2702,65 +2724,6 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 			"so the signal will not move the task", true
 	}
 	return true, "", true
-}
-
-func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
-	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
-	if !ok {
-		return fallback, nil
-	}
-	turns, err := reader.ListTurnsBySession(ctx, sessionID)
-	if err != nil {
-		return "", err
-	}
-	if len(turns) == 0 {
-		return fallback, nil
-	}
-	latest := turns[len(turns)-1]
-	if latest == nil {
-		return "", errors.New("latest turn is missing")
-	}
-	if stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]); stepID != "" {
-		return stepID, nil
-	}
-	return "", errors.New("latest turn has no workflow-step stamp")
-}
-
-func (h *Handlers) claimStepCompletionSignal(
-	ctx context.Context,
-	taskID, sessionID, stepID string,
-	signal models.PendingStepCompletionSignal,
-) (bool, error) {
-	if claimer, ok := h.sessionRepo.(stepCompletionSignalClaimer); ok {
-		return claimer.SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
-			ctx, taskID, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
-		)
-	}
-	return h.sessionRepo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
-		ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, stepID, signal,
-	)
-}
-
-func (h *Handlers) handleDuplicateStepComplete(
-	ctx context.Context,
-	msg *ws.Message,
-	taskID, sessionID, stepID string,
-	session *models.TaskSession,
-) (*ws.Message, error) {
-	// If the initial snapshot already contained this step's signal, this is a
-	// retry after a possible publish failure and the event must be re-published
-	// while the session waits. If the initial snapshot was empty, another
-	// concurrent request won the claim and will publish the event itself.
-	existing, ok := models.LoadPendingStepSignal(session.Metadata)
-	if ok && existing.StepID == stepID && session.State == models.TaskSessionStateWaitingForInput {
-		if errMsg, err := h.publishStepCompletionEvent(ctx, msg, taskID, sessionID, stepID, existing); errMsg != nil {
-			return errMsg, err
-		}
-	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"accepted":   false,
-		mcpReasonKey: "already_signaled",
-	})
 }
 
 // resolveStepCompleteTarget loads the session + task the signal applies to
