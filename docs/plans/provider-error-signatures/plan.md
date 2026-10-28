@@ -1,8 +1,9 @@
 ---
 created: 2026-10-08
-status: implemented
+status: in_progress
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 legacy_specs: []
