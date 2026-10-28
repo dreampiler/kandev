@@ -5,10 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	"github.com/kdlbs/kandev/pluginsdk"
+	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -116,6 +120,71 @@ func TestExactEvidenceAndUsage(t *testing.T) {
 	if err != nil || len(unsupported.Items) != 1 || unsupported.Items[0].ProviderState != "unsupported" {
 		t.Fatalf("unsupported provider evidence = %+v, err=%v; want explicit unsupported state", unsupported.Items, err)
 	}
+}
+
+func TestExactChangeRequestEvidenceIncludesPluginRowsWithoutGitHub(t *testing.T) {
+	base := time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
+	task := &taskmodels.Task{ID: "task-one", WorkspaceID: "workspace-one", State: "in_progress", UpdatedAt: base}
+	data := &exactObservationTestData{fakeTaskDataSource: &fakeTaskDataSource{
+		workspaces:       []*taskmodels.Workspace{{ID: "workspace-one"}},
+		tasksByWorkspace: map[string][]*taskmodels.Task{"workspace-one": {task}},
+		tasksByID:        map[string]*taskmodels.Task{task.ID: task},
+	}}
+	host := newExactReadHost(t, data, []string{"tasks", "change_requests"},
+		[]string{"host.v2.read:tasks", "host.v2.read:change_requests"})
+	ledger := newChangeRequestEvidenceStore(t)
+	host.changeRequestsDep = func() *state.ChangeRequestStore { return ledger }
+	host.taskPRs = nil
+	host.taskPRsDep = nil
+	if _, _, err := ledger.ReportChangeRequest(context.Background(), state.ChangeRequestRecord{
+		InstallationID: host.installationID, WorkspaceID: "workspace-one", TaskID: task.ID,
+		ProviderID: "forgejo", ProviderHost: "forge.example.test", RepositoryID: "repo-one",
+		Number: 7, URL: "https://forge.example.test/acme/widgets/pulls/7", Title: "Fix it",
+		State: state.ChangeRequestStateMerged, MergedAt: base.Add(time.Minute).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("report change request: %v", err)
+	}
+
+	page, err := host.ListChangeRequestEvidence(context.Background(), pluginsdk.ExactChangeRequestEvidenceQuery{
+		RequestID: "plugin-evidence-no-github", WorkspaceID: "workspace-one", TaskIDs: []string{task.ID},
+		Page: pluginsdk.ExactReadPage{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("ListChangeRequestEvidence: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Provider != "forgejo" || page.Items[0].Number != 7 || page.Items[0].ProviderState != "available" {
+		t.Fatalf("plugin evidence = %+v, want the reported Forgejo row", page.Items)
+	}
+	if page.Items[0].FetchedAt == nil {
+		t.Fatal("plugin evidence lacks the observation time")
+	}
+
+	host.taskPRs = &stubPRSource{err: status.Error(codes.Unavailable, "github unavailable")}
+	page, err = host.ListChangeRequestEvidence(context.Background(), pluginsdk.ExactChangeRequestEvidenceQuery{
+		RequestID: "plugin-evidence-github-failed", WorkspaceID: "workspace-one", TaskIDs: []string{task.ID},
+		Page: pluginsdk.ExactReadPage{Limit: 10},
+	})
+	if err != nil {
+		t.Fatalf("ListChangeRequestEvidence with failed GitHub source: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Provider != "forgejo" {
+		t.Fatalf("plugin evidence after GitHub failure = %+v, want the plugin row without a GitHub row", page.Items)
+	}
+}
+
+func newChangeRequestEvidenceStore(t *testing.T) *state.ChangeRequestStore {
+	t.Helper()
+	connection, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open change request database: %v", err)
+	}
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = connection.Close() })
+	store, err := state.NewChangeRequestStore(db.NewPool(connection, connection))
+	if err != nil {
+		t.Fatalf("NewChangeRequestStore: %v", err)
+	}
+	return store
 }
 
 func TestExactUsageNilTotalsFailClosed(t *testing.T) {

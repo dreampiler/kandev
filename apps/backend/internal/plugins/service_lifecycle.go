@@ -110,6 +110,16 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 		s.notifyDeliverer()
 		return result, fmt.Errorf("plugins: disable aborted, could not purge plugin agent conversations: %w", err)
 	}
+	if rec.InstallationID != "" {
+		if err := s.deletePluginChangeRequests(context.Background(), rec.InstallationID); err != nil {
+			if setErr := s.SetStatus(id, StatusError); setErr != nil {
+				s.log.Warn("plugins: could not mark plugin errored after disable cleanup failure",
+					zap.String("plugin_id", id), zap.Error(setErr))
+			}
+			s.notifyDeliverer()
+			return result, fmt.Errorf("plugins: disable aborted, could not purge plugin task change requests: %w", err)
+		}
+	}
 	if rec.Status != StatusDisabled {
 		if err := s.SetStatus(id, StatusDisabled); err != nil {
 			return result, err
