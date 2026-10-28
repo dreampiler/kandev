@@ -209,8 +209,9 @@ of which resolve without a second contract:
   `missing` marker.
 - Vocabulary: no entry reports a non-empty status outside the closed set,
   including for an absent end; `blocks` entries report an empty one.
-- Archived predecessor reports `pending`, appears in the ref, and is absent from
-  a default list.
+- An archived predecessor appears in the ref and is absent from a default list.
+  Its status follows its persisted state: `COMPLETED` is `resolved`,
+  `FAILED`/`CANCELLED` are `failed`, and unfinished work is `pending`.
 
 ## Related decisions
 

@@ -791,9 +791,10 @@ own and never quietly drops the link.
 Three things clear it, all of them deliberate: retry the predecessor until it
 succeeds, remove the link over MCP, or start the dependent manually.
 
-An **archived** predecessor is treated as unfinished, not as failed and not as
-resolved, so archiving a task does not release the work waiting on it.
-**Deleting** a task does remove its links in both directions, and any dependent
+An **archived** predecessor keeps its outcome: **Completed** resolves the
+dependency, **Failed** or **Cancelled** keeps the dependent blocked, and
+unfinished work stays pending. Archiving does not remove the link.
+**Deleting** a task removes its links in both directions, and any dependent
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 

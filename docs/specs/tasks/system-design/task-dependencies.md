@@ -129,9 +129,9 @@ CHECK (task_id != blocker_task_id)
 
 - The row reads "`task_id` is blocked by `blocker_task_id`".
 - Edges are workspace-local: both tasks MUST belong to the same workspace.
-- No new column is added. Edge deletion on task delete/archive is enforced by
-  the owning repository, not by a SQLite `ON DELETE CASCADE`, because the table
-  predates the foreign key.
+- No new column is added. The owning repository removes edges on task deletion;
+  archiving preserves them. No SQLite `ON DELETE CASCADE` is used because the
+  table predates that foreign key.
 - The table currently ships from the Office repository's
   `createTaskExtensionTables`. Reading and writing it becomes a core task
   concern; the Office reader methods stay valid against the same rows.
