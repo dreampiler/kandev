@@ -21,6 +21,8 @@ const (
 	ChangeRequestStateClosed = "closed"
 )
 
+var ErrChangeRequestTaskConflict = errors.New("plugin task change request is associated with a different task")
+
 // ChangeRequestRecord is one Host-owned, plugin-reported task change request.
 // The row is keyed by the owning installation and workspace plus the plugin's
 // provider identity (provider id, repository id, number), so two plugins can
@@ -196,6 +198,9 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 		return ChangeRequestRecord{}, false, err
 	}
 	created := err != nil
+	if !created && existing.TaskID != record.TaskID {
+		return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
+	}
 	if record.State == ChangeRequestStateMerged && record.MergedAt == "" && (created || existing.MergedAt == "") {
 		return ChangeRequestRecord{}, false, errors.New("plugin task change request: merged state requires merged_at")
 	}
@@ -206,13 +211,19 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 			created_at, merged_at, closed_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(installation_id, workspace_id, provider_id, repository_id, number)
-		DO UPDATE SET task_id = excluded.task_id, provider_host = excluded.provider_host,
+		DO UPDATE SET provider_host = excluded.provider_host,
 			url = excluded.url, title = excluded.title,
 			state = CASE WHEN plugin_task_change_requests.state IN ('merged', 'closed')
 				THEN plugin_task_change_requests.state ELSE excluded.state END,
 			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
-			merged_at = CASE WHEN plugin_task_change_requests.merged_at <> '' THEN plugin_task_change_requests.merged_at ELSE excluded.merged_at END,
-			closed_at = CASE WHEN plugin_task_change_requests.closed_at <> '' THEN plugin_task_change_requests.closed_at ELSE excluded.closed_at END,
+			merged_at = CASE
+				WHEN plugin_task_change_requests.state = 'closed' THEN plugin_task_change_requests.merged_at
+				WHEN plugin_task_change_requests.merged_at <> '' THEN plugin_task_change_requests.merged_at
+				ELSE excluded.merged_at END,
+			closed_at = CASE
+				WHEN plugin_task_change_requests.state = 'merged' THEN plugin_task_change_requests.closed_at
+				WHEN plugin_task_change_requests.closed_at <> '' THEN plugin_task_change_requests.closed_at
+				ELSE excluded.closed_at END,
 			updated_at = excluded.updated_at
 	`), record.ID, record.InstallationID, record.WorkspaceID, record.TaskID, record.ProviderID, record.ProviderHost,
 		record.RepositoryID, record.Number, record.URL, record.Title, record.State, record.HeadBranch, record.BaseBranch,

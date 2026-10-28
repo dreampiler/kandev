@@ -410,7 +410,9 @@ with `RemoveTaskChangeRequestExact`. Writes require
 manifest digest. The reported `provider_id` must be one of the plugin's
 manifest-declared `repository_providers`; the task must exist in the same
 workspace and must not be archived. The identity is the owning installation,
-workspace, provider, immutable repository id, and change-request number. State
+workspace, provider, immutable repository id, and change-request number. The
+first report fixes the task association; another task cannot take over the row
+and must remove and report it instead. State
 is `open`, `merged`, or `closed`; merged and closed are terminal and their
 timestamps latch, so a stale report cannot reopen or unmerge a row. To reopen a
 change request, remove it and report it again. Every command carries an idempotency key and

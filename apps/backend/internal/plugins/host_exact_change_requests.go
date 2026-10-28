@@ -197,6 +197,9 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		HeadBranch: input.HeadBranch, BaseBranch: input.BaseBranch,
 		CreatedAt: input.CreatedAt, MergedAt: input.MergedAt, ClosedAt: input.ClosedAt,
 	})
+	if errors.Is(err, state.ErrChangeRequestTaskConflict) {
+		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandConflict, "task_changed", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
+	}
 	if err != nil {
 		return unavailableTaskChangeRequest("task_change_request_store_unavailable"), pluginsdk.TaskChangeRequest{}, nil
 	}

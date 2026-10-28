@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -187,5 +188,21 @@ func TestChangeRequestStoreClosedStateIsTerminal(t *testing.T) {
 	}
 	if !existed || reopened.State != ChangeRequestStateClosed || reopened.ClosedAt != closedAt {
 		t.Fatalf("stale reopen report = %+v, want closed with latched closed_at", reopened)
+	}
+}
+
+func TestChangeRequestStoreRejectsTaskReassignment(t *testing.T) {
+	store := newChangeRequestTestStore(t)
+	ctx := context.Background()
+	record := ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 13, State: ChangeRequestStateOpen,
+	}
+	if _, _, err := store.ReportChangeRequest(ctx, record); err != nil {
+		t.Fatalf("first report: %v", err)
+	}
+	record.TaskID = "task-2"
+	if _, _, err := store.ReportChangeRequest(ctx, record); !errors.Is(err, ErrChangeRequestTaskConflict) {
+		t.Fatalf("task reassignment error = %v, want ErrChangeRequestTaskConflict", err)
 	}
 }
