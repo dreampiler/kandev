@@ -108,3 +108,17 @@ the Windows process PATH; the original product reproduced the same failures
 fixtures pass. No product or assertion, global PATH or Git setting was changed.
 The minimum regressions are retained in existing test files. Documentation
 coverage is covered. Publication uses the normal commit hooks.
+
+## Recreation callback follow-up
+
+A session registration can recreate a missing directory even when the request
+has no WorktreeID. Successful recreation now emits the same physical-creation
+callback after persistence/cache, while valid retained reuse still emits none.
+The existing stale-reuse rollback test also covers this session-registration
+path and checks that the recreated directory and active registration are
+removed when the next repository fails.
+
+The published pre-fix behavior reproduced the active-registration leak in the
+valid existing-entrypoint case (5.135s). Candidate race checks passed with the
+existing fresh/reused/dirty-retained rollback and retained-registration controls:
+lifecycle 27.010s and worktree 50.019s. Publication uses normal commit hooks.

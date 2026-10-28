@@ -2422,6 +2422,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		m.mu.Unlock()
 	}
 
+	if req.OnWorktreeCreated != nil {
+		req.OnWorktreeCreated(existing)
+	}
+
 	m.logger.Info("recreated worktree",
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID),

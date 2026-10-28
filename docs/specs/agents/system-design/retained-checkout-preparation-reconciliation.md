@@ -46,7 +46,9 @@ cache key. No new receipt, owner claim or metadata-repair loop is introduced.
 ## Rollback ownership and canonical holder eligibility
 
 Only a physical creation callback marks a worktree as created by this request.
-Retained registration never emits that callback. Multi-repository rollback uses
+Successful recreation of a missing registered directory emits it after the
+record is persisted and cached. Retained registration never emits it.
+Multi-repository rollback uses
 that explicit result, including partially completed creation, so later failure
 removes new directories and preserves retained checkout contents and identity.
 
