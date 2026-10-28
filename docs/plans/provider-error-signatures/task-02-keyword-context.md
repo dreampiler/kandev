@@ -1,7 +1,20 @@
 ---
+id: "02-keyword-context"
+title: "Classify unmatched provider diagnostics using context"
 status: in_progress
+wave: 1
+depends_on: []
+plan: "plan.md"
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+acceptance_criteria:
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.1
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.2
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.3
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.4
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.5
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.6
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.7
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 ---
