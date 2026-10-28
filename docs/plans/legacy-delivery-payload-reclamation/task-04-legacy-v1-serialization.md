@@ -21,43 +21,59 @@ system_design:
 ## Outcome and owned change
 
 Retained events can contain `tool_output_bytes` from an older producer. The v1
-recipe decodes a typed `streams.AgentEvent` and re-encodes it. Dropping this
-formerly serialized field changes otherwise valid legacy normalization.
+recipe decodes a typed `streams.AgentEvent` and re-encodes it. A backend that did
+not know this field stored a payload and receipt hash without it. A newer backend
+must accept that receipt when it replays the original field-bearing journal event.
 
-Restore only the legacy read-compatibility `*uint64` field in
+Keep the legacy read-compatibility `*uint64` field in
 `apps/backend/internal/agentctl/types/streams/agent.go`, after `ToolStatus` and
-before `NormalizedPayload`. Current producers do not set it. Keep the existing
-normalization recipe, receipt validator, stored rows and lifecycle-field stripping.
+before `NormalizedPayload`. Current producers do not set it. Receipt comparison
+must validate the stored v1 hash against a supported canonical form, then compare
+the incoming event against the exact form or the form with only this field
+omitted. Keep the stored payload, hash, envelope checks and lifecycle-field
+stripping unchanged.
 
 ## Acceptance and exclusions
 
-1. Absent/nil keeps current serialized bytes unchanged. Present zero and nonzero
-   retain the historical key, unsigned value and relative serialization order.
-2. Decode/encode round trips preserve the known legacy field alongside the existing
-   normalized payload; malformed field types remain normal decoding errors.
-3. No progress/stall producer, format migration, permission, new setting, database
-   write, prompt replay, verification bypass or permanent test is added.
+1. Absent/nil keeps current serialized bytes unchanged. Present zero, nonzero and
+   the maximum unsigned value retain the historical key and serialization order.
+2. Decode/encode round trips preserve the field; invalid field types remain normal
+   decoding errors.
+3. Fixed v1 hash cases cover absent, null, zero, nonzero, maximum and invalid
+   values. Receipt tests cover field-less historical hashes, field-bearing hashes,
+   compacted receipts, replay, corruption and unchanged envelope/content guards.
+4. No progress/stall producer, format migration, permission, new setting, database
+   write, prompt replay or verification bypass is added.
 
-## Narrow confirmation and current results
+## Regression coverage and current results
 
-One-time fixtures live outside regular test collection and use a Go overlay in
-the existing `internal/agentctl/types/streams` package. They compare JSON bytes,
-field presence/order and round trips only, never compute or compare hashes.
-The prepared invocation, once the shared Go owner permits it, is:
+Permanent cases extend the existing stream payload and SQLite hash-comparison
+test files. They pin JSON
+serialization and order, fixed v1 digests, old-reader replay, exact field-bearing
+receipt checks, compaction hash preservation and replay after pruning. The tests
+also reject invalid field types, changed envelope/content and corrupt stored hashes.
 
-```sh
-go test -overlay <temporary-overlay.json> ./internal/agentctl/types/streams -run '^TestLegacyReceiptSerialization' -count=1
-```
+The proposed fixtures initially omitted the four capability booleans that the
+unchanged parent AgentEvent already serializes. Expected JSON and fixed v1
+vectors now include those existing false defaults. The existing hash framing was
+checked independently against those explicit bytes; the algorithm and runtime
+wire fields are unchanged. Capability changes remain conflicting normalized
+content, covered for all four fields.
 
-The unchanged-base overlay reproduced real JSON-contract failures: explicit zero
-and nonzero were dropped, and an invalid unsigned field was silently ignored.
-The absent-field control passed. The candidate passed all three serialization
-cases, malformed-field controls and the five existing normalized-payload round-trip
-subcases (0.024s package time). Formatting passed. No receipt hash was computed
-or compared, and no permanent test or runtime action was added.
+With valid fixtures, the original replay comparison rejects all three mixed-reader
+numeric cases (0.079s, no corrupt-receipt error). The corrected serialization,
+fixed-vector, replay, corruption and compaction controls pass under fts5/race
+detection (streams1.046s, SQLite1.908s). Hosted CI is separate. No stored receipt
+is rewritten, and this change does not perform a database repair or trigger
+runtime publication. The historical operating receipt failure remains unresolved
+until the corrected reader validates its separately owned sample; these fixtures
+are source compatibility evidence, not an operating repair result.
 
-This completes the local serialization change only. Preserve the original receipt
-failure as unresolved until the corrected binary's existing validation actually
-returns a result in the separately owned copy/maintenance work. Local JSON evidence
-is not database repair or compaction; publication and operating application remain
-with their existing owners.
+The raw Windows conformance run fails its existing POSIX-only temporary-path
+fixture; the old replay comparison reproduces that same storage CRUD failure
+(0.234s). With the prior disposable fixture changing only two path literals to
+filepath.Join(os.TempDir(), ...), full store conformance passes (56.795s).
+Product path validation and conformance assertions are unchanged. PostgreSQL
+test DSN is not configured in this execution environment, so this records SQLite
+coverage rather than a PostgreSQL run.
+The unchanged full SQL guard also passed for this candidate.
