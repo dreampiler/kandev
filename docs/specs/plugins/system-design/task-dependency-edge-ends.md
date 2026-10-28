@@ -162,8 +162,9 @@ confidentiality.
 A graph built from one page has ends the page does not contain. Three cases, all
 of which resolve without a second contract:
 
-- **Archived end.** An archived predecessor is `pending`, never `resolved`,
-  because archival is neither success nor failure. The default task list hides
+- **Archived end.** An archived predecessor keeps its persisted outcome:
+  `COMPLETED` is `resolved`, `FAILED`/`CANCELLED` are `failed`, and unfinished
+  work is `pending`. Archival alone never resolves work. The default list hides
   archived tasks, so such an end is named by the ref but absent from `items`. A
   non-redacted ref carries id, title, and state, which is enough to render the
   node; a consumer needing the whole task reads it by id or lists with
