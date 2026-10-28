@@ -187,6 +187,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft selection for a capability or model probe. Omit to use the saved value. */
+  copilot_selected_plugins?: string[];
 };
 
 export type ProfileCapabilityRequest = {
@@ -363,12 +365,21 @@ export type ListAvailableAgentsResponse = {
 
 // Clarification request types (for ask_user_question feature)
 export type ClarificationOption = {
+  images?: QuestionImage[];
   option_id: string;
   label: string;
   description: string;
 };
 
+export type QuestionImage = {
+  id: string;
+  path: string;
+  repo?: string;
+  alt: string;
+};
+
 export type ClarificationQuestion = {
+  images?: QuestionImage[];
   id: string;
   title: string;
   prompt: string;

@@ -478,6 +478,10 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+	// A session MCP selection may have arrived while this turn was active. The
+	// completion path transitions to Ready directly instead of going through
+	// MarkReady, so explicitly retry any deferred idle-session reconfiguration.
+	m.RequestSessionMCPReconfiguration(context.Background(), claim.execution.SessionID)
 }
 
 func completeEventStopReason(event *agentctl.AgentEvent) string {
@@ -1593,6 +1597,11 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypePromptSuggestion:
+		// Bound only to its originating prompt; an unknown origin gets no turn.
+		if event.TurnID == "" {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case streams.EventTypeUsageObservation:
 		if event.TurnID == "" {
 			if event.PromptGeneration != 0 {

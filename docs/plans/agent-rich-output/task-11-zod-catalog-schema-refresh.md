@@ -52,3 +52,20 @@ cd apps/web && pnpm exec tsx scripts/generate-rich-output-catalog.ts --check
   rerun with `NODE_OPTIONS` appended per invocation as
   `--max-old-space-size=6144` passed, including `rich-output:check` and
   `tsc --noEmit`.
+
+## Current upstream integration
+
+The normal merge of upstream `3a740c6911a340e73ade7edad6f4b234035f2fc9`
+keeps the current `@kdlbs/plugin-sdk` workspace name alongside the Zod upgrade.
+The only text conflict was in the lockfile importer; regenerating that lockfile
+with the repository's pnpm 9.15.9 preserves the incoming dependency declarations
+and resolves the compatible Zod consumers to 4.6.6.
+
+- Frozen-lockfile installation passed.
+- The generated catalog and guidance check passed without further artifact edits.
+- The same focused selection passed 8 files and 161 tests on the merged source.
+- The full typecheck passed with the existing process-local 6 GiB Node heap
+  allowance. No system configuration or check threshold changed.
+- The feature delta against that upstream commit remains the manifest, lockfile,
+  generated schema and existing delivery documentation. No replacement PR,
+  schema policy, UI behavior or operating change is introduced.
