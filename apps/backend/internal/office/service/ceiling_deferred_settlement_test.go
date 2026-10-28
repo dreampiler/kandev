@@ -7,6 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/service"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
@@ -46,6 +49,43 @@ func TestCeilingDeferredLaunchReplayedSettlesParkedRun(t *testing.T) {
 	got, err = svc.RepoForTest().GetRunByID(ctx, run.ID)
 	require.NoError(t, err)
 	require.Equal(t, "session-1", got.SessionID)
+}
+
+func TestAgentReadyRecoversCeilingDeferredRunSettlement(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentReady, bus.NewEvent(events.AgentReady, "test", lifecycle.AgentEventPayload{
+		TaskID:         "t-cap",
+		SessionID:      "session-1",
+		AgentProfileID: "missing-agent",
+		CausingRunID:   run.ID,
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusClaimed, string(got.Status))
+	require.Equal(t, "session-1", got.SessionID)
+	require.Nil(t, got.RoutingBlockedStatus)
+}
+
+func TestAgentReadyWithoutCausingRunLeavesCeilingDeferredRunParked(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentReady, bus.NewEvent(events.AgentReady, "test", lifecycle.AgentEventPayload{
+		TaskID:         "t-cap",
+		SessionID:      "session-1",
+		AgentProfileID: "missing-agent",
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
 }
 
 func TestCeilingDeferredLaunchDroppedFailsParkedRun(t *testing.T) {

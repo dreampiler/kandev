@@ -232,11 +232,14 @@ runs (routing additions)
   The deferral payload carries the Office run identity as `causing_run_id`.
   When the ceiling replay admits the launch, the run is bound to the replayed
   session and its routing block is cleared, so the ordinary lifecycle events
-  finish it. When the ceiling terminally drops the deferral, the run is failed
-  with the drop reason. If settlement cannot run, the run stays parked and
-  visible; an operator must not clear its routing block by hand, because a
-  manual clear re-queues the run and can launch it a second time. An explicit
-  discard action for the pending task deferral is a separate operator contract.
+  finish it. If that settlement write fails, the replayed launch's ready event
+  carries the same `causing_run_id` and retries the settlement, so the run is
+  not stranded after the deferral is cleared. When the ceiling terminally drops
+  the deferral, the run is failed with the drop reason. If both settlement
+  triggers fail, the run stays parked and visible; an operator must not clear
+  its routing block by hand, because a manual clear re-queues the run and can
+  launch it a second time. An explicit discard action for the pending task
+  deferral is a separate operator contract.
 
   ### `office_run_route_attempts` (per run, per attempt)
 

@@ -41,6 +41,20 @@ func (s *Service) CeilingDeferredLaunchReplayed(
 	return nil
 }
 
+// settleCeilingDeferredLaunchOnReady is the event-driven recovery path for a
+// ceiling replay whose synchronous settlement write failed. The replayed
+// launch's ready event carries the same Office causing run id, so the parked
+// row can be settled without a second launch. A normal task-owned launch is
+// already claimed and this is a no-op.
+func (s *Service) settleCeilingDeferredLaunchOnReady(
+	ctx context.Context, data *AgentLifecycleData,
+) error {
+	if data == nil || data.TaskID == "" || data.CausingRunID == "" || data.SessionID == "" {
+		return nil
+	}
+	return s.CeilingDeferredLaunchReplayed(ctx, data.TaskID, data.CausingRunID, data.SessionID, data.TurnID)
+}
+
 // CeilingDeferredLaunchDropped fails the Office run whose deferred launch the
 // ceiling terminally dropped, since no session will ever be created for it.
 // A run another path already settled is left untouched.

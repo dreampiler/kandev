@@ -160,17 +160,22 @@ type ApprovalResolvedData struct {
 // same identity, so taskless fallback resolution and summary writes use this
 // field, not AgentID.
 type AgentLifecycleData struct {
-	AgentExecutionID            string                 `json:"agent_execution_id"`
-	TaskID                      string                 `json:"task_id"`
-	RunID                       string                 `json:"run_id"`
-	RunSessionID                string                 `json:"run_session_id"`
-	RunAttempt                  int                    `json:"run_attempt"`
-	WorkspaceID                 string                 `json:"workspace_id"`
-	OwnerKind                   string                 `json:"owner_kind"`
-	AgentID                     string                 `json:"agent_id"`
-	AgentProfileID              string                 `json:"agent_profile_id"`
-	SessionID                   string                 `json:"session_id"`
-	TurnID                      string                 `json:"turn_id,omitempty"`
+	AgentExecutionID string `json:"agent_execution_id"`
+	TaskID           string `json:"task_id"`
+	RunID            string `json:"run_id"`
+	RunSessionID     string `json:"run_session_id"`
+	RunAttempt       int    `json:"run_attempt"`
+	WorkspaceID      string `json:"workspace_id"`
+	OwnerKind        string `json:"owner_kind"`
+	AgentID          string `json:"agent_id"`
+	AgentProfileID   string `json:"agent_profile_id"`
+	SessionID        string `json:"session_id"`
+	TurnID           string `json:"turn_id,omitempty"`
+	// CausingRunID is the Office run a task-owned launch serves. The lifecycle
+	// manager carries it on the launch's ready event, which gives Office a
+	// second, event-driven trigger to settle a ceiling-deferred run if the
+	// replay-success settlement write failed.
+	CausingRunID                string                 `json:"causing_run_id,omitempty"`
 	ErrorMessage                string                 `json:"error_message"`
 	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
@@ -318,7 +323,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
-		{events.AgentReady, maybeAsync(s.handleTasklessAgentReady)},
+		{events.AgentReady, maybeAsync(s.handleAgentReady)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
 		// signal "the agent is no longer running on this task and the
