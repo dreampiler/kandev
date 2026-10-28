@@ -262,6 +262,16 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflowWithRequirements(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string, requiredSubtasks int,
 ) (string, error) {
+	return a.CreateOfficeTaskInWorkflowWithContext(
+		ctx, workspaceID, assigneeAgentID, workflowID, title, description, routineID,
+		officeroutines.RoutineTaskOptions{ProjectID: projectID, RequiredSubtaskCount: requiredSubtasks},
+	)
+}
+
+func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflowWithContext(
+	ctx context.Context, workspaceID, assigneeAgentID, workflowID, title, description, routineID string,
+	options officeroutines.RoutineTaskOptions,
+) (string, error) {
 	metadata := map[string]interface{}{
 		// The Routine workflow's start step carries on_enter:
 		// auto_start_agent, but a materialized run lands directly on that
@@ -298,11 +308,12 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflowWithRequirements(
 		WorkflowID:             workflowID,
 		Title:                  title,
 		Description:            description,
-		ProjectID:              projectID,
+		ProjectID:              options.ProjectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Metadata:               metadata,
 		OfficeCarrierMetadata:  carrierMetadata,
-		RequiredSubtaskCount:   requiredSubtasks,
+		RequiredSubtaskCount:   options.RequiredSubtaskCount,
+		BlockedBy:              append([]string(nil), options.BlockedBy...),
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {

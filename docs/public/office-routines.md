@@ -34,6 +34,32 @@ Use a five-field cron expression such as `0 9 * * 1-5` for 09:00 Monday through 
 
 The UI also offers a webhook trigger. Selecting it does not configure an external service to send requests; verify the endpoint and authentication for your deployment before relying on inbound delivery. Use cron for a first scheduled evaluation.
 
+## Connect recurring work to its project and source results
+
+When configuring a heavy routine through the routine API or config sync, its
+JSON-encoded `task_template` can include `project_id` and `blocked_by`. The decoded
+template looks like this:
+
+```json
+{
+  "title": "Prepare the project report",
+  "description": "Read the source task's result and prepare the next report.",
+  "project_id": "<office-project-id>",
+  "blocked_by": ["<source-task-id>"]
+}
+```
+
+Use project and source-task IDs from the same workspace. The task is created with
+the project's repository settings and normal dependency edges before it starts.
+A source task is an explicit document-handoff dependency: unfinished sources
+hold execution, while a completed source remains readable through that relation.
+Project membership alone does not allow reading unrelated tasks.
+
+These optional settings apply to newly created routine tasks. They do not move
+or reopen earlier tasks, attach repositories retroactively, or change the
+routine's concurrency policy. The optional `required_subtask_count` remains a
+separate minimum for durable child assignments. No database migration is needed.
+
 ## Choose concurrency behavior
 
 Concurrency determines what a fire does when matching routine work is already active:
@@ -65,5 +91,22 @@ If no run appears, check workspace pause state and the saved trigger. If a run e
 ## Edit or pause a routine
 
 Open the routine, edit its fields, and select **Save**. Check the resulting schedule status, last fire, and next fire rather than assuming a saved description also updated the trigger successfully. The UI reports schedule reconciliation errors separately; reload and resolve them before relying on the new timing.
+
+### Update an existing trigger through the API
+
+Use `PATCH /api/v1/office/routine-triggers/<trigger-id>` to change
+`cron_expression`, `timezone`, or `enabled` without replacing the trigger.
+For example, `{"cron_expression":"0 9 * * 1-5","timezone":"Asia/Seoul","enabled":true}`
+sets the next future weekday occurrence at 09:00 in that timezone. Disabling a
+trigger clears its next fire; it does not cancel a fire that was already claimed.
+The trigger ID, routine, kind, webhook authentication, creation time, last fire,
+and past runs remain unchanged. Schedule fields apply only to cron triggers;
+webhook triggers can change `enabled` through this endpoint.
+
+An enabled cron trigger with no next-fire value may still be owned by a scheduler
+dispatch. The endpoint returns `409` in that state, or if a scheduler claim or
+another schedule edit wins the update race. Reload after that dispatch's normal
+re-arm and apply the edit again. Do not replace the trigger or replay a routine
+to work around this response. Invalid cron expressions or timezones return `400`.
 
 Set the routine status to **Paused** when you want to suspend that routine. Use **Archived** when it should leave active use. To stop all Office work in a workspace, including event-driven wakes and manual routine launches, use the [workspace pause](office-operations.md#pause-and-resume-a-workspace).

@@ -1247,16 +1247,7 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	if err != nil {
 		return fmt.Errorf("ensure routine workflow: %w", err)
 	}
-	var taskID string
-	if required > 0 {
-		creator, ok := s.taskCreator.(routineTaskCreatorWithRequirements)
-		if !ok {
-			return fmt.Errorf("routine task creator does not support required subtask assignments")
-		}
-		taskID, err = creator.CreateOfficeTaskInWorkflowWithRequirements(ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID, workflowID, title, description, routine.ID, required)
-	} else {
-		taskID, err = s.taskCreator.CreateOfficeTaskInWorkflow(ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID, workflowID, title, description, routine.ID)
-	}
+	taskID, err := s.createRoutineTaskWithContext(ctx, routine, workflowID, title, description, template)
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)
 	}
@@ -1566,9 +1557,11 @@ func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, termi
 // -- helpers --
 
 type taskTemplate struct {
-	Title                string `json:"title"`
-	Description          string `json:"description"`
-	RequiredSubtaskCount int    `json:"required_subtask_count,omitempty"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	ProjectID            string   `json:"project_id,omitempty"`
+	BlockedBy            []string `json:"blocked_by,omitempty"`
+	RequiredSubtaskCount int      `json:"required_subtask_count,omitempty"`
 }
 
 func parseTaskTemplate(raw string) taskTemplate {

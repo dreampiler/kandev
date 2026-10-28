@@ -158,11 +158,26 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 func (r *Repository) UpdateTaskStateIfWorkflowStep(
 	ctx context.Context, taskID, expectedStepID, state string,
 ) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, "", state)
+}
+
+// UpdateTaskStateIfWorkflowStepAndState preserves business updates racing a
+// terminal step's automatic completion.
+func (r *Repository) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID, expectedState, state string,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, expectedState, state)
+}
+
+func (r *Repository) updateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID, expectedState, state string,
+) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks
 		SET state = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
-	`), state, taskID, expectedStepID)
+		  AND (? = '' OR state = ?)
+	`), state, taskID, expectedStepID, expectedState, expectedState)
 	if err != nil {
 		return false, err
 	}
