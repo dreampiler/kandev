@@ -1,14 +1,9 @@
-// Package state provides a plugin-scoped key/value store backed by SQLite.
-// Plugins read and write arbitrary JSON values under a (scope, scope_id, key)
-// tuple, always filtered by plugin_id so a plugin can never read or write
-// another plugin's state (spec: docs/specs/plugins/requirements/plugins.md, "plugin_state").
 package state
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,8 +50,8 @@ type ChangeRequestRecord struct {
 
 // ChangeRequestStore persists plugin-reported task change requests in the
 // plugin_task_change_requests table. The owning installation stamps every
-// row; uninstall and disable paths fence by that identity through
-// DeleteByInstallation, so stale rows never outlive the plugin's authority.
+// row; uninstall deletes by that identity, while disable only fences new
+// writes, so a re-enable can reuse the same installation's history.
 type ChangeRequestStore struct {
 	db *sqlx.DB
 	ro *sqlx.DB
@@ -76,7 +71,8 @@ func NewChangeRequestStore(pool *db.Pool) (*ChangeRequestStore, error) {
 }
 
 // initChangeRequestSchemaDDL is the single source of truth for the table
-// shape, shared by initSchema and conformance fixtures.
+// shape. The task index is created separately so both SQLite and Postgres
+// receive one statement per Exec.
 const initChangeRequestSchemaDDL = `
 		CREATE TABLE IF NOT EXISTS plugin_task_change_requests (
 			id TEXT PRIMARY KEY,
@@ -86,7 +82,7 @@ const initChangeRequestSchemaDDL = `
 			provider_id TEXT NOT NULL,
 			provider_host TEXT NOT NULL DEFAULT '',
 			repository_id TEXT NOT NULL,
-			number INTEGER NOT NULL,
+			number BIGINT NOT NULL,
 			url TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL DEFAULT '',
 			state TEXT NOT NULL DEFAULT 'open',
@@ -98,14 +94,16 @@ const initChangeRequestSchemaDDL = `
 			updated_at TEXT NOT NULL,
 			UNIQUE (installation_id, workspace_id, provider_id, repository_id, number)
 		);
-		CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_task
-			ON plugin_task_change_requests(installation_id, workspace_id, task_id);
-		CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_merged
-			ON plugin_task_change_requests(workspace_id, state, merged_at);
 	`
 
 func (s *ChangeRequestStore) initSchema() error {
-	_, err := s.db.Exec(initChangeRequestSchemaDDL)
+	if _, err := s.db.Exec(initChangeRequestSchemaDDL); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_task
+			ON plugin_task_change_requests(installation_id, workspace_id, task_id);
+	`)
 	return err
 }
 
@@ -121,6 +119,29 @@ func validChangeRequestState(state string) bool {
 	}
 }
 
+const changeRequestTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+func validateChangeRequestTimestamp(value string) error {
+	if value == "" {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+		return errors.New("plugin task change request: timestamp is invalid")
+	}
+	return nil
+}
+
+func normalizeChangeRequestTimestamp(value string) string {
+	if value == "" {
+		return ""
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return value
+	}
+	return parsed.UTC().Format(changeRequestTimestampLayout)
+}
+
 func validateChangeRequestRecord(record ChangeRequestRecord) error {
 	if record.InstallationID == "" || record.WorkspaceID == "" || record.TaskID == "" ||
 		record.ProviderID == "" || record.RepositoryID == "" || record.Number <= 0 {
@@ -128,6 +149,11 @@ func validateChangeRequestRecord(record ChangeRequestRecord) error {
 	}
 	if !validChangeRequestState(record.State) {
 		return errors.New("plugin task change request: state is invalid")
+	}
+	for _, value := range []string{record.CreatedAt, record.MergedAt, record.ClosedAt} {
+		if err := validateChangeRequestTimestamp(value); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -139,22 +165,26 @@ func normalizeChangeRequestRecord(record ChangeRequestRecord, now string) Change
 	if record.CreatedAt == "" {
 		record.CreatedAt = now
 	}
+	record.CreatedAt = normalizeChangeRequestTimestamp(record.CreatedAt)
+	record.MergedAt = normalizeChangeRequestTimestamp(record.MergedAt)
+	record.ClosedAt = normalizeChangeRequestTimestamp(record.ClosedAt)
 	record.UpdatedAt = now
 	return record
 }
 
-// latchChangeRequestRecord preserves the fields a later report deliberately
-// omits on an existing row: the original id and created timestamp, plus the
-// merged and closed instants, so a stale report never un-merges a row.
-func latchChangeRequestRecord(record, existing ChangeRequestRecord, now string) ChangeRequestRecord {
+// latchChangeRequestRecord preserves the original id and created timestamp,
+// the first merged/closed instants, and the merged lifecycle state, so a stale
+// report cannot unmerge a row.
+func latchChangeRequestRecord(record, existing ChangeRequestRecord, _ string) ChangeRequestRecord {
 	record.ID = existing.ID
-	if record.CreatedAt == "" || record.CreatedAt == now {
-		record.CreatedAt = existing.CreatedAt
+	record.CreatedAt = existing.CreatedAt
+	if existing.State == ChangeRequestStateMerged {
+		record.State = ChangeRequestStateMerged
 	}
-	if record.MergedAt == "" {
+	if existing.MergedAt != "" {
 		record.MergedAt = existing.MergedAt
 	}
-	if record.ClosedAt == "" {
+	if existing.ClosedAt != "" {
 		record.ClosedAt = existing.ClosedAt
 	}
 	return record
@@ -162,16 +192,15 @@ func latchChangeRequestRecord(record, existing ChangeRequestRecord, now string) 
 
 // ReportChangeRequest upserts one plugin-reported task change request. The
 // owning installation, workspace, provider, repository, and number identify
-// the row; every other field is replaced on conflict, so a plugin's latest
-// report always wins over its own earlier reports. Merged and closed
-// timestamps are latched: once set, a later report without one never clears
-// it, so a stale poll cannot un-merge a row. The second return reports
-// whether the row already existed.
+// the row; the latest report updates the descriptive fields. The created,
+// merged, and closed instants are latched and a merged row stays merged, so a
+// stale poll cannot unmerge it. The second return reports whether the row
+// already existed.
 func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record ChangeRequestRecord) (ChangeRequestRecord, bool, error) {
 	if err := validateChangeRequestRecord(record); err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(changeRequestTimestampLayout)
 	record = normalizeChangeRequestRecord(record, now)
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -242,47 +271,9 @@ func (s *ChangeRequestStore) ListChangeRequestsByTask(ctx context.Context, insta
 	return records, nil
 }
 
-// ListMergedChangeRequests returns the merged change requests reported in
-// the given workspaces since `since`, newest first, up to limit. Workspace
-// ids are caller-supplied and unscoped to any one installation: the overview
-// consumes every plugin's merged rows together, which is what makes a
-// Forgejo merge visible next to a GitHub one.
-func (s *ChangeRequestStore) ListMergedChangeRequests(ctx context.Context, workspaceIDs []string, since time.Time, limit int) ([]ChangeRequestRecord, error) {
-	if len(workspaceIDs) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, len(workspaceIDs))
-	args := make([]any, 0, len(workspaceIDs)+2)
-	for i, id := range workspaceIDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	query := `SELECT ` + changeRequestColumns + ` FROM plugin_task_change_requests WHERE workspace_id IN (` +
-		strings.Join(placeholders, ",") + `) AND state = 'merged' AND merged_at <> '' AND merged_at >= ? ORDER BY merged_at DESC`
-	args = append(args, since.UTC().Format(time.RFC3339Nano))
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
-	var records []ChangeRequestRecord
-	if err := s.ro.SelectContext(ctx, &records, s.ro.Rebind(query), args...); err != nil {
-		return nil, err
-	}
-	return records, nil
-}
-
-// DeleteAllForPlugin is intentionally absent: the installation id is opaque
-// and not derivable from the plugin id, so a plugin-wide delete cannot be
-// scoped from this store alone. The Service uninstall and disable paths own
-// the fencing instead — they resolve the plugin's installation ids and call
-// DeleteByInstallation for each before the registry record is gone (the same
-// ordering deletePluginAgentConversations uses: nothing destructive to the
-// package or record has happened yet, so a retry is safe).
-
 // DeleteByInstallation removes every change request row for one installation
-// id. The uninstall and disable paths call this once per installation id the
-// plugin's records name (listed before the registry record is gone), so no
-// row outlives the installation that reported it.
+// id. The uninstall path calls it before the installation record is removed,
+// so no row outlives the installation that reported it.
 func (s *ChangeRequestStore) DeleteByInstallation(ctx context.Context, installationID string) error {
 	if installationID == "" {
 		return errors.New("plugin task change request: installation id is required")

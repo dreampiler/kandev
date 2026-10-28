@@ -167,6 +167,9 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		return unavailableTaskChangeRequest("task_change_requests_unsupported"), pluginsdk.TaskChangeRequest{}, nil
 	}
 	if record.Receipt.State == exactReceiptStateCompleted {
+		if record.Receipt.ResultStatus != string(pluginsdk.CommandApplied) {
+			return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
+		}
 		reported, err := ledger.ListChangeRequestsByTask(ctx, h.installationID, input.WorkspaceID, input.TaskID)
 		if err != nil {
 			return unavailableTaskChangeRequest("task_change_request_receipt_unavailable"), pluginsdk.TaskChangeRequest{}, nil

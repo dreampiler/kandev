@@ -26,7 +26,7 @@ func newChangeRequestTestStore(t *testing.T) *ChangeRequestStore {
 func TestChangeRequestStoreReportAndLatch(t *testing.T) {
 	store := newChangeRequestTestStore(t)
 	ctx := context.Background()
-	mergedAt := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	mergedAt := time.Now().UTC().Add(-time.Hour).Format(changeRequestTimestampLayout)
 	first, existed, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
 		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
 		ProviderID: "forgejo", ProviderHost: "forge.example.test", RepositoryID: "repo-1",
@@ -64,6 +64,18 @@ func TestChangeRequestStoreReportAndLatch(t *testing.T) {
 	if second.ID != first.ID {
 		t.Fatal("stable id must survive re-reports")
 	}
+	// A stale report that says the request is open must not unmerge it.
+	third, existed, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 7,
+		State: ChangeRequestStateOpen,
+	})
+	if err != nil {
+		t.Fatalf("stale unmerge report: %v", err)
+	}
+	if !existed || third.State != ChangeRequestStateMerged || third.MergedAt != mergedAt {
+		t.Fatalf("stale unmerge report = %+v, want merged with latched merged_at", third)
+	}
 }
 
 func TestChangeRequestStoreRejectsBadState(t *testing.T) {
@@ -77,11 +89,10 @@ func TestChangeRequestStoreRejectsBadState(t *testing.T) {
 	}
 }
 
-func TestChangeRequestStoreListMergedAndRemove(t *testing.T) {
+func TestChangeRequestStoreRemove(t *testing.T) {
 	store := newChangeRequestTestStore(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
-	mergedAt := now.Add(-30 * time.Minute).Format(time.RFC3339Nano)
+	mergedAt := time.Now().UTC().Add(-30 * time.Minute).Format(changeRequestTimestampLayout)
 	if _, _, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
 		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
 		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 3,
@@ -89,32 +100,31 @@ func TestChangeRequestStoreListMergedAndRemove(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("report merged: %v", err)
 	}
-	if _, _, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
-		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-2",
-		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 4, State: ChangeRequestStateOpen,
-	}); err != nil {
-		t.Fatalf("report open: %v", err)
-	}
-	merged, err := store.ListMergedChangeRequests(ctx, []string{"ws-1"}, now.Add(-time.Hour), 10)
-	if err != nil {
-		t.Fatalf("list merged: %v", err)
-	}
-	if len(merged) != 1 || merged[0].Number != 3 {
-		t.Fatalf("merged rows = %v, want only number 3", merged)
-	}
 	if err := store.RemoveChangeRequest(ctx, "inst-1", "ws-1", "forgejo", "repo-1", 3); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	merged, err = store.ListMergedChangeRequests(ctx, []string{"ws-1"}, now.Add(-time.Hour), 10)
+	remaining, err := store.ListChangeRequestsByTask(ctx, "inst-1", "ws-1", "task-1")
 	if err != nil {
-		t.Fatalf("list merged after remove: %v", err)
+		t.Fatalf("list after remove: %v", err)
 	}
-	if len(merged) != 0 {
-		t.Fatalf("merged rows after remove = %d, want 0", len(merged))
+	if len(remaining) != 0 {
+		t.Fatalf("rows after remove = %d, want 0", len(remaining))
 	}
 	// Removing a missing row is not an error.
 	if err := store.RemoveChangeRequest(ctx, "inst-1", "ws-1", "forgejo", "repo-1", 3); err != nil {
 		t.Fatalf("remove missing: %v", err)
+	}
+}
+
+func TestChangeRequestStoreRejectsInvalidTimestamp(t *testing.T) {
+	store := newChangeRequestTestStore(t)
+	_, _, err := store.ReportChangeRequest(context.Background(), ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1,
+		State: ChangeRequestStateOpen, CreatedAt: "not-a-timestamp",
+	})
+	if err == nil {
+		t.Fatal("invalid timestamp must be rejected")
 	}
 }
 

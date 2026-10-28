@@ -96,7 +96,12 @@ func TestExactChangeRequestReportAndRemove(t *testing.T) {
 	if err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
 		t.Fatalf("Report = result:%+v change:%+v err:%v", result, reported, err)
 	}
-	if reported.ProviderID != "forgejo" || reported.Number != 7 || reported.MergedAt == nil || *reported.MergedAt != mergedAt {
+	if reported.MergedAt == nil {
+		t.Fatalf("reported = %+v, want forgejo number 7 with merged_at", reported)
+	}
+	parsedMergedAt, parseErr := time.Parse(time.RFC3339Nano, *reported.MergedAt)
+	expectedMergedAt, _ := time.Parse(time.RFC3339Nano, mergedAt)
+	if reported.ProviderID != "forgejo" || reported.Number != 7 || parseErr != nil || !parsedMergedAt.Equal(expectedMergedAt) {
 		t.Fatalf("reported = %+v, want forgejo number 7 with merged_at", reported)
 	}
 	remove := pluginsdk.ExactTaskChangeRequestRemove{
@@ -127,6 +132,11 @@ func TestExactChangeRequestRejectsUnownedProvider(t *testing.T) {
 	}
 	if result == nil || result.Status != pluginsdk.CommandDenied {
 		t.Fatalf("Report unowned provider = %+v, want DENIED", result)
+	}
+	replayed, _, err := manager.Report(context.Background(), report)
+	if err != nil || replayed == nil || replayed.Status != pluginsdk.CommandDenied ||
+		replayed.Reason != result.Reason {
+		t.Fatalf("replayed denied Report = %+v err=%v, want the recorded denial", replayed, err)
 	}
 }
 

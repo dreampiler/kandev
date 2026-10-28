@@ -167,8 +167,17 @@ func TestExactChangeRequestEvidenceIncludesPluginRowsWithoutGitHub(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListChangeRequestEvidence with failed GitHub source: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].Provider != "forgejo" {
-		t.Fatalf("plugin evidence after GitHub failure = %+v, want the plugin row without a GitHub row", page.Items)
+	var sawPlugin, sawGitHubFailure bool
+	for _, item := range page.Items {
+		switch {
+		case item.Provider == "forgejo":
+			sawPlugin = true
+		case item.Provider == "github" && item.ProviderState == "unavailable":
+			sawGitHubFailure = true
+		}
+	}
+	if !sawPlugin || !sawGitHubFailure {
+		t.Fatalf("evidence after GitHub failure = %+v, want both the plugin row and the GitHub failure", page.Items)
 	}
 }
 

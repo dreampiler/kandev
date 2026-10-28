@@ -415,10 +415,11 @@ is `open`, `merged`, or `closed`; merged and closed timestamps latch so a stale
 report cannot unmerge a row. Every command carries an idempotency key and
 returns the normal `HostCommandResult`.
 
-The Host owns the `plugin_task_change_requests` ledger. Disable and uninstall
-delete the installation's rows; an in-place upgrade keeps the installation
-identity but advances the approval revision, so a write approved for the old
-manifest is denied. `ListChangeRequestEvidenceExact` returns the calling
+The Host owns the `plugin_task_change_requests` ledger. Disable fences new
+writes while keeping the installation's history, so a re-enable can reuse it;
+uninstall deletes the rows. An in-place upgrade keeps the installation identity
+but advances the approval revision, so a write approved for the old manifest is
+denied. `ListChangeRequestEvidenceExact` returns the calling
 installation's rows with their real provider id alongside any GitHub evidence
 it is already authorized to read. The ledger does not grant merge, comment,
 CI-rerun, automation-trigger, or statistics authority. Exposing these rows to

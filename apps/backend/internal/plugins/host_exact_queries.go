@@ -812,10 +812,8 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 				continue
 			}
 			if providerFailed {
-				if len(pluginRows) == 0 {
-					reason := "provider_read_failed"
-					out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "unavailable", ProviderError: &reason, ResourceVersion: taskVersion, ObservedAt: observed})
-				}
+				reason := "provider_read_failed"
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "unavailable", ProviderError: &reason, ResourceVersion: taskVersion, ObservedAt: observed})
 				continue
 			}
 			prs := prsByTask[id]
