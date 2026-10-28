@@ -152,11 +152,17 @@ func TestExactChangeRequestEvidenceIncludesPluginRowsWithoutGitHub(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListChangeRequestEvidence: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].Provider != "forgejo" || page.Items[0].Number != 7 || page.Items[0].ProviderState != "available" {
-		t.Fatalf("plugin evidence = %+v, want the reported Forgejo row", page.Items)
+	var sawPluginRow, sawGitHubUnsupported bool
+	for _, item := range page.Items {
+		switch {
+		case item.Provider == "forgejo":
+			sawPluginRow = item.Number == 7 && item.ProviderState == "available" && item.FetchedAt != nil
+		case item.ProviderState == "unsupported":
+			sawGitHubUnsupported = true
+		}
 	}
-	if page.Items[0].FetchedAt == nil {
-		t.Fatal("plugin evidence lacks the observation time")
+	if !sawPluginRow || !sawGitHubUnsupported {
+		t.Fatalf("plugin evidence = %+v, want the Forgejo row and the GitHub unsupported state", page.Items)
 	}
 
 	host.taskPRs = &stubPRSource{err: status.Error(codes.Unavailable, "github unavailable")}

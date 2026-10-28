@@ -806,9 +806,7 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: reported.ProviderID, RepositoryID: reported.RepositoryID, Number: reported.Number, URL: reported.URL, ProviderState: "available", FetchedAt: fetchedAt, ResourceVersion: version, ObservedAt: observed})
 			}
 			if !providerAvailable {
-				if len(pluginRows) == 0 {
-					out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, ProviderState: "unsupported", ResourceVersion: taskVersion, ObservedAt: observed})
-				}
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, ProviderState: "unsupported", ResourceVersion: taskVersion, ObservedAt: observed})
 				continue
 			}
 			if providerFailed {
