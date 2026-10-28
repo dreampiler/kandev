@@ -247,6 +247,29 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	assertRoutineFireCarrier(t, noAssigneeTask.Metadata, "routine-2")
 }
 
+func TestCreateOfficeRoutineTaskPersistsRequiredAssignmentsBeforeStart(t *testing.T) {
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	id, err := adapter.CreateOfficeTaskInWorkflowWithRequirements(ctx, "ws-1", "", "routine-assignee", workflows[0].ID, "LD", "Existing evidence refs", "ld-routine", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := taskSvc.GetTask(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := task.Metadata[models.MetaKeyRequiredSubtaskCount].(float64); got != 3 {
+		t.Fatalf("required assignments = %v, want 3", task.Metadata[models.MetaKeyRequiredSubtaskCount])
+	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		t.Fatal("routine start intent lost")
+	}
+}
+
 // assertRoutineFireCarrier pins AC-OFFICE-RUN-CAUSATION-001.14/.24: a
 // routine-fire task carries the full task-boundary causation carrier with
 // the AC.24 root values for the lineage triple (a routine fire has no

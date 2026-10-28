@@ -34,6 +34,32 @@ Use a five-field cron expression such as `0 9 * * 1-5` for 09:00 Monday through 
 
 The UI also offers a webhook trigger. Selecting it does not configure an external service to send requests; verify the endpoint and authentication for your deployment before relying on inbound delivery. Use cron for a first scheduled evaluation.
 
+## Connect recurring work to its project and source results
+
+When configuring a heavy routine through the routine API or config sync, its
+JSON-encoded `task_template` can include `project_id` and `blocked_by`. The decoded
+template looks like this:
+
+```json
+{
+  "title": "Prepare the project report",
+  "description": "Read the source task's result and prepare the next report.",
+  "project_id": "<office-project-id>",
+  "blocked_by": ["<source-task-id>"]
+}
+```
+
+Use project and source-task IDs from the same workspace. The task is created with
+the project's repository settings and normal dependency edges before it starts.
+A source task is an explicit document-handoff dependency: unfinished sources
+hold execution, while a completed source remains readable through that relation.
+Project membership alone does not allow reading unrelated tasks.
+
+These optional settings apply to newly created routine tasks. They do not move
+or reopen earlier tasks, attach repositories retroactively, or change the
+routine's concurrency policy. The optional `required_subtask_count` remains a
+separate minimum for durable child assignments. No database migration is needed.
+
 ## Choose concurrency behavior
 
 Concurrency determines what a fire does when matching routine work is already active:
