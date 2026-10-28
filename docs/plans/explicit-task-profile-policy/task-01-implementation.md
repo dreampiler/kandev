@@ -91,3 +91,16 @@ No permanent tests, default changes, schema changes or operating writes are adde
 Focused existing override/routing/watch/adapter selection passed with -race: task service 2.261s, orchestrator 1.458s, backendapp 1.669s. git diff --check passed. The disposable overlay/fixtures are removed after preserving these results. Normal commit hooks must pass before publication.
 
 The profile eligibility block was extracted into a private helper after the unchanged complexity limit rejected the first commit attempt. Its targeted eligibility/replay cases passed again with -race (1.809s); behavior and assertions were unchanged.
+
+## Latest-main conflict reconciliation
+
+The normal merge preserves both workflow_agent_overrides and the upstream
+priority, explicit executor-profile and MCP-server request fields. The MCP
+tool-schema assertion includes both the override map and priority. Current
+upstream changes to authorization, external-ID replay, task admission and
+Office transport boundaries remain in place. No earlier commit is rebased or
+replaced. The merged-source race selection passed: models 1.052s, task service
+2.503s, MCP server 1.203s, MCP handlers 22.911s, orchestrator 3.188s and
+backendapp 1.431s. It covers the existing override/profile, task schema/create,
+external-ID and watch/review-request controls. Previous results above remain
+historical for unchanged source; publication uses the normal merge hooks.

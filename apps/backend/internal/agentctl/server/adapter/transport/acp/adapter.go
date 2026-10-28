@@ -365,31 +365,33 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn                     context.CancelCauseFunc
-	rpcDone                     chan struct{}
-	abortCh                     chan struct{}
-	handoffCh                   chan struct{}
-	providerErrorCh             chan openCodeStderrDiagnostic
-	promptGeneration            uint64
-	evidenceMu                  sync.Mutex
-	codexSystemError            bool
-	codexCapacity               bool
-	codexUsageLimit             *streams.ProviderError
-	cursorRetriableMsg          string
-	cursorRetriableComplete     bool
-	cursorRetriableAt           time.Time
-	continuationTools           map[string]bool
-	continuationPermissions     uint16
-	continuationPermissionTools map[string]struct{}
-	continuationUnsafe          bool
-	capacityTools               map[string]capacityToolEvidence
-	capacityUnknown             bool
-	capacityBackground          bool
-	capacityPermissions         int
-	allowHandoff                bool
-	handedOff                   bool
-	gateOwned                   bool
-	finishing                   bool
+	endTurn                      context.CancelCauseFunc
+	rpcDone                      chan struct{}
+	abortCh                      chan struct{}
+	handoffCh                    chan struct{}
+	providerErrorCh              chan openCodeStderrDiagnostic
+	promptGeneration             uint64
+	evidenceMu                   sync.Mutex
+	codexSystemError             bool
+	codexCapacity                bool
+	codexUsageLimit              *streams.ProviderError
+	cursorRetriableMsg           string
+	cursorRetriableComplete      bool
+	cursorRetriableAt            time.Time
+	continuationTools            map[string]bool
+	continuationSupportOverride  streams.ContinuationSupport
+	continuationPermissions      uint16
+	continuationPermissionTools  map[string]struct{}
+	continuationPermissionUnsafe bool
+	continuationUnsafe           bool
+	capacityTools                map[string]capacityToolEvidence
+	capacityUnknown              bool
+	capacityBackground           bool
+	capacityPermissions          int
+	allowHandoff                 bool
+	handedOff                    bool
+	gateOwned                    bool
+	finishing                    bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -687,6 +689,23 @@ func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
 // GetAgentInfo returns information about the connected agent.
 func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
+}
+
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
 }
 
 // SetPendingContext sets the context to be injected into the next prompt.
