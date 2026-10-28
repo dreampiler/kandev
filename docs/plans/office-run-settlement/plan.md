@@ -37,8 +37,9 @@ replacement run is created.
 
 ### In scope
 
-- `REQ-OFFICE-RUN-SETTLE-001`: settle a claimed run when its launched session
-  parks without an error.
+- `REQ-OFFICE-RUN-SETTLE-001`: settle per-launch runs at a clean park and
+  Office runs after their completing turn confirms runtime settlement. Keep
+  successor ownership and completed business results intact.
 - `REQ-OFFICE-RUN-SETTLE-002`: inheritance fallbacks and immediate escalation of
   unsafe workspace reuse.
 - `REQ-OFFICE-RUN-SETTLE-003`: the default-off session verdict guard.
@@ -56,9 +57,10 @@ replacement run is created.
 
 ## Risks
 
-- Park settlement finishes a run on any clean `RUNNING -> WAITING_FOR_INPUT`
-  of its launched session, including a recovery settlement that abandoned a
-  turn without an error.
+- Early settlement of a canonical Office session can race delayed teardown
+  and configure a process still owned by the previous turn. Office now waits
+  for completion confirmation while Routine/per-launch park behavior remains.
+  Failed stop is not success; immutable turn timing fences later claims.
 - A pending inheritance (live parent, no environment yet) keeps the retry
   backoff and escalates only after `MaxRetryCount`, as before; its first
   deferral is now recorded on the run and in activity.

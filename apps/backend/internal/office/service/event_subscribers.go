@@ -319,19 +319,17 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
 		{events.AgentReady, maybeAsync(s.handleTasklessAgentReady)},
-		// AgentStopped fires when StopAgent is called (e.g. office
-		// fire-and-forget turn-complete teardown). Same handler — both
-		// signal "the agent is no longer running on this task and the
-		// claimed run should be finished so the next run for the
-		// same agent can be claimed". Without this, comments / status
-		// changes / mentions queue runs that never fire because the
-		// previous run stays in 'claimed' state forever.
-		{events.AgentStopped, maybeAsync(s.handleAgentCompleted)},
+		// AgentStopped settles a successful teardown only after the process
+		// has stopped; failed bootstrap cleanup keeps the failure outcome.
+		// Office turns without a stopping teardown confirm their own identity
+		// through OfficeTurnSettled instead of releasing at the early park.
+		{events.AgentStopped, maybeAsync(s.handleAgentStopped)},
 		{events.AgentFailed, maybeAsync(s.handleAgentFailed)},
 		{events.BuildSessionPromptUsageWildcardSubject(), maybeAsync(s.handlePromptUsage)},
 		{events.BuildAgentStreamWildcardSubject(), maybeAsync(s.handleAgentStreamUsage)},
 		{events.AgentTurnMessageSaved, maybeAsync(s.handleAgentTurnMessageSaved)},
 		{events.TaskSessionStateChanged, maybeAsync(s.handleTaskSessionStateChanged)},
+		{events.OfficeTurnSettled, maybeAsync(s.handleOfficeTurnSettled)},
 	}
 	for _, sub := range subs {
 		if _, err := eb.Subscribe(sub.subject, sub.handler); err != nil {
@@ -452,6 +450,34 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	return nil
 }
 
+// handleAgentStopped distinguishes successful teardown from failed bootstrap
+// cleanup. A failed process stop is not evidence that its Office run succeeded.
+func (s *Service) handleAgentStopped(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[AgentLifecycleData](event)
+	if err != nil || data == nil || data.SessionID == "" {
+		return s.handleAgentCompleted(ctx, event)
+	}
+	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, data.SessionID)
+	if err != nil {
+		return err
+	}
+	if state != taskSessionStateFailed {
+		return s.handleAgentCompleted(ctx, event)
+	}
+	run, err := s.resolveLifecycleRun(ctx, *data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if run.ClaimedAt != nil && !event.Timestamp.IsZero() && event.Timestamp.Before(*run.ClaimedAt) {
+		return nil
+	}
+	data.ErrorMessage = errorMessage
+	return s.failClaimedTaskRun(ctx, run, *data)
+}
+
 func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[AgentLifecycleData](event)
 	if err != nil {
@@ -502,6 +528,12 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 			return nil
 		}
 		return err
+	}
+	// A delayed legacy stop must not resolve through a successor's claim on
+	// the same persistent task/agent session.
+	if data.RunID == "" && run.ClaimedAt != nil && !event.Timestamp.IsZero() &&
+		event.Timestamp.Before(*run.ClaimedAt) {
+		return nil
 	}
 	// Only the event's own run identity may consume the parked failure. The
 	// task-and-agent fallback used for legacy events does not prove which run

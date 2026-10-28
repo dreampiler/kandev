@@ -52,26 +52,34 @@ never relaunches finished work.
 #### Acceptance criteria
 
 - **AC-OFFICE-RUN-SETTLE-001.1:** When a claimed task run's launched session
-  moves from `RUNNING` to `WAITING_FOR_INPUT` without an error message, the
-  system shall finish the run with the processed outcome and release its task
-  checkout.
+  uses the per-launch model and moves from `RUNNING` to `WAITING_FOR_INPUT`
+  without an error message, the system shall finish the run with the processed
+  outcome and release its task checkout.
 - **AC-OFFICE-RUN-SETTLE-001.2:** When a session that is not the run's launched
   session parks, or a session parks with an error message, or a session moves
   to `WAITING_FOR_INPUT` from a state other than `RUNNING`, the system shall
   leave the run claimed.
 - **AC-OFFICE-RUN-SETTLE-001.3:** When an Office task session parks at `IDLE`,
   the system shall leave settlement to the existing teardown completion path.
-- **AC-OFFICE-RUN-SETTLE-001.4:** The `RUNNING` to `WAITING_FOR_INPUT` park
-  settles the run for an Office task as well, so a turn whose IDLE teardown
-  does not stop the agent (a cancelled turn, a session without an agent
-  execution, or a session relaunched for the next run) does not leave the run
-  claimed and the agent ceiling held. The teardown's later `AgentStopped` is a
-  no-op on the finished run.
+- **AC-OFFICE-RUN-SETTLE-001.4:** An Office task shall retain its run claim
+  and checkout at the early park until that turn's runtime stop succeeds or
+  its completion owner confirms a no-stop path. Cancelled turns, sessions
+  without an execution, and superseded teardowns shall still settle through
+  that completion confirmation. A failed stop shall not publish successful
+  settlement. Duplicate confirmations shall not repeat completion effects.
 - **AC-OFFICE-RUN-SETTLE-001.5:** When an Office IDLE teardown runs after its
   session was relaunched (the session is `STARTING`, is `RUNNING` again after
   the completion snapshot was not `RUNNING`, holds a different agent execution,
   or is running a turn other than the one that just completed), the system
   shall skip the IDLE flip and the agent stop.
+- **AC-OFFICE-RUN-SETTLE-001.6:** A completing Office turn shall not settle
+  a newer claim on the reused session. Its completion confirmation shall
+  retain the original turn start; legacy completion timestamps older than
+  the current claim shall be ignored.
+- **AC-OFFICE-RUN-SETTLE-001.7:** Failed bootstrap cleanup shall retain the
+  run's failure outcome. A later automatic failure projection shall preserve
+  an already completed business task and its original result; existing manual
+  task-state changes and session failure history shall remain available.
 
 ### REQ-OFFICE-RUN-SETTLE-002: Inherited workspace launch resolution
 

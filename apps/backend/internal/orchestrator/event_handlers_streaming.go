@@ -3187,7 +3187,8 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if state == v1.TaskStateInProgress && task != nil && task.IsFromOffice {
 		return nil
 	}
-	if state == v1.TaskStateInProgress && task != nil && task.State == v1.TaskStateCompleted {
+	if (state == v1.TaskStateInProgress || state == v1.TaskStateFailed) &&
+		task != nil && task.State == v1.TaskStateCompleted {
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -3459,7 +3460,8 @@ func (s *Service) reconcileCompleteEventRuntime(
 		return false
 	}
 	stopReason := extractStopReason(payload)
-	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason, completionTurnID) {
+	if !extractCompleteIsError(payload) && extractCompleteErrorMessage(payload) == "" &&
+		s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason, completionTurnID) {
 		return true
 	}
 	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
@@ -3669,6 +3671,7 @@ func (s *Service) handleOfficeTurnComplete(
 	}
 
 	if stopReason == stopReasonCancelled {
+		s.publishOfficeTurnSettlement(ctx, taskID, sessionID, session, completionTurnID)
 		s.logger.Info("office turn cancelled by user — skipping IDLE flip, deferring to cancel handler",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -3676,8 +3679,11 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 
+	settlementSnapshot := *session
 	teardown := func() {
-		s.teardownOfficeTurn(ctx, taskID, sessionID, session, completionTurnID)
+		if s.teardownOfficeTurn(ctx, taskID, sessionID, session, completionTurnID) {
+			s.publishOfficeTurnSettlement(ctx, taskID, sessionID, &settlementSnapshot, completionTurnID)
+		}
 	}
 	// The relaunch that this teardown must not stop takes the executor's
 	// per-session launch/stop lock. Running the ownership decision and the
@@ -3697,9 +3703,12 @@ func (s *Service) handleOfficeTurnComplete(
 // observed here and keeps its execution.
 func (s *Service) teardownOfficeTurn(
 	ctx context.Context, taskID, sessionID string, session *models.TaskSession, completionTurnID string,
-) {
+) bool {
 	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
-		return
+		return true
+	}
+	if session.AgentExecutionID != "" && s.agentManager == nil {
+		return false
 	}
 
 	s.logger.Info("office turn complete — IDLE + tearing down execution",
@@ -3721,7 +3730,7 @@ func (s *Service) teardownOfficeTurn(
 			s.logger.Info("office turn complete — session moved on, skipping stale teardown",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
-			return
+			return false
 		}
 	}
 
@@ -3734,8 +3743,10 @@ func (s *Service) teardownOfficeTurn(
 				zap.String("session_id", sessionID),
 				zap.String("agent_execution_id", session.AgentExecutionID),
 				zap.Error(err))
+			return false
 		}
 	}
+	return true
 }
 
 // officeSessionRelaunchedSince reloads the session right before the Office

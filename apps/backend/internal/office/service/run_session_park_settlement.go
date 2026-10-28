@@ -31,15 +31,14 @@ type TaskSessionStateData struct {
 	// this event. It orders the park against a run claim: a run claimed after
 	// the park belongs to the next turn, not the turn that parked.
 	UpdatedAt string `json:"updated_at"`
+	// The separate Office settlement event carries its completing turn.
+	TurnStartedAt string `json:"turn_started_at,omitempty"`
+	TurnID        string `json:"turn_id,omitempty"`
 }
 
-// handleTaskSessionStateChanged settles a claimed task run whose launched
-// session ended its turn. A session on the per-launch model has no IDLE
-// teardown, and an Office turn depends on the park whenever its IDLE teardown
-// does not stop the agent — a cancelled turn, a session without an agent
-// execution, or a session relaunched for the next run. In all of those neither
-// AgentStopped nor AgentCompleted reports the turn's end, so the park is the
-// one completion signal every turn produces.
+// handleTaskSessionStateChanged settles per-launch turns on their park.
+// Office sessions retain the run claim until their completion path confirms
+// teardown, so the next run cannot configure a process that is still alive.
 func (s *Service) handleTaskSessionStateChanged(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskSessionStateData](event)
 	if err != nil || data == nil {
@@ -49,18 +48,37 @@ func (s *Service) handleTaskSessionStateChanged(ctx context.Context, event *bus.
 	if !isSuccessfulTurnPark(*data) {
 		return nil
 	}
+	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+	if err != nil {
+		return err
+	}
+	if fields.IsFromOffice {
+		return nil
+	}
+	return s.settleParkedSessionRun(ctx, *data)
+}
+
+// handleOfficeTurnSettled receives only a completed turn's runtime settlement,
+// after its stop succeeded or its completion owner chose a no-stop path.
+func (s *Service) handleOfficeTurnSettled(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[TaskSessionStateData](event)
+	if err != nil || data == nil || data.TaskID == "" || data.SessionID == "" ||
+		data.AgentProfileID == "" || data.TurnStartedAt == "" {
+		return nil
+	}
+	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+	if err != nil {
+		return err
+	}
+	if !fields.IsFromOffice {
+		return nil
+	}
 	return s.settleParkedSessionRun(ctx, *data)
 }
 
 // isSuccessfulTurnPark reports a RUNNING -> WAITING_FOR_INPUT transition
-// without an error. A failed turn parks with its error message and belongs to
-// the failure path. Every other park settles the run: a Routine-workflow
-// session has no IDLE teardown, and an Office turn depends on this park too
-// whenever its IDLE teardown does not stop the agent — a cancelled turn, a
-// session without an agent execution, or a session relaunched for the next
-// run. The park is the one signal every turn produces, so it is the settlement
-// point; the orchestrator keeps the IDLE teardown from stopping an agent a
-// relaunched session no longer owns.
+// without an error. Routine and other per-launch sessions settle here; Office
+// turns retain their claim until the separate teardown confirmation.
 func isSuccessfulTurnPark(data TaskSessionStateData) bool {
 	return data.TaskID != "" && data.SessionID != "" && data.AgentProfileID != "" &&
 		data.OldState == taskSessionStateRunning &&
@@ -81,6 +99,22 @@ func (s *Service) settleParkedSessionRun(ctx context.Context, data TaskSessionSt
 	}
 	if run.SessionID == "" || run.SessionID != data.SessionID {
 		return nil
+	}
+	if data.TurnStartedAt != "" {
+		// The turn start is immutable even if a reused session has advanced
+		// while git-status capture or teardown was in progress. Never let an
+		// old completion settle a newer claim on that same session.
+		turnStartedAt, err := time.Parse(time.RFC3339Nano, data.TurnStartedAt)
+		if err != nil || run.ClaimedAt == nil || run.ClaimedAt.After(turnStartedAt) {
+			return nil
+		}
+		state, errorMessage, err := s.repo.GetTaskSessionState(ctx, data.SessionID)
+		if err != nil {
+			return err
+		}
+		if state == taskSessionStateFailed || errorMessage != "" {
+			return nil
+		}
 	}
 	if parkPredatesClaim(data.UpdatedAt, run.ClaimedAt) {
 		// A run claimed after this park was recorded belongs to the next
@@ -103,6 +137,7 @@ func (s *Service) settleParkedSessionRun(ctx context.Context, data TaskSessionSt
 		RunID:          run.ID,
 		AgentProfileID: data.AgentProfileID,
 		SessionID:      data.SessionID,
+		TurnID:         data.TurnID,
 	})
 }
 

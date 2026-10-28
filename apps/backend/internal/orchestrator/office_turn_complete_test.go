@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -138,6 +139,12 @@ func TestHandleOfficeTurnComplete_SetsIdleAndStopsAgent(t *testing.T) {
 	seedOfficeSession(t, repo, "t-office", "s-office", "exec-42")
 	mgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+	eb := &mockEventBus{}
+	svc.eventBus = eb
+	mgr.stopAgentFunc = func(context.Context, string, bool) error {
+		assertOfficeTurnSettlementCount(t, eb, 0)
+		return nil
+	}
 
 	session, err := repo.GetTaskSession(ctx, "s-office")
 	if err != nil {
@@ -162,6 +169,7 @@ func TestHandleOfficeTurnComplete_SetsIdleAndStopsAgent(t *testing.T) {
 	if mgr.stopAgentArgs[0].ExecutionID != "exec-42" {
 		t.Errorf("StopAgent execution_id: got %q want exec-42", mgr.stopAgentArgs[0].ExecutionID)
 	}
+	assertOfficeTurnSettlementCount(t, eb, 1)
 }
 
 // TestHandleOfficeTurnComplete_KanbanFallthrough verifies kanban / quick-chat
@@ -191,6 +199,8 @@ func TestHandleOfficeTurnComplete_StopAgentFailureStillIdle(t *testing.T) {
 	seedOfficeSession(t, repo, "t-stop-fail", "s-stop-fail", "exec-99")
 	mgr := &mockAgentManager{stopAgentErr: errors.New("teardown failed")}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+	eb := &mockEventBus{}
+	svc.eventBus = eb
 
 	session, _ := repo.GetTaskSession(ctx, "s-stop-fail")
 	if !svc.handleOfficeTurnComplete(ctx, "t-stop-fail", "s-stop-fail", session, "", "") {
@@ -204,6 +214,7 @@ func TestHandleOfficeTurnComplete_StopAgentFailureStillIdle(t *testing.T) {
 	if len(mgr.stopAgentArgs) != 1 {
 		t.Errorf("StopAgent should have been called once, got %d", len(mgr.stopAgentArgs))
 	}
+	assertOfficeTurnSettlementCount(t, eb, 0)
 }
 
 // TestHandleOfficeTurnComplete_NoExecutionStillIdle ensures that an office
@@ -215,6 +226,8 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	seedOfficeSession(t, repo, "t-no-exec", "s-no-exec", "" /* no exec id */)
 	mgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+	eb := &mockEventBus{}
+	svc.eventBus = eb
 
 	session, _ := repo.GetTaskSession(ctx, "s-no-exec")
 	svc.handleOfficeTurnComplete(ctx, "t-no-exec", "s-no-exec", session, "", "")
@@ -226,6 +239,7 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	if len(mgr.stopAgentArgs) != 0 {
 		t.Errorf("expected no StopAgent (no execution_id), got %d", len(mgr.stopAgentArgs))
 	}
+	assertOfficeTurnSettlementCount(t, eb, 1)
 }
 
 // Pins the cancel-on-office fix: handler returns false on stop_reason="cancelled" and skips StopAgent.
@@ -235,6 +249,8 @@ func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testin
 	seedOfficeSession(t, repo, "t-cancel", "s-cancel", "exec-cancel")
 	mgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+	eb := &mockEventBus{}
+	svc.eventBus = eb
 
 	session, err := repo.GetTaskSession(ctx, "s-cancel")
 	if err != nil {
@@ -256,6 +272,7 @@ func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testin
 	if len(mgr.stopAgentArgs) != 0 {
 		t.Errorf("StopAgent must not be called on cancelled office turn; got %d calls", len(mgr.stopAgentArgs))
 	}
+	assertOfficeTurnSettlementCount(t, eb, 1)
 }
 
 // Only the literal "cancelled" triggers the skip branch; all other stop_reasons still IDLE + StopAgent.
@@ -360,5 +377,18 @@ func TestHandleOfficeTurnComplete_SkipsTeardownAfterRelaunch(t *testing.T) {
 				t.Fatalf("state = %q, want %q (late teardown must not flip it to IDLE)", got.State, tc.currentState)
 			}
 		})
+	}
+}
+
+func assertOfficeTurnSettlementCount(t *testing.T, eb *mockEventBus, want int) {
+	t.Helper()
+	count := 0
+	for _, event := range eb.published() {
+		if event.Subject == events.OfficeTurnSettled {
+			count++
+		}
+	}
+	if count != want {
+		t.Fatalf("Office turn settlements = %d, want %d", count, want)
 	}
 }

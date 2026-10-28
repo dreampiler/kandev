@@ -27,8 +27,8 @@ routing owns its failover decision; this design only waits for its outcome.
 ## Components and responsibilities
 
 - `office/service/run_session_park_settlement.go` subscribes to
-  `task_session.state_changed`, resolves deferred failures, and settles parked
-  launched sessions.
+  `task_session.state_changed` and the internal `office.turn_settled` event,
+  resolves deferred failures, and settles the matching launched-session run.
 - `office/service/event_subscribers.go` shares one completion body
   (`completeClaimedTaskRun`) between lifecycle completion events and park
   settlement, and one failure body (`failClaimedTaskRun`) between immediate and
@@ -64,13 +64,28 @@ claimed run on the task, checks the launched session, and runs the AgentComplete
 completion body: finish, routing success, output summary, checkout release, and
 runtime stamp. Office task sessions park at `IDLE` and keep their teardown path.
 
-Park settlement runs for Office tasks too. A session parks at
-`WAITING_FOR_INPUT` either with no IDLE teardown (Routine-workflow tasks, and
-Office turns that never reach a stopping teardown: a cancelled turn, a session
-without an agent execution, or a session relaunched for the next run) or just
-before the Office IDLE teardown. The park is the one signal every turn
-produces, so it settles the run and releases the agent ceiling; the teardown's
-later `AgentStopped` is a no-op on the finished run.
+The canonical `IsFromOffice` projection separates Office from per-launch
+settlement. Routine-workflow sessions keep their early park settlement. An
+Office park retains its claim while the existing process can still be alive,
+so a queued comment cannot claim a successor and configure that same process
+before teardown.
+
+The orchestrator publishes `office.turn_settled` only after a successful stop
+or a completion-owned no-stop path (cancelled, no execution, or superseded
+teardown). A failed stop publishes no success confirmation. The original
+completion snapshot and, when available, the completing turn's start are kept
+across teardown. The receiver rejects a claim newer than that start and a
+failed current session. The existing park timestamp fence remains; a legacy
+completion older than the current claim is also ignored. Normal AgentStopped
+and explicit confirmation may both arrive: the existing atomic finish and
+identity checks keep their side effects once-only.
+
+AgentStopped on a session recorded FAILED follows the existing failure body,
+so failed bootstrap cleanup cannot be labelled processed. Automatic runtime
+state projection and its existing transactional task-state guard preserve a
+COMPLETED task against late IN_PROGRESS or FAILED writes. Session failure
+evidence and direct/manual task-state APIs are unchanged. This preserves the
+[task and conversation separation](../../tasks/requirements/task-completion.md).
 
 `handleOfficeTurnComplete` decides ownership and runs the IDLE flip and
 `StopAgent` while holding the executor's per-session launch/stop lock, the same
