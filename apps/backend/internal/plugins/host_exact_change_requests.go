@@ -204,7 +204,7 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 	}
 	completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", reported.ID, changeRequestResourceVersion(reported))
 	if err != nil {
-		return unavailableTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(reported), nil
+		return uncertainTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(reported), nil
 	}
 	return commandResultFromRecord(completed), taskChangeRequestToSDK(reported), nil
 }
@@ -240,7 +240,7 @@ func (h *pluginHost) removeTaskChangeRequestExact(ctx context.Context, input plu
 	}
 	completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", "", "")
 	if err != nil {
-		return unavailableTaskChangeRequest("command_receipt_unavailable"), nil
+		return uncertainTaskChangeRequest("command_receipt_unavailable"), nil
 	}
 	return commandResultFromRecord(completed), nil
 }
@@ -387,6 +387,10 @@ func unavailableTaskChangeRequest(reason string) *pluginsdk.CommandResult {
 	return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: reason}
 }
 
+func uncertainTaskChangeRequest(reason string) *pluginsdk.CommandResult {
+	return &pluginsdk.CommandResult{Status: pluginsdk.CommandUncertain, Reason: reason}
+}
+
 func (h *pluginHost) completeChangeRequestFailure(ctx context.Context, store *state.CommandStore, record state.CommandRecord,
 	commandStatus pluginsdk.CommandStatus, reason, targetID, resourceVersion string,
 ) *pluginsdk.CommandResult {
@@ -395,7 +399,7 @@ func (h *pluginHost) completeChangeRequestFailure(ctx context.Context, store *st
 	}
 	completed, err := store.Complete(ctx, record.Intent.OperationID, string(commandStatus), reason, targetID, resourceVersion)
 	if err != nil {
-		return unavailableTaskChangeRequest("command_receipt_unavailable")
+		return uncertainTaskChangeRequest("command_receipt_unavailable")
 	}
 	return commandResultFromRecord(completed)
 }

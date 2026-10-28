@@ -413,7 +413,10 @@ workspace and must not be archived. The identity is the owning installation,
 workspace, provider, immutable repository id, and change-request number. State
 is `open`, `merged`, or `closed`; merged and closed timestamps latch so a stale
 report cannot unmerge a row. Every command carries an idempotency key and
-returns the normal `HostCommandResult`.
+returns the normal `HostCommandResult`. A disabled installation is denied. If
+the ledger write succeeds but the receipt cannot be completed, the result is
+`UNCERTAIN`; retrying the same idempotency key reconciles the receipt and the
+row instead of creating a second record.
 
 The Host owns the `plugin_task_change_requests` ledger. Disable fences new
 writes while keeping the installation's history, so a re-enable can reuse it;
