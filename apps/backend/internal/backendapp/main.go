@@ -2835,6 +2835,9 @@ func buildOfficeFeatureServices(
 	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
+	if services.Office != nil {
+		services.Office.SetTaskStateWriter(taskRepo)
+	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
 	agentSvc.SetProfileStore(settingsRepo)
@@ -2881,7 +2884,7 @@ func buildOfficeFeatureServices(
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
 	configSvc := officeconfig.NewConfigService(repo, cfgLoader, cfgWriter, log, activity)
 	dashboardSvc := buildOfficeDashboardService(
-		repo, log, activity, agentSvc, costSvc,
+		repo, taskRepo, log, activity, agentSvc, costSvc,
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
@@ -2976,6 +2979,7 @@ func initOfficeConfigSyncService(
 // buildOfficeFeatureServices to keep the parent under funlen's 80-line cap.
 func buildOfficeDashboardService(
 	repo *officesqlite.Repository,
+	taskRepo *tasksqlite.Repository,
 	log *logger.Logger,
 	activity officeshared.ActivityLogger,
 	agentSvc *officeagents.AgentService,
@@ -2987,6 +2991,7 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetTaskStateWriter(taskRepo)
 	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)

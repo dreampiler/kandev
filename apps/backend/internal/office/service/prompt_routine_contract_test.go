@@ -14,11 +14,11 @@ func TestRoutinePromptPreservesWorkContract(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	routine := &models.Routine{
-		WorkspaceID: "ws-1", Name: "LI improvement", Status: "active",
-		Description: "Review MPM product quality against docs/SDS-00.md; save evidence and proposal ref in LI existing handoff.",
+		WorkspaceID: "ws-1", Name: "Quality review", Status: "active",
+		Description: "Review the current release against its evidence; save findings and proposal references in the existing handoff.",
 	}
 	require.NoError(t, svc.CreateRoutine(ctx, routine))
-	snapshot := fmt.Sprintf(`{"routine_id":%q,"variables":{"target":"MPM"}}`, routine.ID)
+	snapshot := fmt.Sprintf(`{"routine_id":%q,"variables":{"target":"current release"}}`, routine.ID)
 	for _, reason := range routineCatchUpReasons {
 		t.Run(reason, func(t *testing.T) {
 			pc := service.BuildPromptContextWithSnapshotForTest(svc, ctx, reason, "{}", snapshot)

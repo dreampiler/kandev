@@ -38,7 +38,7 @@ func (r *Repository) guardRequiredSubtaskAssignmentsTx(ctx context.Context, tx *
 
 func requiredSubtaskCount(raw string) (int, error) {
 	var requirement struct {
-		Count int `json:"required_subtask_count"`
+		Count int `json:"kandev.office_required_subtask_count"`
 	}
 	if err := json.Unmarshal([]byte(raw), &requirement); err != nil {
 		return 0, fmt.Errorf("read required subtask assignments: %w", err)
@@ -52,7 +52,7 @@ func requiredSubtaskCount(raw string) (int, error) {
 // Used by both the write guard and bounded read models; workflow defaults are
 // deliberately insufficient evidence of a task-specific durable assignment.
 func assignedRoutineChildrenSQL(parent string) string {
-	return `CASE WHEN COALESCE(` + parent + `.metadata, '{}') LIKE '%"required_subtask_count"%' THEN
+	return `CASE WHEN COALESCE(` + parent + `.metadata, '{}') LIKE '%"kandev.office_required_subtask_count"%' THEN
 		(SELECT COUNT(*) FROM tasks child
 		WHERE child.parent_id=` + parent + `.id AND child.workspace_id=` + parent + `.workspace_id AND child.is_ephemeral=0
 		AND child.state NOT IN ('CANCELLED','FAILED')
