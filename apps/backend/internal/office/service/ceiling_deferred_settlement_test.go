@@ -1,0 +1,71 @@
+package service_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/office/service"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+)
+
+func parkCeilingDeferredRun(t *testing.T, svc *service.Service) *runsmodels.Run {
+	t.Helper()
+	run := &runsmodels.Run{
+		AgentProfileID: "missing-agent",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"t-cap"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	require.NoError(t, svc.RepoForTest().CreateRun(context.Background(), run))
+	require.NoError(t, svc.RepoForTest().ParkRunForProviderCapacity(
+		context.Background(), run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
+	))
+	return run
+}
+
+func TestCeilingDeferredLaunchReplayedSettlesParkedRun(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, svc.CeilingDeferredLaunchReplayed(ctx, "t-cap", run.ID, "session-1", "turn-1"))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusClaimed, string(got.Status))
+	require.Equal(t, "session-1", got.SessionID)
+	require.Nil(t, got.RoutingBlockedStatus)
+	require.NotNil(t, got.ClaimedAt)
+
+	// A duplicate replay leaves the first binding intact.
+	require.NoError(t, svc.CeilingDeferredLaunchReplayed(ctx, "t-cap", run.ID, "session-2", "turn-2"))
+	got, err = svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "session-1", got.SessionID)
+}
+
+func TestCeilingDeferredLaunchDroppedFailsParkedRun(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, svc.CeilingDeferredLaunchDropped(ctx, "t-cap", run.ID, "superseded", "destination changed"))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusFailed, string(got.Status))
+	require.Contains(t, got.ErrorMessage, "destination changed")
+	require.Nil(t, got.RoutingBlockedStatus)
+	require.NotNil(t, got.FinishedAt)
+
+	// A stale second drop is a no-op.
+	require.NoError(t, svc.CeilingDeferredLaunchDropped(ctx, "t-cap", run.ID, "superseded", "second"))
+	got, err = svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusFailed, string(got.Status))
+	require.Contains(t, got.ErrorMessage, "destination changed")
+}

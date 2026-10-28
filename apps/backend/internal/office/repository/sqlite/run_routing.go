@@ -131,6 +131,74 @@ func (r *Repository) ParkRunForProviderCapacity(
 	return nil
 }
 
+// SettleCeilingDeferredRun binds the Office run a ceiling replay launched.
+// Only the exact row the deferral parked is accepted, so a duplicate or stale
+// replay cannot claim a different run. sessionID is optional: a replay kind
+// that creates no session still releases the deferral park.
+func (r *Repository) SettleCeilingDeferredRun(
+	ctx context.Context, runID, sessionID string,
+) (bool, error) {
+	if runID == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET status = 'claimed',
+		    session_id = CASE WHEN ? = '' THEN session_id ELSE ? END,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    claimed_at = ?,
+		    finished_at = NULL
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?
+	`), sessionID, sessionID, now, runID, runsmodels.RoutingBlockedActionRequired)
+	if err != nil {
+		return false, fmt.Errorf("run_routing: settle ceiling deferral: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// FailCeilingDeferredRun terminally fails the Office run whose ceiling deferral
+// was dropped. Only the exact row the deferral parked is accepted, so a stale
+// drop cannot fail a run another path already settled.
+func (r *Repository) FailCeilingDeferredRun(
+	ctx context.Context, runID, errorMessage string,
+) (*runsmodels.Run, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var run runsmodels.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET status = 'failed',
+		    outcome = NULL,
+		    error_message = ?,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    finished_at = COALESCE(finished_at, ?)
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?
+		RETURNING *
+	`), errorMessage, now, runID, runsmodels.RoutingBlockedActionRequired).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: fail ceiling deferral: %w", err)
+	}
+	return &run, nil
+}
+
 // ParkRunForSessionRecovery preserves a pending Office run after its session
 // cannot be restored. It intentionally clears all retry timestamps so the
 // scheduler's timed wake-up path cannot turn an operator decision into an
