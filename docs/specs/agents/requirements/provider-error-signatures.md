@@ -119,8 +119,10 @@ additional behavior.
   control suspension expiry. A structured model 404 shall remain unavailable
   until model change or owner release; prose shall never permanently hold an account.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.6:** Defaults shall prefer next
-  candidate at startup/prompt-send, one same-session retry at mid-turn before
-  next candidate, and stop only for ACCOUNT. Explicit saved policies, existing
+  candidate at startup/prompt-send, a same-session retry recommendation at
+  mid-turn before next candidate, and stop only for ACCOUNT. These are
+  classification defaults, not authorization to execute post-output continuation.
+  Generic post-output continuation is outside this extension. Explicit saved policies, existing
   unclassified admission/thresholds, cancellation, ownership, generation,
   output/effect and continuation guards shall take precedence over defaults.
   Existing empty-turn handling shall be reused without changing thresholds.

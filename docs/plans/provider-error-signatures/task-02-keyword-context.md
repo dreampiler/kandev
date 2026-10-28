@@ -15,8 +15,9 @@ before phase defaults. Own keyword/context files, typed flag wiring,
 diagnostic producer/consumer consistency and dynamic circuit integration.
 Preserve explicit candidate policy, all safety guards and model order.
 
-Dependency: consume the accepted literal catalog and empty-turn source once.
-Do not reimplement either, add an external loader, change installed account
+The classifier is prepared independently on the current main base. Preserve its
+known rules and empty-turn behavior; do not import the pending literal catalog,
+reimplement either subsystem, add an external loader, change installed account
 attribution, activate an operator flag or publish from this worktree.
 
 ## Acceptance
@@ -66,6 +67,17 @@ projected HTTP metadata and correlate repeated failures by semantic group.
 
 No OpenCode Go paid-tier detector exists in the current registered agent; its
 default remains API key. Post-output mid-turn recovery remains refused by the
-existing safety contract. These original limitations remain explicit for owner
-reconciliation. The local implementation is committed; independent formal review
-and publication acceptance remain pending.
+existing safety contract. The classifier returns recommendations without implementing generic post-output
+continuation, which is outside this work order. The original local candidate
+passed independent formal review and was received by the publication owner.
+It is now reconciled as a separate delta on current main; changed-context
+verification, exact delta review and publication remain distinct milestones.
+
+Current-base focused classifier, circuit, billing, diagnostic projection and
+guarded-routing overlays passed, including the current continuation controls.
+Real stream checks preserve base attribution when OFF and transport-type/legacy
+selection when ON. Pending-tool admission still requires the retained runtime.
+Flag/profile/config feature contracts and frontend feature data (9 tests) passed;
+the backend composition package compiles. No pending literal catalog is imported.
+Broad Windows package attempts also encountered unchanged home-directory and
+escaped-path assertions outside this delta; those runs are not all-green results.

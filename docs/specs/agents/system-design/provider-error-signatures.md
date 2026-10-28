@@ -21,7 +21,6 @@ provider-neutral rules, or how dynamic routing acts on a classified failure.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
-
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
@@ -30,6 +29,11 @@ provider-neutral rules, or how dynamic routing acts on a classified failure.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+
+With the extension enabled, the terminal stream consumer selects known rules by
+`AgentType`, retaining the legacy `AgentID` fallback when type is absent. OFF
+preserves the current base attribution. Execution identity, generation,
+output and effect fences are preserved.
 
 ## Inputs that carry prose
 
@@ -137,6 +141,10 @@ Saved candidate policy overrides defaults. Unknown failures and empty
 completions retain their existing per-candidate unclassified policy and
 threshold. No confidence level bypasses replay, continuation, task ownership,
 cancellation, settlement or generation fences.
+
+The returned mid-turn action is a classification recommendation only. Existing
+continuation admission is unchanged; generic post-output retry or candidate
+continuation is not implemented by this extension.
 
 The minimal future catalog seam is the existing deterministic classifier:
 known rules stay before `classifyKeywordContext`; loading and export remain
