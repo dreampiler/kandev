@@ -311,3 +311,30 @@ func TestExactChangeRequestRejectsDisabledInstallation(t *testing.T) {
 		t.Fatalf("disabled Report = result:%+v err:%v, want DENIED plugin_not_active", result, err)
 	}
 }
+
+func TestExactChangeRequestNewKeyUpdatesExistingRow(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	digest := changeRequestManifestDigest(t, host)
+	base := pluginsdk.ExactTaskChangeRequestReport{
+		WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 21,
+		URL: "https://forge.example.test/pulls/21", Title: "Initial", State: "open",
+		ApprovalRevision: 1, ManifestDigest: digest,
+	}
+	base.RequestID, base.IdempotencyKey = "initial-report", "initial-report"
+	if result, _, err := manager.Report(context.Background(), base); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("initial Report = result:%+v err:%v", result, err)
+	}
+	mergedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	next := base
+	next.RequestID, next.IdempotencyKey = "merged-report", "merged-report"
+	next.State, next.Title, next.MergedAt = "merged", "Merged", mergedAt
+	result, change, err := manager.Report(context.Background(), next)
+	if err != nil || result == nil || result.Status != pluginsdk.CommandApplied || change.State != "merged" || change.Title != "Merged" {
+		t.Fatalf("second Report under a new key = result:%+v change:%+v err:%v", result, change, err)
+	}
+}

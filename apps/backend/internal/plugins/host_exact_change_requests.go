@@ -182,15 +182,6 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		// receipt still makes the replay idempotent even when no row remains.
 		return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
 	}
-	if candidate, err := h.findReportedChangeRequest(ctx, ledger, input); err != nil {
-		return unavailableTaskChangeRequest("task_change_request_receipt_unavailable"), pluginsdk.TaskChangeRequest{}, nil
-	} else if candidate != nil && candidate.TaskID == input.TaskID {
-		completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", candidate.ID, changeRequestResourceVersion(*candidate))
-		if err != nil {
-			return uncertainTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(*candidate), nil
-		}
-		return commandResultFromRecord(completed), taskChangeRequestToSDK(*candidate), nil
-	}
 	if !h.ownsRepositoryProvider(strings.TrimSpace(input.ProviderID)) {
 		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandDenied, "repository_provider_not_owned", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
 	}
