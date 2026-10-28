@@ -4,6 +4,7 @@ status: in_progress
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 legacy_specs: []
@@ -55,3 +56,9 @@ and known rules retain priority. It includes trusted context and existing
 consumer/circuit integration; it does not import the pending literal catalog.
 Verification uses disposable overlays, focused checks, normal hooks and exact
 delta review. No permanent suite, external loader or operator activation is added.
+
+## Operator rule catalog follow-up
+
+[Task 03](task-03-operator-rule-catalog.md) implements requirement 003 on top of
+task 02: a startup-loaded local JSON/YAML catalog evaluated after built-in rules
+and before the keyword/context fallback. Unset keeps the built-in behavior.

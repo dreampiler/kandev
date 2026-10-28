@@ -532,6 +532,17 @@ correlation accepts it; this toggle does not authorize replay after effects.
 Explicit reset hints control suspension expiry. Model-scoped failures do not
 suspend unrelated models; paid-account scope requires an established binding.
 
+Operators can add provider-error rules from a local JSON or YAML file with the
+`providerErrors.catalogFile` startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`).
+A relative path resolves against the directory of the selected `config.yaml`.
+Kandev reads the file once at startup; restart to apply changes. Built-in rules
+always run first, and catalog rules run in file order before the keyword and
+context classification. Rules that use keyword terms or invocation context, and
+any requested scope, backoff or reset, take effect only while the toggle above
+is on. An invalid file is ignored as a whole and logged with its reason; Kandev
+keeps the built-in rules. See the catalog format reference in
+`apps/backend/internal/agent/runtime/routingerr/externalcatalog/README.md`.
+
 Choose the **Dynamic** agent family when you create a profile. Add concrete
 profiles in the order that Kandev must try them. The logical dynamic profile
 stays selected in the task and utility binding, while each launch uses one
