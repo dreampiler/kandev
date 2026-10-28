@@ -54,17 +54,15 @@ The review follow-up checks below establish the corrected behavior; normal commi
 UI-01: Existing affected surface, after this change.
 
 ```text
-Workflow settings
-  [ ] Require an explicit agent profile
-
-Create task
+Create task (desktop or phone)
   Agent profile: [Choose profile]
   [Create]
+  [Existing validation error when a required choice is missing]
 
 Existing desktop and phone forms share the optional policy and validation.
 ```
 
-This sketch records the affected structure; spacing is illustrative. It does not add a new control or approval requirement.
+This sketch shows the existing create form; spacing and validation wording are illustrative. The opt-in workflow policy is configured through the existing HTTP, WebSocket and MCP workflow configuration surfaces. This backend change does not add a workflow-settings checkbox.
 
 
 ## Review follow-up
