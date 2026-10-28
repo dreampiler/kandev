@@ -43,13 +43,13 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles              store.Repository
-	dynamic               store.DynamicProfileRepository
-	engine                *dynamic.Engine
-	bindingResolver       *dynamic.CredentialBindingResolver
-	billingTypeResolver   func(string) string
-	enabled               atomic.Bool
-	keywordContextEnabled atomic.Bool
+	profiles               store.Repository
+	dynamic                store.DynamicProfileRepository
+	engine                 *dynamic.Engine
+	bindingResolver        *dynamic.CredentialBindingResolver
+	keywordBindingResolver func(context.Context, string, *agentsettingsmodels.AgentProfile, string) dynamic.CredentialBindingDescriptor
+	enabled                atomic.Bool
+	keywordContextEnabled  atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -132,7 +132,12 @@ func (r *ProfileExecutionResolver) ResolveExecution(ctx context.Context, profile
 // returns the same ordered, fail-closed candidate view used by ordinary
 // profile resolution, without claiming a route generation.
 func (r *ProfileExecutionResolver) LoadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
-	return r.loadDynamicProfile(ctx, profileID)
+	return r.loadDynamicProfile(ctx, profileID, "")
+}
+
+// LoadDynamicProfileForSession retains launch locality for opt-in account keys.
+func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(ctx context.Context, sessionID, profileID string) (dynamic.Profile, error) {
+	return r.loadDynamicProfile(ctx, profileID, sessionID)
 }
 
 // ResolveExecutionForSession resolves one logical profile for a caller that
@@ -203,7 +208,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if sessionID == "" {
 		sessionID = "utility:" + uuid.NewString()
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -263,7 +268,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -295,7 +300,7 @@ func (r *ProfileExecutionResolver) UnclassifiedPolicyEnabled(
 	if r == nil || profileID == "" || candidateID == "" {
 		return false
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, "")
 	if err != nil {
 		return false
 	}
@@ -529,7 +534,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -668,7 +673,7 @@ func (r *ProfileExecutionResolver) resolve(
 	if r.dynamic == nil || r.engine == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -787,7 +792,7 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	return agent.Name, nil
 }
 
-func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
+func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID, sessionID string) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
 	}
@@ -837,7 +842,7 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
 			)
 		}
-		r.populateKeywordCandidate(ctx, concrete, &candidate)
+		r.populateKeywordCandidate(ctx, sessionID, concrete, &candidate)
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil

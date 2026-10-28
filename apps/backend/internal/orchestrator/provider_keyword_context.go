@@ -40,7 +40,7 @@ func (s *Service) refineKeywordFailure(ctx context.Context, data watcher.AgentEv
 	}
 	c := failure.Keyword.Context
 	if s.profileExecutionResolver != nil {
-		metadata := s.profileExecutionResolver.ProviderKeywordContext(ctx, data.ExecutionProfileID)
+		metadata := s.profileExecutionResolver.ProviderKeywordContext(ctx, data.ExecutionProfileID, data.SessionID)
 		c.AccountID, c.Tier = metadata.AccountID, metadata.Tier
 		if c.ModelID == "" {
 			c.ModelID = metadata.ModelID

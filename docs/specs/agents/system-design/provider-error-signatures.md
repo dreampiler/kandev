@@ -123,8 +123,16 @@ successful output/effects clear continuity and the existing evidence lifecycle
 owns cleanup. No service, persistent log, fingerprint algorithm or periodic task
 is introduced.
 
-The registered agent's existing billing detector supplies optional account
-context through the credential-binding resolver. Candidate `KeywordAccountID`
+Account context comes from the current session's actual executor and runtime
+environment, not the profile family or backend login alone. Session-aware
+profile loading keeps that binding consistent in the conductor and classifier.
+The existing registered-agent billing detector is reused only when a local
+launch demonstrably uses the backend's unchanged default credential home.
+Different or unknown homes, remote executors, custom launch/provider overrides,
+and incomplete bindings stay unknown without consulting that detector. No new
+credential-file reader, account registry or identity algorithm is added.
+Known same-account profiles still share the existing credential binding.
+Candidate `KeywordAccountID`
 uses that same identity without changing the ordinary `BindingKey` used by
 known-rule failures. Missing bindings remain isolated. Dynamic circuits reuse
 the existing registry and probe leases. Path/model keys isolate unrelated
@@ -149,3 +157,10 @@ continuation is not implemented by this extension.
 The minimal future catalog seam is the existing deterministic classifier:
 known rules stay before `classifyKeywordContext`; loading and export remain
 separate work. No loader or new rule DSL is implemented.
+
+Typed process-start and ACP-initialization failures may separate their own
+matching lifecycle wrapper after the original classification remains unknown.
+Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
+The inner message still needs its error envelope and passes quote/negation
+guards. Untyped workspace/executor failures cannot use this path, and OFF and
+already classified failures keep their previous behavior.

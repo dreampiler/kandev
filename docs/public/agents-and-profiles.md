@@ -522,16 +522,6 @@ can retry it.
 > `features.dynamicAgentRouting` under **Settings > System > Feature Toggles**
 > and restart Kandev before creating or using a dynamic profile.
 
-An additional experimental toggle, **Provider keyword and context
-classification** (`features.providerKeywordContext`), recognizes unmatched
-provider diagnostics using structural signals and keyword combinations. It is
-off in all shipped profiles and requires a restart. Existing typed errors,
-known signatures, candidate policies and output/tool safety checks still take
-precedence. New assistant text remains output unless the existing diagnostic
-correlation accepts it; this toggle does not authorize replay after effects.
-Explicit reset hints control suspension expiry. Model-scoped failures do not
-suspend unrelated models; paid-account scope requires an established binding.
-
 Choose the **Dynamic** agent family when you create a profile. Add concrete
 profiles in the order that Kandev must try them. The logical dynamic profile
 stays selected in the task and utility binding, while each launch uses one
@@ -690,6 +680,22 @@ hold remains. A 401 or 403 requires checking authentication, settings access,
 and the current per-boot interlock. Bearer credentials are rejected on this
 settings route. The interlock is an accidental-mutation guard, not an
 authentication credential; see [Scope agent profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions).
+
+#### Provider keyword and context classification
+
+> [!EXPERIMENTAL]
+> Provider keyword and context classification is disabled in all shipped profiles.
+> Enable `features.providerKeywordContext` under **Settings > System > Feature
+> Toggles** and restart Kandev to use it with dynamic routing.
+
+This classifier recognizes unmatched provider diagnostics using structural
+signals and keyword combinations. Existing typed errors,
+known signatures, candidate policies and output/tool safety checks still take
+precedence. New assistant text remains output unless the existing diagnostic
+correlation accepts it; this toggle does not authorize replay after effects.
+Explicit reset hints control suspension expiry. Model-scoped failures do not
+suspend unrelated models. Account-wide limits require a proven current launch
+credential binding; unknown bindings retain narrower scope.
 
 ### Host probes and executor model catalogs
 

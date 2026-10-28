@@ -54,10 +54,12 @@ typecheck and specification checks passed. Normal changed-Go lint, all other
 applicable commit hooks and commit-message validation passed for the local
 implementation.
 
-The registered agent's existing live billing detector supplies both optional
-account context and the candidate's separate fallback account identity. Focused
-checks confirm that OFF does not consult it, stored profiles remain unchanged,
-and subscription/API-key context uses the same fallback circuit identity.
+Actual session launch context supplies both optional account context and the
+candidate's separate fallback account identity. Existing billing detection is
+applicable only to a proven local launch using the backend's default credential
+home; remote, overridden or missing context remains unknown. Focused checks
+confirm that OFF does not consult it, stored profiles remain unchanged, known
+same-account candidates share limits, and unknown bindings stay isolated.
 The ordinary known-rule binding remains unchanged. Missing models stay
 candidate-scoped, and an OFF consumer retains its legacy circuit duration even
 when an input carries keyword metadata. The terminal
@@ -81,3 +83,8 @@ Flag/profile/config feature contracts and frontend feature data (9 tests) passed
 the backend composition package compiles. No pending literal catalog is imported.
 Broad Windows package attempts also encountered unchanged home-directory and
 escaped-path assertions outside this delta; those runs are not all-green results.
+
+The startup fallback separates only the matching wrapper of a typed process-start
+or ACP-initialization failure after existing classification remains unknown.
+Both wrapped and inner diagnostic bounds, envelope/quote/negation controls,
+known-rule priority, OFF behavior and internal-failure rejection remain intact.
