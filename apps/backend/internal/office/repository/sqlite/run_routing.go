@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
@@ -136,13 +137,13 @@ func (r *Repository) ParkRunForProviderCapacity(
 // replay cannot claim a different run. sessionID is optional: a replay kind
 // that creates no session still releases the deferral park.
 func (r *Repository) SettleCeilingDeferredRun(
-	ctx context.Context, runID, sessionID string,
+	ctx context.Context, runID, sessionID, taskID, agentProfileID string,
 ) (bool, error) {
 	if runID == "" {
 		return false, nil
 	}
 	now := time.Now().UTC()
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE runs
 		SET status = 'claimed',
 		    session_id = CASE WHEN ? = '' THEN session_id ELSE ? END,
@@ -153,8 +154,17 @@ func (r *Repository) SettleCeilingDeferredRun(
 		    finished_at = NULL
 		WHERE id = ?
 		  AND status = 'queued'
-		  AND routing_blocked_status = ?
-	`), sessionID, sessionID, now, runID, runsmodels.RoutingBlockedActionRequired)
+		  AND routing_blocked_status = ?`
+	args := []interface{}{sessionID, sessionID, now, runID, runsmodels.RoutingBlockedActionRequired}
+	if taskID != "" {
+		query += " AND " + dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id") + " = ?"
+		args = append(args, taskID)
+	}
+	if agentProfileID != "" {
+		query += " AND agent_profile_id = ?"
+		args = append(args, agentProfileID)
+	}
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, fmt.Errorf("run_routing: settle ceiling deferral: %w", err)
 	}
@@ -169,14 +179,13 @@ func (r *Repository) SettleCeilingDeferredRun(
 // was dropped. Only the exact row the deferral parked is accepted, so a stale
 // drop cannot fail a run another path already settled.
 func (r *Repository) FailCeilingDeferredRun(
-	ctx context.Context, runID, errorMessage string,
+	ctx context.Context, runID, errorMessage, taskID string,
 ) (*runsmodels.Run, error) {
 	if runID == "" {
 		return nil, nil
 	}
 	now := time.Now().UTC()
-	var run runsmodels.Run
-	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE runs
 		SET status = 'failed',
 		    outcome = NULL,
@@ -187,9 +196,15 @@ func (r *Repository) FailCeilingDeferredRun(
 		    finished_at = COALESCE(finished_at, ?)
 		WHERE id = ?
 		  AND status = 'queued'
-		  AND routing_blocked_status = ?
-		RETURNING *
-	`), errorMessage, now, runID, runsmodels.RoutingBlockedActionRequired).StructScan(&run)
+		  AND routing_blocked_status = ?`
+	args := []interface{}{errorMessage, now, runID, runsmodels.RoutingBlockedActionRequired}
+	if taskID != "" {
+		query += " AND " + dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id") + " = ?"
+		args = append(args, taskID)
+	}
+	query += " RETURNING *"
+	var run runsmodels.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(query), args...).StructScan(&run)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

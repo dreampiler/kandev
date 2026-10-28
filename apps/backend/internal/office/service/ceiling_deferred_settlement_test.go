@@ -70,6 +70,44 @@ func TestAgentReadyRecoversCeilingDeferredRunSettlement(t *testing.T) {
 	require.Nil(t, got.RoutingBlockedStatus)
 }
 
+func TestAgentReadyMismatchedTaskDoesNotSettleCeilingDeferredRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentReady, bus.NewEvent(events.AgentReady, "test", lifecycle.AgentEventPayload{
+		TaskID:         "other-task",
+		SessionID:      "session-1",
+		AgentProfileID: "missing-agent",
+		CausingRunID:   run.ID,
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
+}
+
+func TestAgentReadyMismatchedAgentDoesNotSettleCeilingDeferredRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentReady, bus.NewEvent(events.AgentReady, "test", lifecycle.AgentEventPayload{
+		TaskID:         "t-cap",
+		SessionID:      "session-1",
+		AgentProfileID: "other-agent",
+		CausingRunID:   run.ID,
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
+}
+
 func TestAgentReadyWithoutCausingRunLeavesCeilingDeferredRunParked(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

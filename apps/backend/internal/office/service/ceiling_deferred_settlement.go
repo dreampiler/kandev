@@ -14,10 +14,19 @@ import (
 func (s *Service) CeilingDeferredLaunchReplayed(
 	ctx context.Context, taskID, causingRunID, sessionID, turnID string,
 ) error {
+	return s.settleCeilingDeferredRun(ctx, taskID, causingRunID, sessionID, turnID, "")
+}
+
+// settleCeilingDeferredRun is the shared exact-row settlement. taskID always
+// scopes the update to the run's own task; agentProfileID adds the lifecycle
+// event's agent identity when the ready-event recovery path supplies it.
+func (s *Service) settleCeilingDeferredRun(
+	ctx context.Context, taskID, causingRunID, sessionID, turnID, agentProfileID string,
+) error {
 	if causingRunID == "" {
 		return nil
 	}
-	wrote, err := s.repo.SettleCeilingDeferredRun(ctx, causingRunID, sessionID)
+	wrote, err := s.repo.SettleCeilingDeferredRun(ctx, causingRunID, sessionID, taskID, agentProfileID)
 	if err != nil {
 		return fmt.Errorf("settle ceiling-deferred run %s: %w", causingRunID, err)
 	}
@@ -52,7 +61,9 @@ func (s *Service) settleCeilingDeferredLaunchOnReady(
 	if data == nil || data.TaskID == "" || data.CausingRunID == "" || data.SessionID == "" {
 		return nil
 	}
-	return s.CeilingDeferredLaunchReplayed(ctx, data.TaskID, data.CausingRunID, data.SessionID, data.TurnID)
+	return s.settleCeilingDeferredRun(
+		ctx, data.TaskID, data.CausingRunID, data.SessionID, data.TurnID, data.AgentProfileID,
+	)
 }
 
 // CeilingDeferredLaunchDropped fails the Office run whose deferred launch the
@@ -65,7 +76,7 @@ func (s *Service) CeilingDeferredLaunchDropped(
 		return nil
 	}
 	message := fmt.Sprintf("the queued launch was dropped: %s", detail)
-	run, err := s.repo.FailCeilingDeferredRun(ctx, causingRunID, message)
+	run, err := s.repo.FailCeilingDeferredRun(ctx, causingRunID, message, taskID)
 	if err != nil {
 		return fmt.Errorf("fail ceiling-deferred run %s: %w", causingRunID, err)
 	}

@@ -27,7 +27,7 @@ func TestSettleCeilingDeferredRun(t *testing.T) {
 		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
 	))
 
-	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1")
+	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-cap", "agent-cap")
 	require.NoError(t, err)
 	require.True(t, wrote)
 
@@ -40,7 +40,7 @@ func TestSettleCeilingDeferredRun(t *testing.T) {
 	require.Nil(t, got.FinishedAt)
 
 	// A duplicate replay is a no-op and cannot overwrite the bound session.
-	wrote, err = repo.SettleCeilingDeferredRun(ctx, run.ID, "session-2")
+	wrote, err = repo.SettleCeilingDeferredRun(ctx, run.ID, "session-2", "t-cap", "agent-cap")
 	require.NoError(t, err)
 	require.False(t, wrote)
 	got, err = repo.GetRunByID(ctx, run.ID)
@@ -65,7 +65,7 @@ func TestSettleCeilingDeferredRunIgnoresOtherParks(t *testing.T) {
 		ctx, run.ID, string(runsmodels.RoutingBlockedWaitingForCapacity), time.Now().UTC().Add(time.Minute),
 	))
 
-	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1")
+	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-cap", "agent-cap")
 	require.NoError(t, err)
 	require.False(t, wrote)
 
@@ -92,7 +92,7 @@ func TestFailCeilingDeferredRun(t *testing.T) {
 		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
 	))
 
-	failed, err := repo.FailCeilingDeferredRun(ctx, run.ID, "the queued launch was dropped: superseded")
+	failed, err := repo.FailCeilingDeferredRun(ctx, run.ID, "the queued launch was dropped: superseded", "t-cap")
 	require.NoError(t, err)
 	require.NotNil(t, failed)
 	require.Equal(t, "failed", string(failed.Status))
@@ -101,10 +101,45 @@ func TestFailCeilingDeferredRun(t *testing.T) {
 	require.NotNil(t, failed.FinishedAt)
 
 	// A stale drop cannot fail a run another path already settled.
-	again, err := repo.FailCeilingDeferredRun(ctx, run.ID, "second drop")
+	again, err := repo.FailCeilingDeferredRun(ctx, run.ID, "second drop", "t-cap")
 	require.NoError(t, err)
 	require.Nil(t, again)
 	got, err := repo.GetRunByID(ctx, run.ID)
 	require.NoError(t, err)
 	require.Equal(t, "the queued launch was dropped: superseded", got.ErrorMessage)
+}
+
+func TestSettleCeilingDeferredRunRejectsMismatchedTaskOrAgent(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	seedAgentProfile(t, db, "agent-cap", "ws-cap")
+	ctx := context.Background()
+
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-cap",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"t-cap"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	require.NoError(t, repo.CreateRun(ctx, run))
+	require.NoError(t, repo.ParkRunForProviderCapacity(
+		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
+	))
+
+	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "other-task", "agent-cap")
+	require.NoError(t, err)
+	require.False(t, wrote)
+
+	wrote, err = repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-cap", "other-agent")
+	require.NoError(t, err)
+	require.False(t, wrote)
+
+	still, err := repo.GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "queued", string(still.Status))
+	require.NotNil(t, still.RoutingBlockedStatus)
+
+	wrote, err = repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-cap", "agent-cap")
+	require.NoError(t, err)
+	require.True(t, wrote)
 }
