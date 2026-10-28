@@ -47,8 +47,17 @@ Observed result: the original input-end endpoint check failed on the baseline
 selected `-race` run passed (2.514s), including that endpoint, invalid JSON,
 normal close frame, explicit done, credential invalidation, independent
 connections, and the existing stream delivery, shell-input and concurrent-write
-checks. No agent or shell process was started. Temporary overlays are removed
-after delivery; no permanent test or collection rule is introduced.
+checks. No agent or shell process was started. Those original temporary
+overlays were removed after verification.
+
+The existing `workspace_stream_ws_test.go` now retains the endpoint regression.
+Its shared helper exposes handler completion without changing existing callers.
+The test reads the connected frame, closes the client, publishes no event or
+shell output, and waits for the handler itself to return before cleanup runs.
+Removing only the inputDone exit makes this test fail (10.527s); the committed
+candidate and selected existing input/event controls pass under fts5/race
+detection (2.255s). Cleanup can still release a failed test's listener. Hosted
+CI remains a separate result.
 
 ## Files and dependencies
 
