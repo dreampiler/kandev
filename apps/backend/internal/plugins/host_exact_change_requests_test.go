@@ -50,6 +50,7 @@ func newExactChangeRequestHost(t *testing.T, providerIDs []string) *pluginHost {
 		Manifest: manifest.Manifest{ID: "change-request-plugin", RepositoryProviders: providerIDs,
 			Capabilities: manifest.Capabilities{APIWrite: []string{"task_change_requests"}}},
 		InstallationID: "change-request-installation",
+		Status:         StatusActive,
 	}
 	registry := NewRegistry()
 	registry.Add(record)
@@ -112,6 +113,10 @@ func TestExactChangeRequestReportAndRemove(t *testing.T) {
 	removeResult, err := manager.Remove(context.Background(), remove)
 	if err != nil || removeResult == nil || removeResult.Status != pluginsdk.CommandApplied {
 		t.Fatalf("Remove = result:%+v err:%v", removeResult, err)
+	}
+	replayed, replayedChange, err := manager.Report(context.Background(), report)
+	if err != nil || replayed == nil || replayed.Status != pluginsdk.CommandApplied || replayedChange.ID != "" {
+		t.Fatalf("Report replay after remove = result:%+v change:%+v err:%v, want recorded APPLIED", replayed, replayedChange, err)
 	}
 }
 
@@ -281,5 +286,28 @@ func TestExactChangeRequestRejectsStaleApprovalRevision(t *testing.T) {
 	})
 	if err != nil || current == nil || current.Status != pluginsdk.CommandApplied {
 		t.Fatalf("current Report = result:%+v err:%v, want APPLIED", current, err)
+	}
+}
+
+func TestExactChangeRequestRejectsDisabledInstallation(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	records := host.service.registry.List()
+	if len(records) != 1 {
+		t.Fatalf("registry records = %d, want 1", len(records))
+	}
+	if _, ok := host.service.registry.SetStatus(records[0].ID, StatusDisabled); !ok {
+		t.Fatal("could not disable the test installation")
+	}
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	result, _, err := manager.Report(context.Background(), pluginsdk.ExactTaskChangeRequestReport{
+		RequestID: "disabled-report", WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1, State: "open",
+		IdempotencyKey: "disabled-report", ApprovalRevision: 1, ManifestDigest: changeRequestManifestDigest(t, host),
+	})
+	if err != nil || result == nil || result.Status != pluginsdk.CommandDenied || result.Reason != "plugin_not_active" {
+		t.Fatalf("disabled Report = result:%+v err:%v, want DENIED plugin_not_active", result, err)
 	}
 }

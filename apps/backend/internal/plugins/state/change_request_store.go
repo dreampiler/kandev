@@ -172,24 +172,6 @@ func normalizeChangeRequestRecord(record ChangeRequestRecord, now string) Change
 	return record
 }
 
-// latchChangeRequestRecord preserves the original id and created timestamp,
-// the first merged/closed instants, and the merged lifecycle state, so a stale
-// report cannot unmerge a row.
-func latchChangeRequestRecord(record, existing ChangeRequestRecord, _ string) ChangeRequestRecord {
-	record.ID = existing.ID
-	record.CreatedAt = existing.CreatedAt
-	if existing.State == ChangeRequestStateMerged {
-		record.State = ChangeRequestStateMerged
-	}
-	if existing.MergedAt != "" {
-		record.MergedAt = existing.MergedAt
-	}
-	if existing.ClosedAt != "" {
-		record.ClosedAt = existing.ClosedAt
-	}
-	return record
-}
-
 // ReportChangeRequest upserts one plugin-reported task change request. The
 // owning installation, workspace, provider, repository, and number identify
 // the row; the latest report updates the descriptive fields. The created,
@@ -214,8 +196,8 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 		return ChangeRequestRecord{}, false, err
 	}
 	created := err != nil
-	if !created {
-		record = latchChangeRequestRecord(record, existing, now)
+	if record.State == ChangeRequestStateMerged && record.MergedAt == "" && (created || existing.MergedAt == "") {
+		return ChangeRequestRecord{}, false, errors.New("plugin task change request: merged state requires merged_at")
 	}
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO plugin_task_change_requests (
@@ -224,9 +206,12 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 			created_at, merged_at, closed_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(installation_id, workspace_id, provider_id, repository_id, number)
-		DO UPDATE SET task_id = excluded.task_id, url = excluded.url, title = excluded.title,
-			state = excluded.state, head_branch = excluded.head_branch, base_branch = excluded.base_branch,
-			created_at = excluded.created_at, merged_at = excluded.merged_at, closed_at = excluded.closed_at,
+		DO UPDATE SET task_id = excluded.task_id, provider_host = excluded.provider_host,
+			url = excluded.url, title = excluded.title,
+			state = CASE WHEN state = 'merged' THEN 'merged' ELSE excluded.state END,
+			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
+			merged_at = CASE WHEN merged_at <> '' THEN merged_at ELSE excluded.merged_at END,
+			closed_at = CASE WHEN closed_at <> '' THEN closed_at ELSE excluded.closed_at END,
 			updated_at = excluded.updated_at
 	`), record.ID, record.InstallationID, record.WorkspaceID, record.TaskID, record.ProviderID, record.ProviderHost,
 		record.RepositoryID, record.Number, record.URL, record.Title, record.State, record.HeadBranch, record.BaseBranch,
@@ -234,10 +219,15 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 	if err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
+	var stored ChangeRequestRecord
+	if err := tx.GetContext(ctx, &stored, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
+		record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number); err != nil {
+		return ChangeRequestRecord{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
-	return record, !created, nil
+	return stored, !created, nil
 }
 
 // RemoveChangeRequest deletes one plugin-reported task change request owned

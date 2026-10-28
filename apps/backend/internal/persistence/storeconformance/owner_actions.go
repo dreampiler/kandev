@@ -3342,11 +3342,15 @@ func pluginTaskChangeRequestAction() apiAction {
 		if err != nil {
 			return err
 		}
-		_, _, err = ledger.ReportChangeRequest(s.Context, pluginstate.ChangeRequestRecord{
+		record := pluginstate.ChangeRequestRecord{
 			InstallationID: installationID, WorkspaceID: workspaceID, TaskID: id,
 			ProviderID: providerID, RepositoryID: repositoryID(id), Number: 1,
 			URL: "https://forge.example.test/pulls/1", Title: "conformance", State: bodyState,
-		})
+		}
+		if bodyState == pluginstate.ChangeRequestStateMerged {
+			record.MergedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		_, _, err = ledger.ReportChangeRequest(s.Context, record)
 		return err
 	}
 	readEntry := func(s testconformance.ScenarioContext, id string) (*changeRequestBehaviorRecord, error) {

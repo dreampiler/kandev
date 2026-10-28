@@ -126,6 +126,14 @@ func TestChangeRequestStoreRejectsInvalidTimestamp(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid timestamp must be rejected")
 	}
+	_, _, err = store.ReportChangeRequest(context.Background(), ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 2,
+		State: ChangeRequestStateMerged,
+	})
+	if err == nil {
+		t.Fatal("new merged row without merged_at must be rejected")
+	}
 }
 
 func TestChangeRequestStoreDeleteByInstallation(t *testing.T) {
