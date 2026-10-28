@@ -65,6 +65,7 @@ func matchKeywordGroup(text string) (keywordGroup, int, bool) {
 	var best keywordGroup
 	bestCount := 0
 	tied := false
+	accountHit, goneHit := false, false
 	for _, group := range keywordGroups {
 		count := 0
 		for _, term := range group.terms {
@@ -72,11 +73,18 @@ func matchKeywordGroup(text string) (keywordGroup, int, bool) {
 				count++
 			}
 		}
+		accountHit = accountHit || (group.group == groupAccount && count > 0)
+		goneHit = goneHit || (group.group == groupGone && count > 0)
 		if count > bestCount {
 			best, bestCount, tied = group.group, count, false
 		} else if count > 0 && count == bestCount {
 			tied = true
 		}
+	}
+	// Generic recovery terms cannot resolve conflicting account or removal
+	// evidence. Such evidence alone also cannot authorize a stop or hold.
+	if (accountHit && best != groupAccount) || (goneHit && best != groupGone) {
+		tied = true
 	}
 	return best, bestCount, tied
 }

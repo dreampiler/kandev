@@ -109,7 +109,9 @@ The 400 request/context distinction authorizes no circuit or replay permission.
 
 `keyword_groups.go` owns the semantic vocabulary. Separator normalization and
 bounded stem matching count distinct terms, not occurrences. Single terms and
-ties retain low confidence. Error envelopes, source completeness and current
+ties retain low confidence. Unresolved ACCOUNT or GONE evidence also retains
+ambiguity when a different group wins by term count; one such term cannot
+authorize a stop, hold or automatic retry. Error envelopes, source completeness and current
 invocation evidence remain separate from semantic confidence. A keyword match
 cannot turn a quoted success into a terminal provider failure.
 

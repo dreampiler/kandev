@@ -31,10 +31,12 @@ attribution, activate an operator flag or publish from this worktree.
 
 ## Verification
 
-Use excluded disposable Go overlays with existing package runners:
+The initial implementation used excluded disposable Go overlays. The approved
+PR review follow-up adds minimal regressions to existing package test files;
+run only their relevant entrypoints:
 
 ```text
-go test -trimpath -overlay <temporary-overlay.json> ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic ./internal/orchestrator -run '^TestPR2' -count=1
+go test -trimpath -tags fts5,e2e ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic ./internal/orchestrator -run '^(TestClassifyKeyword|TestKeyword|TestConsecutiveKeyword)' -count=1
 ```
 
 Run affected signature, diagnostic, unclassified and circuit controls. Use race
@@ -53,6 +55,13 @@ path/model scope. Existing flag contracts, frontend feature data (8 tests),
 typecheck and specification checks passed. Normal changed-Go lint, all other
 applicable commit hooks and commit-message validation passed for the local
 implementation.
+
+The review follow-up covers bounded envelopes, distinct hits, ties,
+normalization, structural statuses, disabled/known-rule precedence, scoped
+circuits, reset deadlines, probe rollback, saved policies and bounded
+consecutive observations. Reproduced mixed ACCOUNT/GONE and generic LIMIT
+diagnostics retain ambiguity instead of granting automatic quota recovery;
+existing known rules and single-term confidence remain unchanged.
 
 Actual session launch context supplies both optional account context and the
 candidate's separate fallback account identity. Existing billing detection is
