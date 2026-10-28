@@ -5,7 +5,12 @@ status: done
 wave: 4
 depends_on: ["03-resolve-and-auto-start"]
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/task-dependencies.md"
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+acceptance_criteria:
+  - AC-TASKS-TASK-DEPENDENCIES-001.2
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 ---
 
 # Task 04: Halt Chains on a Failed Predecessor

@@ -4,7 +4,8 @@ requirements:
 system_design:
   - ../../specs/tasks/system-design/task-dependencies.md
 created: 2026-08-09
-status: not_started
+status: done
+legacy_specs: []
 ---
 
 # Implementation Plan: Task Dependencies and Auto-Start Chains

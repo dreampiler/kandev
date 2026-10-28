@@ -5,7 +5,12 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/task-dependencies.md"
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+acceptance_criteria:
+  - AC-TASKS-TASK-DEPENDENCIES-001.2
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 ---
 
 # Task 01: Promote Dependency Edges to a Core Relationship
