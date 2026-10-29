@@ -554,3 +554,82 @@ func TestWorkspaceDeletedRemovesOnlyThatWorkspaceChangeRequests(t *testing.T) {
 		t.Fatalf("ws-2 rows = %d, want 1", len(remaining))
 	}
 }
+
+func TestExactChangeRequestFailedRemoveCompleteThenNewerReportIsNotDeleted(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	connection, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open command database: %v", err)
+	}
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = connection.Close() })
+	pool := db.NewPool(connection, connection)
+	commandStore, err := state.NewCommandStore(pool)
+	if err != nil {
+		t.Fatalf("NewCommandStore: %v", err)
+	}
+	ledger, err := state.NewChangeRequestStore(pool)
+	if err != nil {
+		t.Fatalf("NewChangeRequestStore: %v", err)
+	}
+	host.commandStore = commandStore
+	host.changeRequestsDep = func() *state.ChangeRequestStore { return ledger }
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	digestManifest := changeRequestManifestDigest(t, host)
+	seed := pluginsdk.ExactTaskChangeRequestReport{
+		RequestID: "seed", WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 61,
+		URL: "https://forge.example.test/pulls/61", Title: "Seed", State: "open",
+		IdempotencyKey: "seed", ApprovalRevision: 1, ManifestDigest: digestManifest,
+	}
+	if result, _, err := manager.Report(context.Background(), seed); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("seed Report = result:%+v err:%v", result, err)
+	}
+	if _, err := connection.Exec(`
+		CREATE TRIGGER fail_remove_receipt
+		BEFORE UPDATE ON plugin_host_command_receipts
+		WHEN NEW.operation_id IN (
+			SELECT operation_id FROM plugin_host_command_intents WHERE idempotency_key = 'uncertain-remove'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'injected remove receipt completion failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create remove failure trigger: %v", err)
+	}
+	remove := pluginsdk.ExactTaskChangeRequestRemove{
+		RequestID: "uncertain-remove", WorkspaceID: "workspace-change-requests",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 61,
+		IdempotencyKey: "uncertain-remove", ApprovalRevision: 1, ManifestDigest: digestManifest,
+	}
+	failed, err := manager.Remove(context.Background(), remove)
+	if err != nil || failed == nil || failed.Status != pluginsdk.CommandUncertain {
+		t.Fatalf("failed Remove = result:%+v err:%v, want UNCERTAIN", failed, err)
+	}
+	if _, err := connection.Exec(`DROP TRIGGER fail_remove_receipt`); err != nil {
+		t.Fatalf("drop remove failure trigger: %v", err)
+	}
+	newer := seed
+	newer.RequestID, newer.IdempotencyKey = "newer", "newer"
+	newer.Title, newer.State, newer.MergedAt = "Newer", "merged", time.Now().UTC().Format(time.RFC3339Nano)
+	if result, _, err := manager.Report(context.Background(), newer); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("newer Report = result:%+v err:%v", result, err)
+	}
+	replayed, err := manager.Remove(context.Background(), remove)
+	if err != nil || replayed == nil {
+		t.Fatalf("old Remove replay = result:%+v err:%v", replayed, err)
+	}
+	rows, err := ledger.ListChangeRequestsByTask(context.Background(), host.installationID, seed.WorkspaceID, seed.TaskID)
+	if err != nil {
+		t.Fatalf("list after old Remove replay: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Title != "Newer" || rows[0].State != "merged" {
+		t.Fatalf("rows after old Remove replay = %+v, want the newer merged row", rows)
+	}
+	if replayed.Status != pluginsdk.CommandUncertain {
+		t.Fatalf("old Remove replay = %+v, want UNCERTAIN", replayed)
+	}
+}
