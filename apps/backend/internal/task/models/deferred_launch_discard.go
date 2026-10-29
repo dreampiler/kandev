@@ -13,8 +13,9 @@ const (
 	// launch, so nothing was written.
 	DeferredLaunchDiscardAlreadyClear DeferredLaunchDiscardOutcome = "already_clear"
 	// DeferredLaunchDiscardDiscarded means the ceiling half of the shared
-	// deferred_launch record was removed and the launch's automation ownership
-	// was settled.
+	// deferred_launch record was removed, the launch's automation run was
+	// settled, and its automation start ownership was released or never
+	// belonged to this launch.
 	DeferredLaunchDiscardDiscarded DeferredLaunchDiscardOutcome = "discarded"
 	// DeferredLaunchDiscardRetained means the durable record, and with it the
 	// launch ownership, is still in place because the discard could not
@@ -35,6 +36,10 @@ const (
 	// serves could not be settled. Clearing the record first would leave an open
 	// run with nothing to settle it.
 	DeferredLaunchDiscardReasonSettlement DeferredLaunchDiscardReason = "settlement_incomplete"
+	// DeferredLaunchDiscardReasonOwnership means this request had to release the
+	// automation start ownership the launch carried and could not prove it did.
+	// Leaving the record in place keeps the marker meaningful.
+	DeferredLaunchDiscardReasonOwnership DeferredLaunchDiscardReason = "ownership_incomplete"
 	// DeferredLaunchDiscardReasonClear means the compare-and-set clear could not
 	// be proven to land.
 	DeferredLaunchDiscardReasonClear DeferredLaunchDiscardReason = "clear_incomplete"
@@ -42,6 +47,10 @@ const (
 	// ceiling half but cannot be decoded, so its identity cannot be compared.
 	// It is reported rather than silently discarded.
 	DeferredLaunchDiscardReasonRecordUnreadable DeferredLaunchDiscardReason = "record_unreadable"
+	// DeferredLaunchDiscardReasonRecordSuperseded means the record this request
+	// observed was replaced or consumed before it could be claimed. Nothing was
+	// settled, and the newer record is not this request's to discard.
+	DeferredLaunchDiscardReasonRecordSuperseded DeferredLaunchDiscardReason = "record_superseded"
 )
 
 // DeferredLaunchDiscardResult is the answer to one explicit discard request.

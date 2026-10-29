@@ -37,30 +37,39 @@ agreed public contract.
 ## In scope
 
 - `internal/task/models`: the closed outcome and retained-reason sets.
-- `internal/orchestrator`: the shared settlement routine, the guarded
-  identity-CAS clear that refuses a live foreign claim, and the exported discard
-  entry point.
+- `internal/orchestrator`: the shared settlement routine, the identity-bound
+  dispatch claim taken before any settlement effect, the guarded clear that
+  refuses a live foreign claim, the conditional automation-start ownership
+  release, and the exported discard entry point.
 - `internal/task/service`: task-write plus executor-mutation authorization and a
   narrow injected settler; an unwired settler is an explicit error.
 - `internal/task/handlers`: one thin route and response.
 - Composition wiring in `internal/backendapp`.
-- Focused tests in the existing ceiling replay test file and one route
-  registration assertion.
+- One-off verification injected with `go test -overlay` from outside the
+  repository and removed afterwards; no permanent test file or auto-collected
+  test addition is part of this work order.
 
 ## Out of scope
 
 - Frontend affordance or copy.
 - Session start, resume, stop, or steering; task-state writes.
 - New schema, permissions, configuration, metrics, or queue.
+- Permanent companion tests. Making the one-off checks permanent needs a
+  separate narrow proposal with its repeated-execution rationale.
 
 ## Validation
 
 - `gofmt` on every touched Go file.
 - `go build ./...` in `apps/backend`.
-- `go test ./internal/orchestrator` (whole package) with the known
-  Windows-only passthrough-attachment failures recorded separately.
-- `go test ./internal/task/service -run DeferredLaunch`.
-- `go test ./internal/task/handlers -run 'DeferredLaunchDiscard|RegisteredTaskCreate'`.
+- `go vet` on the touched packages and `golangci-lint --new-from-rev` on the
+  changed delta.
+- One-off `-overlay` checks covering no-op, success with a coexisting non-ceiling
+  key and a running session left untouched, settlement failure, ownership-release
+  failure, another run's ownership marker, clear failure, a live claim, a claim
+  appearing after the read, a successor after the read, and route registration.
+  The same file replayed over the previous implementation fails exactly on the
+  ordering and ownership cases this work order fixes.
+- Existing repository tests for the touched packages.
 - `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all`.
 - A local `pr-docs.cjs validateCoverage` run over the real changed-file set.

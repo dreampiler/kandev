@@ -50,12 +50,14 @@ handler.
 - A closed three-way outcome plus a closed set of retained reasons, so an
   incomplete discard is never reported as a no-op or a success.
 - One settlement routine shared by the automatic replay drop and the explicit
-  path: settle the served automation run, clear only the ceiling keys under the
-  entry-admission lock with an identity CAS, release automation start ownership,
-  publish the task update. A failure stops before ownership release.
-- A live dispatch claim and a successor record are never cleared.
+  path. The request takes the existing dispatch claim for the observed record
+  first, then settles the served automation run, releases the automation start
+  ownership this launch holds, clears only the ceiling keys under the same
+  identity CAS, and publishes. Settlement, ownership, or clear failure retains
+  the record.
+- A live dispatch claim, a successor record, and another execution's ownership
+  marker are never cleared.
 - Task-write plus executor-mutation authorization, reused from task mutation.
-- Focused backend tests in the existing ceiling replay test file.
 
 ### Out of scope
 
@@ -69,18 +71,29 @@ handler.
 
 ## Delivery order
 
-One work order. The durable service and its tests come first in the same change
-as the transport, because a transport without a proven settlement path would be
-the exact "bool only" shortcut this package replaces.
+One work order. The durable service and its verification come first in the same
+change as the transport, because a transport without a proven settlement path
+would be the exact "bool only" shortcut this package replaces.
 
-## Evidence and conformance
+## Verification and test lifetime
 
-The safety properties are pinned by tests colocated with the existing ceiling
-replay tests: no-op, success with a coexisting non-ceiling key, settlement
-failure, clear failure, live claim, successor record, unreadable record, and a
-running session left untouched. The route registration has its own assertion.
+The safety properties are verified with a one-off check outside the
+repository's permanent test set: a temporary Go test file is injected into the
+package with `go test -overlay`, exercised against the real SQLite repository and
+small fakes, and removed afterwards. The same file is replayed over the previous
+implementation as a negative control, which fails exactly on the ordering and
+ownership cases this package fixes. No new permanent test file, test framework,
+or append to an auto-collected test file is part of this change; the verified
+cases are no-op, success with a coexisting non-ceiling key, settlement failure,
+ownership-release failure, another run's ownership marker, clear failure, live
+claim, a claim appearing after the read, a successor after the read, and a
+running session left untouched. The route registration is checked the same way.
 The transport's HTTP authorization path reuses the same helpers as the deferred
 prompt edit.
+
+If upstream requires these as permanent companion tests, that is a separate
+narrow proposal: it needs the repeated-execution rationale and explicit
+approval, and it is not a condition for this implementation.
 
 ## Boundaries
 

@@ -259,24 +259,38 @@ that is still valid. Both share one settlement routine so their ordering and
 ownership rules cannot diverge.
 
 `DeferredLaunchDiscardOutcome` is a closed set: `already_clear` (nothing was
-written), `discarded` (the ceiling half is gone and the launch's automation
-ownership was settled), and `retained` (the record is still durable). A retained
+written), `discarded` (the ceiling half is gone, the served automation run was
+settled, and the launch's automation start ownership was released or never
+belonged to it), and `retained` (the record is still durable). A retained
 outcome carries one closed reason: `claim_in_flight`, `settlement_incomplete`,
-`clear_incomplete`, or `record_unreadable`. A failure is never reported as a
-no-op or as a success.
+`ownership_incomplete`, `clear_incomplete`, `record_unreadable`, or
+`record_superseded`. A failure is never reported as a no-op or as a success.
 
-The durable work reuses the established ceiling boundaries. The shared routine
-settles the automation run the launch serves first, then removes only
-`ceiling_`-prefixed keys under the entry-admission lock with an identity-bound
-compare-and-set against the observed record, then releases the automation start
-ownership and publishes the task update. A settlement or clear failure stops
-before the ownership release, so the record stays as recoverable as it was.
+The durable work reuses the established ceiling boundaries. The request first
+takes the existing dispatch claim for the exact record it observed, under the
+entry-admission lock and bound to the record's full identity, so no replay or
+Send Now can start dispatching in between and a successor record with the same
+destination session is never settled under the old decision. Only after that
+claim is held does the shared routine settle the automation run the launch
+serves, release the automation start ownership this launch holds, remove only
+`ceiling_`-prefixed keys under the same identity-bound compare-and-set, and
+publish the task update. A failure at settlement, ownership release, or clear
+returns `retained`, removes nothing, and releases the claim, so the record and
+its ownership stay as recoverable as they were.
+
+Ownership release is conditional on the captured marker value. A marker that is
+absent, already replaced, or that belongs to a bound or live run is not this
+request's to remove; only a failed, unbound run with no persisted session is
+released, and a read failure at that point retains the record instead of
+reporting success.
 
 A live dispatch claim is authoritative for this path: the claim is another
 dispatcher's key and may already be launching, so the discard reports
 `claim_in_flight` and leaves the record alone. A record that claims the ceiling
 half but cannot be decoded is reported as `record_unreadable` rather than
-silently removed, because its identity cannot be compared.
+silently removed, because its identity cannot be compared. A record replaced or
+consumed between the read and the claim is reported as `record_superseded`
+because nothing was settled under the observed identity.
 
 The task service keeps authorization: `ScopeTaskWrite` plus the existing
 executor-mutation check run before any record work, exactly as the deferred
