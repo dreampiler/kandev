@@ -340,7 +340,7 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
-		copyDeliveryTerminalIdentity(&claim.readyPayload, event)
+		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -478,6 +478,10 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+	// A session MCP selection may have arrived while this turn was active. The
+	// completion path transitions to Ready directly instead of going through
+	// MarkReady, so explicitly retry any deferred idle-session reconfiguration.
+	m.RequestSessionMCPReconfiguration(context.Background(), claim.execution.SessionID)
 }
 
 func completeEventStopReason(event *agentctl.AgentEvent) string {
@@ -490,6 +494,7 @@ func completeEventStopReason(event *agentctl.AgentEvent) string {
 
 const claudeACPAgentID = "claude-acp"
 const codexACPAgentID = "codex-acp"
+const openCodeACPAgentID = "opencode-acp"
 
 func (m *Manager) retainPromptFailureRuntime(
 	execution *AgentExecution,
@@ -512,7 +517,7 @@ func (m *Manager) retainPromptFailureRuntime(
 		current.ErrorMessage = ""
 		current.promptSettlementGeneration = event.PromptGeneration
 		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
-		copyDeliveryTerminalIdentity(&payload, event)
+		copyDeliveryTerminalIdentity(&payload, event, current)
 		payload.ErrorMessage = extractErrorMessage(event)
 		payload.PromptFailureDisposition = event.PromptFailureDisposition
 		if event.AttemptID != "" {
@@ -578,7 +583,7 @@ func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
 
 func isRetainableACPAgent(agentID string) bool {
 	switch agentID {
-	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
+	case claudeACPAgentID, codexACPAgentID, openCodeACPAgentID, acpcompat.CursorAgentID, "mock-agent":
 		return true
 	default:
 		return false
@@ -1606,6 +1611,11 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypePromptSuggestion:
+		// Bound only to its originating prompt; an unknown origin gets no turn.
+		if event.TurnID == "" {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case streams.EventTypeUsageObservation:
 		if event.TurnID == "" {
 			if event.PromptGeneration != 0 {

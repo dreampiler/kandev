@@ -44,7 +44,7 @@ export type KanbanStepEvents = {
  *
  * `status` is the resolution verdict and is only meaningful on `dependsOn`
  * entries: "resolved" (finished successfully), "failed" (FAILED/CANCELLED —
- * halts the chain), or "pending" (anything else, including archived).
+ * halts the chain), or "pending" (unfinished work, whether archived or not).
  */
 export type TaskDependencyRef = {
   id: string;
@@ -287,6 +287,8 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
+    source?: string;
+    source_path?: string;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
