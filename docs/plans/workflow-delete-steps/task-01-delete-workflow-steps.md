@@ -154,9 +154,11 @@ Minimal regressions were added to existing test files:
 - `TestDeleteWorkflowMissingRollsBackStepAndBindingDeletes`
 - `TestDeleteWorkflowsByWorkspaceRemovesOnlySelectedSteps`
 - `TestRunMigrationsPrunesWorkflowStepOrphansOnce`
-- `TestPostgresWorkflowStepOrphanPruneSerializesAcrossConnections` (env-gated)
+- `TestPostgresWorkflowStepOrphanPruneStartsAndSerializes` (env-gated)
 
-The maintainer's proposed new test file was not applied wholesale.
+The maintainer's proposed new test file was not applied wholesale. The
+PostgreSQL case lives in the existing startup migration test file and reuses
+the existing isolated multi-connection helper and DSN gate.
 
 ### Verification (2026-10-29)
 
@@ -170,9 +172,11 @@ The maintainer's proposed new test file was not applied wholesale.
   reached the same Windows-only storage scenario failure, so the sentinel
   regression is gone while the unrelated platform limitation remains.
 - `TestUpgradeFixtureManifest`: pass.
-- The five regressions above: four SQLite cases pass with race detection; the
-  PostgreSQL case skips locally because `KANDEV_TEST_POSTGRES_DSN` is unset.
-  CI runs it with a DSN.
+- The five regressions above: four SQLite cases pass with race detection. The
+  PostgreSQL case first runs `runMigrations` to prove the startup path reaches
+  the prune, then exercises two concurrent helper calls under the advisory
+  lock; it skips locally because `KANDEV_TEST_POSTGRES_DSN` is unset. CI runs
+  it with a DSN.
 - `go run ./cmd/sqlguard ./internal`: pass.
 - `scripts/lint-go-changed` on the changed Go files: 0 issues. A shared
   golangci-lint lock from another run required the equivalent
