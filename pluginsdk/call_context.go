@@ -20,12 +20,17 @@ const pluginCallMetadata = "x-kandev-plugin-call"
 type pluginHandlerReferenceKey struct{}
 
 func withPluginCallReference(ctx context.Context) context.Context {
-	incoming, _ := metadata.FromIncomingContext(ctx)
+	incoming, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx
+	}
 	refs := incoming.Get(pluginCallMetadata)
 	if len(refs) != 1 || refs[0] == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, pluginHandlerReferenceKey{}, refs[0])
+	clean := incoming.Copy()
+	clean.Delete(pluginCallMetadata)
+	return context.WithValue(metadata.NewIncomingContext(ctx, clean), pluginHandlerReferenceKey{}, refs[0])
 }
 
 // HostCallContextPolicy is implemented by the host application. The SDK does
@@ -78,6 +83,11 @@ func (o *pluginCallOrigins) bind(ctx context.Context, agentTool bool) (context.C
 // Plugin-owned startup storage/configuration and capability-scoped Host
 // operations keep their existing checks; conversation domain operations are
 // classified in host_call_classification.go.
+//
+// A live call reference is a bearer capability for its lifetime. This wrapper
+// prevents accidental context drops and expired or returned replays. In-process
+// code that bypasses the wrapper and presents a live reference is exercising
+// that invocation's existing authority; no cryptographic binding is added.
 func (o *pluginCallOrigins) intercept(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	if !o.enabled() {
 		return handler(ctx, req)

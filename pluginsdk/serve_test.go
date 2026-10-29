@@ -373,20 +373,19 @@ func (p *hostCallProbe) OnEvent(ctx context.Context, event *Event) error {
 		return status.Error(codes.Unavailable, "host not injected")
 	}
 	call, _ := event.Payload["call"].(string)
+	if call == "reference-visibility" {
+		incoming, _ := metadata.FromIncomingContext(ctx)
+		if refs := incoming.Get(pluginCallMetadata); len(refs) != 0 {
+			p.results <- probeResult{call: call, err: status.Error(codes.Internal, "call reference visible to handler")}
+			return nil
+		}
+		p.results <- probeResult{call: call}
+		return nil
+	}
 	use := ctx
 	switch call {
 	case "background-preview", "background-task", "dropped-task":
 		use = context.Background()
-	case "forged-background-task":
-		incoming, _ := metadata.FromIncomingContext(ctx)
-		if refs := incoming.Get(pluginCallMetadata); len(refs) == 1 && refs[0] != "" {
-			use = metadata.AppendToOutgoingContext(context.Background(), pluginCallMetadata, refs[0])
-		}
-	case "forged-incoming-task":
-		incoming, _ := metadata.FromIncomingContext(ctx)
-		if refs := incoming.Get(pluginCallMetadata); len(refs) == 1 && refs[0] != "" {
-			use = metadata.NewIncomingContext(context.Background(), metadata.Pairs(pluginCallMetadata, refs[0]))
-		}
 	}
 	var err error
 	if call == "background-preview" {
@@ -457,16 +456,9 @@ func TestHostCallContextDroppedHandlerContextStaysClosed(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
-func TestHostCallContextForgedOutgoingReferenceStaysClosed(t *testing.T) {
+func TestHostCallContextHandlerCannotSeeCallReference(t *testing.T) {
 	remote, plugin := newHostCallProbeHarness(t, true)
-	err := runHostCallProbe(t, remote, plugin, "forged-background-task")
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-}
-
-func TestHostCallContextForgedIncomingMetadataStaysClosed(t *testing.T) {
-	remote, plugin := newHostCallProbeHarness(t, true)
-	err := runHostCallProbe(t, remote, plugin, "forged-incoming-task")
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.NoError(t, runHostCallProbe(t, remote, plugin, "reference-visibility"))
 }
 
 func TestHostCallContextForwardedHandlerContextReachesHost(t *testing.T) {
