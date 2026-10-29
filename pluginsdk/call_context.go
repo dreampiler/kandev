@@ -133,13 +133,15 @@ type hostCallClientConn struct{ grpc.ClientConnInterface }
 
 func (c hostCallClientConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
 	// The plugin handler's incoming RPC context is the only origin source.
-	// context.Background and JSON task fields cannot manufacture one.
+	// context.Background and JSON task fields cannot manufacture one. Strip any
+	// outgoing reference first so a plugin cannot replay a captured reference.
+	outgoing, _ := metadata.FromOutgoingContext(ctx)
+	outgoing = outgoing.Copy()
+	outgoing.Delete(pluginCallMetadata)
 	incoming, _ := metadata.FromIncomingContext(ctx)
 	if refs := incoming.Get(pluginCallMetadata); len(refs) == 1 && refs[0] != "" {
-		outgoing, _ := metadata.FromOutgoingContext(ctx)
-		outgoing = outgoing.Copy()
 		outgoing.Set(pluginCallMetadata, refs[0])
-		ctx = metadata.NewOutgoingContext(ctx, outgoing)
 	}
+	ctx = metadata.NewOutgoingContext(ctx, outgoing)
 	return c.ClientConnInterface.Invoke(ctx, method, args, reply, opts...)
 }

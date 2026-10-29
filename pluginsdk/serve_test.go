@@ -10,6 +10,7 @@ import (
 	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -376,6 +377,11 @@ func (p *hostCallProbe) OnEvent(ctx context.Context, event *Event) error {
 	switch call {
 	case "background-preview", "background-task", "dropped-task":
 		use = context.Background()
+	case "forged-background-task":
+		incoming, _ := metadata.FromIncomingContext(ctx)
+		if refs := incoming.Get(pluginCallMetadata); len(refs) == 1 && refs[0] != "" {
+			use = metadata.AppendToOutgoingContext(context.Background(), pluginCallMetadata, refs[0])
+		}
 	}
 	var err error
 	if call == "background-preview" {
@@ -443,6 +449,12 @@ func TestHostCallContextBackgroundDomainCallsStayClosed(t *testing.T) {
 func TestHostCallContextDroppedHandlerContextStaysClosed(t *testing.T) {
 	remote, plugin := newHostCallProbeHarness(t, true)
 	err := runHostCallProbe(t, remote, plugin, "dropped-task")
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestHostCallContextForgedOutgoingReferenceStaysClosed(t *testing.T) {
+	remote, plugin := newHostCallProbeHarness(t, true)
+	err := runHostCallProbe(t, remote, plugin, "forged-background-task")
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
