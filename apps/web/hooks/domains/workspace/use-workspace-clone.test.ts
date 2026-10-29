@@ -210,6 +210,7 @@ describe("workspace collaboration editor", () => {
     });
     const row = result.current.rows.find((item) => item.id === "ws-2");
     expect(row?.saved.read).toBe(true);
+    expect(row?.saved.prompt).toBe(false);
     expect(row?.draft.read).toBe(true);
     expect(row?.draft.prompt).toBe(true);
     expect(row?.saving).toBe(false);
