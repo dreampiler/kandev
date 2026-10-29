@@ -16,9 +16,11 @@ Repository saves use `updated_at` as the optimistic-concurrency version token.
 Two stale saves that observed the same future-dated version could both write
 `observed + 1us`, so the second save did not advance the token, and the exact
 and complete writers could rewind a future version with `time.Now()`. This plan
-advances every repository version from the committed row, read under the same
-transaction write lock, while keeping the exact `ExpectedUpdatedAt` race
-rejection, the checkout intent, and existing field and event behavior.
+advances `updated_at` from the committed row for checkout-intent, exact, and
+complete repository writes. It preserves the exact `ExpectedUpdatedAt` conflict
+condition, the checkout intent, and other fields. Repository update events keep
+their existing RFC3339 timestamp format, which has whole-second precision. The
+change does not promise distinct event timestamp strings or event ordering.
 
 ## Scope
 
