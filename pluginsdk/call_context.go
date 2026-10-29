@@ -14,6 +14,20 @@ import (
 
 const pluginCallMetadata = "x-kandev-plugin-call"
 
+// pluginHandlerReferenceKey carries the reference installed by the SDK at the
+// plugin RPC entry point. Incoming metadata is forgeable by plugin code; the
+// private value is not part of the public context surface.
+type pluginHandlerReferenceKey struct{}
+
+func withPluginCallReference(ctx context.Context) context.Context {
+	incoming, _ := metadata.FromIncomingContext(ctx)
+	refs := incoming.Get(pluginCallMetadata)
+	if len(refs) != 1 || refs[0] == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, pluginHandlerReferenceKey{}, refs[0])
+}
+
 // HostCallContextPolicy is implemented by the host application. The SDK does
 // not interpret task identities; it carries the original server context only.
 type HostCallContextPolicy interface {
@@ -132,15 +146,13 @@ func (c pluginCallClientConn) Invoke(ctx context.Context, method string, args, r
 type hostCallClientConn struct{ grpc.ClientConnInterface }
 
 func (c hostCallClientConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-	// The plugin handler's incoming RPC context is the only origin source.
-	// context.Background and JSON task fields cannot manufacture one. Strip any
-	// outgoing reference first so a plugin cannot replay a captured reference.
+	// Only the private reference installed at the SDK handler entry may reach
+	// the Host. Incoming and outgoing metadata are plugin-controlled.
 	outgoing, _ := metadata.FromOutgoingContext(ctx)
 	outgoing = outgoing.Copy()
 	outgoing.Delete(pluginCallMetadata)
-	incoming, _ := metadata.FromIncomingContext(ctx)
-	if refs := incoming.Get(pluginCallMetadata); len(refs) == 1 && refs[0] != "" {
-		outgoing.Set(pluginCallMetadata, refs[0])
+	if ref, ok := ctx.Value(pluginHandlerReferenceKey{}).(string); ok && ref != "" {
+		outgoing.Set(pluginCallMetadata, ref)
 	}
 	ctx = metadata.NewOutgoingContext(ctx, outgoing)
 	return c.ClientConnInterface.Invoke(ctx, method, args, reply, opts...)
