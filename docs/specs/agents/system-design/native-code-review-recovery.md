@@ -43,25 +43,43 @@ AC-AGENTS-NATIVE-CODE-REVIEW-001.14 is satisfied by the task claim, classified
 native settlement, terminal readback and retained entry-ID deduplication. No
 schema, timer, provider retry policy or public command is added.
 
-AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001.1 through .3 are satisfied by the
-task-bound local source fallback. `ReviewChangeSource` keeps its agentctl read
-and, only when that read errors, reads the session's own persisted worktree
-through `CollectLocalChanges` (`internal/review/local_source.go`). The backend
-reader (`internal/backendapp/review_local_source.go`) admits only `local`,
-`worktree`, and `local_pc` executors; a remote executor still requires agentctl.
-Reads keep the existing per-file, per-output, and total byte limits and reject a
-worktree path that is not an absolute local path or that carries a `..` segment,
-so no caller-supplied filesystem path is accepted. Reads include the working
-tree, staging-area (index) changes the working tree no longer shows, and
-untracked files, distinct from the committed base-to-head range, and keep
-multi-repository files scoped to their own repository.
+AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001.1 through .4 are satisfied by the
+task-bound local source fallback. `ReviewChangeSource` first uses the existing
+execution lookup, which checks `session.exec` before it reads agentctl data. If
+that read fails, the source checks `session.exec` again before it calls the
+local reader. A missing access checker or a denied check stops the fallback
+before the local reader opens the persisted checkout. An agentctl cumulative
+diff response with an error state also enters the fallback. A remote executor
+still requires agentctl.
 
-The committed range anchors on the live target branch (`origin/<branch>` first,
-then the local branch), so changes already merged from the target are excluded;
-the stored session base is used only when the target cannot be compared. A
-single repository keeps the legacy bare-path scope key while a multi-repository
-task scopes a file by its workspace-relative repository path, matching the
-Review panel.
+The backend reader (`internal/backendapp/review_local_source.go`) admits only
+`local`, `worktree`, and `local_pc` executors. It uses the persisted session
+worktree paths and accepts no caller-supplied filesystem path. The local Git
+collector rejects a path that is not absolute and local or that carries a `..`
+segment. Its per-file, output, and total diff limits match agentctl. The
+per-file limit checks the working file, base blob, and index blob before a
+staged-only diff is read.
+
+Working-tree, index-only, untracked, and committed changes remain separate
+sources. Both agentctl and the local collector use the bounded formatter in
+`internal/common/unidiff` for untracked files. This keeps normalized patch text
+and hashes consistent across the two sources.
+
+For committed changes, the reader finds the `TaskRepository` row for the
+session task and repository. If that attachment has a validated
+`comparison_target`, the reader resolves only its `ComparisonRef`. A missing or
+unmergeable ref returns `review_workspace_unavailable`; it does not fall back
+to a same-named origin branch or a stored base. Without an explicit target, the
+reader keeps the live target branch (`origin/<branch>` first, then the local
+branch), with the stored session base as its fallback. This excludes changes
+already merged from an ordinary target. A single repository keeps the legacy
+bare-path scope key. A multi-repository task uses its workspace-relative
+repository path, matching the Review panel.
+
+`CollectChanges` propagates a committed-source `review_workspace_unavailable`
+error. It does not start a partial review when an explicit comparison target
+cannot be resolved. Other committed-source errors remain non-fatal so valid
+working-tree changes can still be reviewed when no committed range exists.
 
 
 ## Permanent verification

@@ -23,9 +23,8 @@ or worktree executor.
 
 In scope: `internal/review/local_git.go`, `internal/review/local_source.go`, the
 reader in `internal/backendapp/review_local_source.go`, the fallback branch in
-`internal/agent/handlers/review_change_source.go`, and their cases in the
-existing `internal/review/diff_test.go` and
-`internal/backendapp/review_routing_test.go`.
+`internal/agent/handlers/review_change_source.go`, the shared untracked patch
+formatter in `internal/common/unidiff`, and their regression tests.
 
 Excluded: the caller-supplied filesystem path API (an explicit operator/admin
 path), grant framework changes, schema changes, and the runtime review/utility
@@ -35,13 +34,15 @@ integration owned by its own design.
 
 `CollectLocalChanges` reads a local worktree's working tree (including staged
 changes the working tree reverted, and untracked files) or a committed
-`base..head` range, bounded by the same per-file, per-output, and total byte
-limits agentctl uses, and rejects a worktree path with a `..` segment, a UNC
-path, or a non-absolute path. The backend session reader resolves the session's
-own persisted `Worktrees`/`WorkspacePath` and admits only `local`, `worktree`,
-and `local_pc` executors. `ReviewChangeSource` falls back to the local reader
-only when the agentctl read errors, so the success path and every other review
-path are unchanged.
+`base..head` range. It enforces the same per-file, per-output, and total byte
+limits as agentctl, including the staged index blob, and rejects a worktree
+path that has a `..` segment, is a UNC path, or is not absolute. The backend
+session reader resolves the session's persisted `Worktrees`/`WorkspacePath`
+and admits only `local`, `worktree`, and `local_pc` executors. The local
+fallback repeats the existing `session.exec` check before reading disk. An
+explicit repository-qualified comparison target uses its exact validated ref
+and fails closed when that ref is unavailable. Both readers use the shared
+bounded untracked-patch formatter so the diff text and hash stay equal.
 
 ## Work orders
 
@@ -49,7 +50,7 @@ path are unchanged.
 
 ## Changed-path coverage
 
-The work order owns the review collector, the backend session reader, and the
-`ReviewChangeSource` fallback, their cases in the existing package test files,
-the new criterion in the native code review requirement, and the matching note
-in the review recovery system design.
+The work order owns the review collector, the backend session reader, the
+`ReviewChangeSource` fallback, the shared untracked formatter, their regression
+tests, the local-source acceptance criteria, and the matching review recovery
+system design note.

@@ -100,37 +100,58 @@ func (r reviewSessionReader) localReviewRepo(ctx context.Context, session *model
 	return files, nil
 }
 
-// localReviewBase prefers the live target branch so changes already merged from
-// it stay out of the review, and falls back to the stored session base only
-// when the target cannot be compared.
+// localReviewBase requires an explicit repository-qualified target when one is
+// attached. Without one, it prefers the live branch and falls back to the
+// stored session base when that branch cannot be compared.
 func (r reviewSessionReader) localReviewBase(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo, multi bool) (string, bool, error) {
+	link, hasLink, err := r.localReviewTaskRepository(ctx, session, repo)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: resolve local review repository target: %v", review.ErrWorkspaceUnavailable, err)
+	}
+	if hasLink {
+		target, explicit, err := models.LoadComparisonTarget(link.Metadata)
+		if err != nil {
+			return "", false, fmt.Errorf("%w: local review comparison target invalid: %v", review.ErrWorkspaceUnavailable, err)
+		}
+		if explicit {
+			base, ok := review.ResolveLocalComparisonRef(ctx, repo.WorktreePath, target.ComparisonRef())
+			if !ok {
+				return "", false, fmt.Errorf("%w: explicit comparison target unavailable", review.ErrWorkspaceUnavailable)
+			}
+			return base, true, nil
+		}
+	}
+
 	target, stored := session.BaseBranch, session.BaseCommitSHA
 	if multi && repo.RepositoryID != session.RepositoryID {
-		linkTarget, err := r.localReviewLinkBase(ctx, session, repo)
-		if err != nil {
-			return "", false, err
+		if !hasLink {
+			return "", false, fmt.Errorf("%w: local review comparison base unavailable", review.ErrWorkspaceUnavailable)
 		}
-		target, stored = linkTarget, ""
+		target, stored = link.BaseBranch, ""
 	}
 	base, ok := review.ResolveLocalComparisonBase(ctx, repo.WorktreePath, target, stored)
 	return base, ok, nil
 }
 
-// localReviewLinkBase resolves a non-primary repository's own base branch from
-// its task repository link.
-func (r reviewSessionReader) localReviewLinkBase(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo) (string, error) {
+// localReviewTaskRepository resolves the attachment for one checkout.
+func (r reviewSessionReader) localReviewTaskRepository(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo) (*models.TaskRepository, bool, error) {
 	getter, ok := r.repo.(localReviewTaskRepositories)
 	if !ok {
-		return "", fmt.Errorf("local review comparison base unavailable")
+		return nil, false, nil
 	}
 	links, err := getter.ListTaskRepositories(ctx, session.TaskID)
 	if err != nil {
-		return "", err
+		return nil, false, err
 	}
+	var match *models.TaskRepository
 	for _, link := range links {
-		if link != nil && link.RepositoryID == repo.RepositoryID {
-			return link.BaseBranch, nil
+		if link == nil || link.TaskID != session.TaskID || link.RepositoryID != repo.RepositoryID {
+			continue
 		}
+		if match != nil {
+			return nil, false, fmt.Errorf("local review repository attachment is ambiguous")
+		}
+		match = link
 	}
-	return "", fmt.Errorf("local review comparison base unavailable")
+	return match, match != nil, nil
 }

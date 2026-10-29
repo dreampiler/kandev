@@ -324,8 +324,9 @@ func TestNativeReviewHostPolicyUsesSuccessorProviderIdentity(t *testing.T) {
 }
 
 type localReviewSessionRepo struct {
-	session      *taskmodels.TaskSession
-	executorType taskmodels.ExecutorType
+	session          *taskmodels.TaskSession
+	executorType     taskmodels.ExecutorType
+	taskRepositories []*taskmodels.TaskRepository
 }
 
 type unavailableReviewExecution struct{ execution *lifecycle.AgentExecution }
@@ -336,6 +337,7 @@ func (e unavailableReviewExecution) GetExecutionBySessionID(string) (*lifecycle.
 func (e unavailableReviewExecution) GetOrEnsureExecution(context.Context, string) (*lifecycle.AgentExecution, error) {
 	return e.execution, nil
 }
+func (unavailableReviewExecution) CheckSessionExecAccess(context.Context, string) error { return nil }
 
 func (r localReviewSessionRepo) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
 	return r.session, nil
@@ -346,6 +348,10 @@ func (r localReviewSessionRepo) GetExecutor(context.Context, string) (*taskmodel
 
 func (r localReviewSessionRepo) GetRepository(_ context.Context, id string) (*taskmodels.Repository, error) {
 	return &taskmodels.Repository{ID: id, Name: "repo-" + id}, nil
+}
+
+func (r localReviewSessionRepo) ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error) {
+	return r.taskRepositories, nil
 }
 
 // TestReviewLocalFallbackAnchorsOnLiveTarget keeps changes that already landed
@@ -391,7 +397,7 @@ func TestReviewLocalFallbackAnchorsOnLiveTarget(t *testing.T) {
 		ID: "s", ExecutorID: "exec", BaseBranch: "main", BaseCommitSHA: base,
 		Worktrees: []*taskmodels.TaskEnvironmentRepo{{WorktreePath: dir}},
 	}, executorType: taskmodels.ExecutorTypeLocal}
-	files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(nil, reviewSessionReader{repo: r}), "s", "")
+	files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: r}), "s", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,6 +412,101 @@ func TestReviewLocalFallbackAnchorsOnLiveTarget(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("task change missing: %+v", files)
+	}
+}
+
+func TestReviewLocalFallbackUsesQualifiedComparisonTarget(t *testing.T) {
+	for _, materialized := range []bool{true, false} {
+		name := "materialized target"
+		if !materialized {
+			name = "unavailable target does not fall back to origin"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			git := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			write := func(name, content string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git("init")
+			git("config", "user.email", "review@example.test")
+			git("config", "user.name", "Review Test")
+			write("base.txt", "base\n")
+			git("add", ".")
+			git("commit", "-m", "base")
+			base := git("rev-parse", "HEAD")
+
+			git("checkout", "-b", "origin-main")
+			write("fork.txt", "fork-only\n")
+			git("add", ".")
+			git("commit", "-m", "fork main")
+			git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
+
+			git("checkout", "-b", "upstream-main", base)
+			write("upstream.txt", "upstream target\n")
+			git("add", ".")
+			git("commit", "-m", "upstream main")
+			upstream := git("rev-parse", "HEAD")
+
+			target := taskmodels.ComparisonTarget{
+				Version: taskmodels.ComparisonTargetVersion, Provider: taskmodels.ComparisonTargetProviderGitHub,
+				Kind: taskmodels.ComparisonTargetKindPullRequest, Number: 12, HeadBranch: "feature/review",
+				TargetBranch: "main",
+				HeadRepository: taskmodels.ComparisonTargetRepository{
+					Host: "github.com", Path: "contributor/project", RemoteURL: "https://github.com/contributor/project.git",
+				},
+				TargetRepository: taskmodels.ComparisonTargetRepository{
+					Host: "github.com", Path: "upstream/project", RemoteURL: "https://github.com/upstream/project.git",
+				},
+			}
+			metadata := map[string]interface{}{}
+			if err := taskmodels.PutComparisonTarget(metadata, &target); err != nil {
+				t.Fatal(err)
+			}
+			if materialized {
+				git("update-ref", target.ComparisonRef(), upstream)
+			}
+
+			git("checkout", "-b", "task", upstream)
+			write("task.txt", "task change\n")
+			git("add", ".")
+			git("commit", "-m", "task change")
+
+			repo := localReviewSessionRepo{
+				session: &taskmodels.TaskSession{
+					ID: "s", TaskID: "task", ExecutorID: "exec", RepositoryID: "repo",
+					BaseBranch: "main", BaseCommitSHA: base,
+					Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "repo", WorktreePath: dir}},
+				},
+				executorType:     taskmodels.ExecutorTypeLocal,
+				taskRepositories: []*taskmodels.TaskRepository{{TaskID: "task", RepositoryID: "repo", BaseBranch: "main", Metadata: metadata}},
+			}
+			files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: repo}), "s", "")
+			if !materialized {
+				if !errors.Is(err, review.ErrWorkspaceUnavailable) {
+					t.Fatalf("missing comparison target error = %v, want workspace comparison unavailable", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 || files[0].Path != "task.txt" {
+				t.Fatalf("files = %+v, want only task.txt relative to the upstream target", files)
+			}
+		})
 	}
 }
 
@@ -479,11 +580,14 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 		})
 	}
 	t.Run("repository scopes", func(t *testing.T) {
-		r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+		r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", TaskID: "task", ExecutorID: "exec", RepositoryID: "one", Worktrees: []*taskmodels.TaskEnvironmentRepo{
 			{RepositoryID: "one", WorkspaceRelativePath: "one", WorktreePath: dir},
 			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
-		}}, executorType: taskmodels.ExecutorTypeLocal}
-		files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(nil, reviewSessionReader{repo: r}), "s", "")
+		}}, executorType: taskmodels.ExecutorTypeLocal, taskRepositories: []*taskmodels.TaskRepository{
+			{TaskID: "task", RepositoryID: "one", BaseBranch: "main"},
+			{TaskID: "task", RepositoryID: "two", BaseBranch: "main"},
+		}}
+		files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: r}), "s", "")
 		if err != nil {
 			t.Fatal(err)
 		}

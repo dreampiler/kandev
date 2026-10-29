@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -100,6 +101,20 @@ func ResolveLocalComparisonBase(ctx context.Context, worktreePath, targetBranch,
 	return "", false
 }
 
+// ResolveLocalComparisonRef compares HEAD with one authoritative ref. It does
+// not try a same-named origin branch or a stored base when the ref is missing.
+func ResolveLocalComparisonRef(ctx context.Context, worktreePath, comparisonRef string) (string, bool) {
+	commit, err := localCommit(ctx, worktreePath, comparisonRef)
+	if err != nil {
+		return "", false
+	}
+	mergeBase, err := localGit(ctx, worktreePath, localMaxTotalDiffBytes, "merge-base", "HEAD", commit)
+	if err != nil || strings.TrimSpace(mergeBase) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(mergeBase), true
+}
+
 func localComparisonRefs(targetBranch string) []string {
 	target := strings.TrimSpace(targetBranch)
 	if target == "" {
@@ -187,12 +202,48 @@ func localStagedFile(ctx context.Context, path, base, file, status string, used 
 	if localFileTooLarge(ctx, path, base, "", file) {
 		return ChangedFile{}, nil
 	}
+	tooLarge, err := localIndexFileTooLarge(ctx, path, file)
+	if err != nil {
+		return ChangedFile{}, fmt.Errorf("%w: inspect staged file %q: %v", ErrWorkspaceUnavailable, file, err)
+	}
+	if tooLarge {
+		return ChangedFile{}, nil
+	}
 	args := append(localCachedDiffArgs(base), "--", file)
 	diff, err := localGit(ctx, path, localMaxDiffOutputSize, args...)
 	if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
 		return ChangedFile{}, fmt.Errorf("%w: read staged diff for %q: %v", ErrWorkspaceUnavailable, file, err)
 	}
 	return localFile(file, localChangeStatus(status), diff, false, used), nil
+}
+
+func localIndexFileTooLarge(ctx context.Context, path, file string) (bool, error) {
+	entries, err := localGit(ctx, path, localMaxDiffOutputSize, "ls-files", "--stage", "-z", "--", file)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range strings.Split(strings.TrimSuffix(entries, "\x00"), "\x00") {
+		metadata, name, ok := strings.Cut(entry, "\t")
+		if !ok || name != file {
+			continue
+		}
+		fields := strings.Fields(metadata)
+		if len(fields) != 3 {
+			return false, fmt.Errorf("unexpected index entry for %q", file)
+		}
+		sizeText, err := localGit(ctx, path, 128, "cat-file", "-s", fields[1])
+		if err != nil {
+			return false, err
+		}
+		size, err := strconv.ParseInt(strings.TrimSpace(sizeText), 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid index blob size %q", sizeText)
+		}
+		if size > localMaxDiffFileSize {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func localDiffArgs(base, head string) []string {

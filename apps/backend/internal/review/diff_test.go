@@ -197,6 +197,19 @@ func TestCollectChanges_CommittedErrorIsNotFatal(t *testing.T) {
 	}
 }
 
+func TestCollectChanges_FailsWhenCommittedWorkspaceComparisonIsUnavailable(t *testing.T) {
+	src := &fakeChangeSource{
+		uncommitted: map[string]any{"working.go": fileEntry("working.go", "working diff", "", "")},
+		diffErr:     ErrWorkspaceUnavailable,
+	}
+
+	_, err := CollectChanges(context.Background(), src, "sess", "")
+
+	if !errors.Is(err, ErrWorkspaceUnavailable) {
+		t.Fatalf("CollectChanges error = %v, want unavailable workspace comparison", err)
+	}
+}
+
 func TestCollectChanges_RequiresSourceAndSession(t *testing.T) {
 	if _, err := CollectChanges(context.Background(), nil, "sess", ""); !errors.Is(err, ErrWorkspaceUnavailable) {
 		t.Fatalf("expected ErrWorkspaceUnavailable for nil source, got %v", err)
