@@ -916,10 +916,7 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
-	if err := applySQLiteReaderConnsYAML(&cfg, v, yamlKeys, sources); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
-	if err := applySQLiteReaderConnsEnv(&cfg, envSnapshot, sources); err != nil {
+	if err := applySQLiteReaderConns(&cfg, v, yamlKeys, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {

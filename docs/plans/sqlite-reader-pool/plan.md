@@ -67,8 +67,11 @@ both reader maximum open and idle connections through
 `OpenSQLiteReaderWithConns`; the writer pool and required-store health behavior
 are unchanged. Strict parsing and range validation are driver-scoped, so an
 invalid SQLite-only value does not reject a PostgreSQL startup. The typed field
-skips direct unmarshalling; the raw YAML value is parsed after driver selection,
-so a nonnumeric YAML value also cannot fail a PostgreSQL startup.
+skips direct unmarshalling. After driver selection, a present environment value
+is parsed first and the lower-priority YAML value is not parsed; an invalid
+environment value fails without falling back to YAML. When the environment
+value is absent, the raw YAML value is parsed strictly. This also keeps a
+nonnumeric YAML value from failing a PostgreSQL startup.
 
 Verification used one-off Go overlay tests outside the permanent test tree.
 They covered the default, YAML and environment overrides, environment-over-YAML

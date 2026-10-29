@@ -398,11 +398,31 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
 }
 
-// applySQLiteReaderConnsYAML parses the raw configured value after the driver
-// is known. The typed field deliberately skips direct unmarshalling so a
-// nonnumeric SQLite-only YAML value cannot fail a PostgreSQL startup.
-func applySQLiteReaderConnsYAML(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, sources map[string]SettingSource) error {
-	if !yamlKeys[sqliteReaderConnsKey] || !sqliteReaderConnsApplies(cfg) {
+// applySQLiteReaderConns resolves the effective startup value after driver
+// selection. Environment is the higher-priority source: when it is present it
+// is parsed strictly and a lower-priority YAML value is not parsed. When the
+// environment value is absent, the raw YAML value is parsed strictly. A
+// PostgreSQL selection ignores both values so a SQLite-only setting cannot
+// change its startup.
+func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) error {
+	if !sqliteReaderConnsApplies(cfg) {
+		return nil
+	}
+	entry, ok := CatalogEntryForKey(sqliteReaderConnsKey)
+	if !ok {
+		return nil
+	}
+	if _, found := nonEmptyEnv(env, entry.EnvVars...); found {
+		return applyStrictIntEnv(
+			sqliteReaderConnsKey,
+			&cfg.Database.SQLiteReaderConns,
+			sqliteReaderConnsMinimum,
+			sqliteReaderConnsMaximum,
+			env,
+			sources,
+		)
+	}
+	if !yamlKeys[sqliteReaderConnsKey] {
 		return nil
 	}
 	raw := v.Get(sqliteReaderConnsKey)
@@ -416,24 +436,6 @@ func applySQLiteReaderConnsYAML(cfg *Config, v *viper.Viper, yamlKeys map[string
 	cfg.Database.SQLiteReaderConns = parsed
 	sources[sqliteReaderConnsKey] = SourceConfiguration
 	return nil
-}
-
-// applySQLiteReaderConnsEnv validates the startup-only SQLite reader pool
-// override strictly: an invalid or out-of-range value fails startup instead
-// of silently falling back to the default. The setting only applies to
-// SQLite, so a PostgreSQL selection must keep its existing startup behavior.
-func applySQLiteReaderConnsEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
-	if !sqliteReaderConnsApplies(cfg) {
-		return nil
-	}
-	return applyStrictIntEnv(
-		sqliteReaderConnsKey,
-		&cfg.Database.SQLiteReaderConns,
-		sqliteReaderConnsMinimum,
-		sqliteReaderConnsMaximum,
-		env,
-		sources,
-	)
 }
 
 // sqliteReaderConnsApplies reports whether the selected database driver uses
