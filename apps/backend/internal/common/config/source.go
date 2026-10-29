@@ -25,6 +25,15 @@ const (
 	windowsOS                 = "windows"
 )
 
+// sqliteReaderConnsKey is the startup-only SQLite reader pool size. The
+// default and bounds mirror internal/db's factory contract.
+const (
+	sqliteReaderConnsKey     = "database.sqliteReaderConns"
+	sqliteReaderConnsDefault = 4
+	sqliteReaderConnsMinimum = 1
+	sqliteReaderConnsMaximum = 64
+)
+
 // ConfigSource records configuration provenance without retaining any decoded
 // secret values.
 type ConfigSource struct {
@@ -77,6 +86,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"credentials.file":                         {},
 	"limits.ghMaxConcurrent":                   {},
 	"limits.gitMaxConcurrent":                  {},
+	sqliteReaderConnsKey:                       {},
 	"limits.lspMaxConnections":                 {},
 	"messageQueue.maxPerSession":               {},
 	"agentctl.idleTimeout":                     {},
@@ -316,6 +326,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
 	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
+	setDefaultInt(sqliteReaderConnsKey, &cfg.Database.SQLiteReaderConns, sqliteReaderConnsDefault)
 	setDefaultInt("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10)
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
@@ -385,6 +396,20 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
 	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
+}
+
+// applySQLiteReaderConnsEnv validates the startup-only SQLite reader pool
+// override strictly: an invalid or out-of-range value fails startup instead
+// of silently falling back to the default.
+func applySQLiteReaderConnsEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	return applyStrictIntEnv(
+		sqliteReaderConnsKey,
+		&cfg.Database.SQLiteReaderConns,
+		sqliteReaderConnsMinimum,
+		sqliteReaderConnsMaximum,
+		env,
+		sources,
+	)
 }
 
 func applyDeliveryRetentionEnvironment(cfg *Config, env map[string]string, sources map[string]SettingSource) error {

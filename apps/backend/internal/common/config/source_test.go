@@ -448,3 +448,74 @@ func TestHomeConfigDefaultDotDirectory(t *testing.T) {
 		t.Fatalf("selected config = %q, port = %d; want %s and port 40128", cfg.Source.FilePath, cfg.Server.Port, configFile)
 	}
 }
+
+func TestSQLiteReaderConnsStartupConfiguration(t *testing.T) {
+	t.Setenv("KANDEV_SQLITE_READER_CONNS", "")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath default: %v", err)
+	}
+	if cfg.Database.SQLiteReaderConns != 4 {
+		t.Fatalf("database.sqliteReaderConns default = %d, want 4", cfg.Database.SQLiteReaderConns)
+	}
+	if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceDefault {
+		t.Fatalf("database.sqliteReaderConns source = %q, want default", got)
+	}
+
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte("database:\n  sqliteReaderConns: 6\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err = LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath YAML: %v", err)
+	}
+	if cfg.Database.SQLiteReaderConns != 6 {
+		t.Fatalf("database.sqliteReaderConns YAML = %d, want 6", cfg.Database.SQLiteReaderConns)
+	}
+	if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceConfiguration {
+		t.Fatalf("database.sqliteReaderConns source = %q, want configuration", got)
+	}
+
+	for _, test := range []struct {
+		raw  string
+		want int
+	}{{"1", 1}, {"9", 9}, {"64", 64}} {
+		t.Setenv("KANDEV_SQLITE_READER_CONNS", test.raw)
+		cfg, err = LoadWithPath(dir)
+		if err != nil {
+			t.Fatalf("LoadWithPath env %q: %v", test.raw, err)
+		}
+		if cfg.Database.SQLiteReaderConns != test.want {
+			t.Fatalf("database.sqliteReaderConns env %q = %d, want %d", test.raw, cfg.Database.SQLiteReaderConns, test.want)
+		}
+		if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceEnvironment {
+			t.Fatalf("database.sqliteReaderConns source = %q, want environment", got)
+		}
+	}
+}
+
+func TestSQLiteReaderConnsRejectsInvalidValues(t *testing.T) {
+	for _, raw := range []string{"0", "65", "-1", "many"} {
+		t.Run("env_"+raw, func(t *testing.T) {
+			t.Setenv("KANDEV_SQLITE_READER_CONNS", raw)
+			_, err := LoadWithPath(t.TempDir())
+			if err == nil || !strings.Contains(err.Error(), "database.sqliteReaderConns") {
+				t.Fatalf("Load error = %v, want database.sqliteReaderConns rejection", err)
+			}
+		})
+	}
+
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte("database:\n  sqliteReaderConns: 65\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_SQLITE_READER_CONNS", "")
+	_, err := LoadWithPath(dir)
+	if err == nil || !strings.Contains(err.Error(), filepath.Base(configFile)) || !strings.Contains(err.Error(), "sqliteReaderConns") {
+		t.Fatalf("Load error = %v, want selected file and sqliteReaderConns rejection", err)
+	}
+}

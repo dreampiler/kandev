@@ -387,3 +387,57 @@ func TestSQLiteWriterJournalSizeLimit(t *testing.T) {
 
 	require.Equal(t, int64(-1), sqliteJournalSizeLimit(t, ctx, reader), "reader keeps the SQLite default")
 }
+
+func TestSQLiteReaderPoolAppliesConfiguredSize(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "reader-pool-size.db")
+	writer, err := internaldb.OpenSQLite(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	require.Equal(t, 1, writer.Stats().MaxOpenConnections, "writer pool stays single-connection")
+
+	reader, err := internaldb.OpenSQLiteReader(path)
+	require.NoError(t, err)
+	require.Equal(t, 4, reader.Stats().MaxOpenConnections, "default reader pool size")
+	require.NoError(t, reader.Close())
+
+	reader, err = internaldb.OpenSQLiteReaderWithConns(path, 7)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	require.Equal(t, 7, reader.Stats().MaxOpenConnections)
+
+	conns := make([]*sql.Conn, 0, 7)
+	for range 7 {
+		conn, err := reader.Conn(ctx)
+		require.NoError(t, err)
+		conns = append(conns, conn)
+	}
+	require.Equal(t, 7, reader.Stats().OpenConnections, "all configured reader connections open")
+	for _, conn := range conns {
+		require.NoError(t, conn.Close())
+	}
+	require.Equal(t, 7, reader.Stats().Idle, "all configured reader connections stay idle")
+}
+
+func TestSQLiteReaderPoolSizeBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reader-pool-bounds.db")
+	writer, err := internaldb.OpenSQLite(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+
+	for _, readerConns := range []int{0, 1, 64} {
+		reader, err := internaldb.OpenSQLiteReaderWithConns(path, readerConns)
+		require.NoError(t, err)
+		want := readerConns
+		if want == 0 {
+			want = 4
+		}
+		require.Equal(t, want, reader.Stats().MaxOpenConnections)
+		require.NoError(t, reader.Close())
+	}
+
+	for _, readerConns := range []int{-1, 65} {
+		_, err := internaldb.OpenSQLiteReaderWithConns(path, readerConns)
+		require.Error(t, err)
+	}
+}
