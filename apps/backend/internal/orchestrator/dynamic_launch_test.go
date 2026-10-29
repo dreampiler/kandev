@@ -745,16 +745,18 @@ func TestStartCreatedSession_RefusesProfileChangeOnMaterializedDynamicRoute(t *t
 
 // The same logical profile resumes its route, and a session without a
 // materialized route keeps its first profile selection. Both run through the
-// real StartCreatedSession entrypoint, so the guard's positive wiring is
-// covered and not only the refusal branch.
+// real StartCreatedSession entrypoint and are asserted to succeed and launch
+// exactly once, so the guard's positive wiring is covered and not only the
+// refusal branch.
 func TestStartCreatedSession_MaterializedRouteGuardKeepsSameProfileAndFirstSelection(t *testing.T) {
 	ctx := context.Background()
 
-	// Same logical profile resumes its route: the guard must not refuse.
-	svc, repo, _ := newMaterializedRouteService(t)
+	// Same logical profile resumes its route and launches once.
+	svc, repo, launches := newMaterializedRouteService(t)
 	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
 		materializedRouteLogicalProfile, "continue", false, false, true, nil, nil)
-	require.NotErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, launches.Load(), "a route for the requested profile must resume and launch once")
 	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
 	require.NoError(t, getErr)
 	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
@@ -763,10 +765,18 @@ func TestStartCreatedSession_MaterializedRouteGuardKeepsSameProfileAndFirstSelec
 	// A session without a materialized route keeps its first profile selection.
 	unrouted := setupTestRepo(t)
 	seedTaskAndSession(t, unrouted, "task-unrouted", "session-unrouted", models.TaskSessionStateCreated)
-	unroutedSvc := createTestServiceWithScheduler(unrouted, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	var unroutedLaunches atomic.Int32
+	unroutedAgent := &mockAgentManager{launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		unroutedLaunches.Add(1)
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-unrouted"}, nil
+	}}
+	unroutedTaskRepo := newMockTaskRepo()
+	unroutedTaskRepo.tasks["task-unrouted"] = &v1.Task{ID: "task-unrouted", WorkspaceID: "ws1", Title: "Test Task"}
+	unroutedSvc := createTestServiceWithScheduler(unrouted, newMockStepGetter(), unroutedTaskRepo, unroutedAgent)
 	_, err = unroutedSvc.StartCreatedSession(ctx, "task-unrouted", "session-unrouted",
 		"profile-first", "go", false, false, true, nil, nil)
-	require.NotErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, unroutedLaunches.Load(), "an unrouted session must keep its first profile selection and launch once")
 	unroutedSession, getErr := unrouted.GetTaskSession(ctx, "session-unrouted")
 	require.NoError(t, getErr)
 	require.Equal(t, "profile-first", unroutedSession.AgentProfileID,
