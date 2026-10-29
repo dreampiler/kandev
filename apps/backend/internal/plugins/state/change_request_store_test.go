@@ -218,3 +218,103 @@ func TestChangeRequestStoreRejectsTaskReassignment(t *testing.T) {
 		t.Fatalf("task reassignment error = %v, want ErrChangeRequestTaskConflict", err)
 	}
 }
+
+func TestChangeRequestStoreDeleteByWorkspace(t *testing.T) {
+	store := newChangeRequestTestStore(t)
+	ctx := context.Background()
+	for _, row := range []struct {
+		installationID string
+		workspaceID    string
+		number         int64
+	}{
+		{"inst-1", "ws-1", 1},
+		{"inst-1", "ws-2", 2},
+		{"inst-2", "ws-1", 3},
+	} {
+		if _, _, err := store.ReportChangeRequest(ctx, ChangeRequestRecord{
+			InstallationID: row.installationID, WorkspaceID: row.workspaceID, TaskID: "task-1",
+			ProviderID: "forgejo", RepositoryID: "repo-1", Number: row.number, State: ChangeRequestStateOpen,
+		}); err != nil {
+			t.Fatalf("report %+v: %v", row, err)
+		}
+	}
+	if err := store.DeleteByWorkspace(ctx, "ws-1"); err != nil {
+		t.Fatalf("delete by workspace: %v", err)
+	}
+	for _, row := range []struct {
+		installationID string
+		workspaceID    string
+		want           int
+	}{
+		{"inst-1", "ws-1", 0},
+		{"inst-2", "ws-1", 0},
+		{"inst-1", "ws-2", 1},
+	} {
+		rows, err := store.ListChangeRequestsByTask(ctx, row.installationID, row.workspaceID, "task-1")
+		if err != nil {
+			t.Fatalf("list %+v: %v", row, err)
+		}
+		if len(rows) != row.want {
+			t.Errorf("rows for %+v = %d, want %d", row, len(rows), row.want)
+		}
+	}
+}
+
+func TestReportAndRemoveWithReceiptAreAtomic(t *testing.T) {
+	ledger := newChangeRequestTestStore(t)
+	commands := &CommandStore{db: ledger.db, ro: ledger.ro}
+	if err := commands.initSchema(); err != nil {
+		t.Fatalf("init command schema: %v", err)
+	}
+	ctx := context.Background()
+	admit := func(requestID, key string) CommandRecord {
+		record, _, err := commands.Admit(ctx, CommandIntent{
+			InstallationID: "inst-1", WorkspaceID: "ws-1", RequestID: requestID, IdempotencyKey: key,
+			Method: "ReportTaskChangeRequestExact", CapabilityID: "cap", PayloadDigest: "digest",
+			TargetID: "task-1", ExpectedResourceVersion: "v", ApprovalRevision: 1, ManifestDigest: "digest",
+		})
+		if err != nil {
+			t.Fatalf("admit %s: %v", requestID, err)
+		}
+		return record
+	}
+
+	reportIntent := admit("report-request", "report-key")
+	change, receipt, err := ledger.ReportChangeRequestWithReceipt(ctx, ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1, State: ChangeRequestStateOpen,
+	}, commands, reportIntent.Intent.OperationID, "APPLIED")
+	if err != nil || change.ID == "" || receipt.Receipt.State != commandReceiptStateCompleted || receipt.Receipt.ResultStatus != "APPLIED" {
+		t.Fatalf("report with receipt = change:%+v receipt:%+v err:%v", change, receipt, err)
+	}
+
+	rollbackIntent := admit("rollback-request", "rollback-key")
+	if _, _, err := ledger.ReportChangeRequestWithReceipt(ctx, ChangeRequestRecord{
+		InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 2, State: ChangeRequestStateOpen,
+	}, commands, "missing-operation", "APPLIED"); err == nil {
+		t.Fatal("missing command receipt must fail the transaction")
+	}
+	rows, err := ledger.ListChangeRequestsByTask(ctx, "inst-1", "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list after rollback: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Number != 1 {
+		t.Fatalf("rows after rollback = %+v, want only number 1", rows)
+	}
+	_ = rollbackIntent
+
+	removeIntent := admit("remove-request", "remove-key")
+	removeReceipt, err := ledger.RemoveChangeRequestWithReceipt(ctx, "inst-1", "ws-1", "forgejo", "repo-1", 1,
+		commands, removeIntent.Intent.OperationID, "APPLIED")
+	if err != nil || removeReceipt.Receipt.State != commandReceiptStateCompleted {
+		t.Fatalf("remove with receipt = %+v err:%v", removeReceipt, err)
+	}
+	rows, err = ledger.ListChangeRequestsByTask(ctx, "inst-1", "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list after remove: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows after remove = %d, want 0", len(rows))
+	}
+}

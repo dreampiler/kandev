@@ -418,14 +418,16 @@ cannot reopen or unmerge a row. An open report carries no terminal timestamp, a
 merged report carries only `merged_at`, and a closed report carries only
 `closed_at`. To reopen a change request, remove it and report it again. Every
 command carries an idempotency key and returns the normal `HostCommandResult`. A
-disabled installation is denied. If
-the ledger write succeeds but the receipt cannot be completed, the result is
-`UNCERTAIN`; retrying the same idempotency key reconciles the receipt and the
-row instead of creating a second record.
+disabled installation is denied. The row change and receipt completion commit
+in one transaction. If that transaction cannot be confirmed, the result is
+`UNCERTAIN`; retrying the same idempotency key resolves the recorded uncertain
+receipt without repeating the write. Use a new idempotency key to retry
+intentionally.
 
 The Host owns the `plugin_task_change_requests` ledger. Disable fences new
 writes while keeping the installation's history, so a re-enable can reuse it;
-uninstall deletes the rows. An in-place upgrade keeps the installation identity
+uninstall deletes the rows, and workspace deletion removes every row for that
+workspace. An in-place upgrade keeps the installation identity
 but advances the approval revision, so a write approved for the old manifest is
 denied. `ListChangeRequestEvidenceExact` returns the calling
 installation's rows with their real provider id alongside any GitHub evidence

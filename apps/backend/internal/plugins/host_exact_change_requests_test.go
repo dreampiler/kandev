@@ -7,6 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
@@ -336,5 +338,219 @@ func TestExactChangeRequestNewKeyUpdatesExistingRow(t *testing.T) {
 	result, change, err := manager.Report(context.Background(), next)
 	if err != nil || result == nil || result.Status != pluginsdk.CommandApplied || change.State != "merged" || change.Title != "Merged" {
 		t.Fatalf("second Report under a new key = result:%+v change:%+v err:%v", result, change, err)
+	}
+}
+
+func TestExactChangeRequestReplayDoesNotUndoNewerOperations(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	digest := changeRequestManifestDigest(t, host)
+	report := pluginsdk.ExactTaskChangeRequestReport{
+		WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 31,
+		URL: "https://forge.example.test/pulls/31", Title: "Initial", State: "open",
+		ApprovalRevision: 1, ManifestDigest: digest,
+	}
+	report.RequestID, report.IdempotencyKey = "initial", "initial"
+	if result, _, err := manager.Report(context.Background(), report); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("initial Report = %+v err=%v", result, err)
+	}
+	merged := report
+	merged.RequestID, merged.IdempotencyKey = "merged", "merged"
+	merged.State, merged.Title, merged.MergedAt = "merged", "Merged", time.Now().UTC().Format(time.RFC3339Nano)
+	if result, _, err := manager.Report(context.Background(), merged); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("merged Report = %+v err=%v", result, err)
+	}
+	replayed, change, err := manager.Report(context.Background(), report)
+	if err != nil || replayed == nil || replayed.Status != pluginsdk.CommandApplied || change.State != "merged" {
+		t.Fatalf("initial replay after merge = result:%+v change:%+v err=%v, want current merged row", replayed, change, err)
+	}
+
+	remove := pluginsdk.ExactTaskChangeRequestRemove{
+		RequestID: "remove", WorkspaceID: "workspace-change-requests",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 31,
+		IdempotencyKey: "remove", ApprovalRevision: 1, ManifestDigest: digest,
+	}
+	if result, err := manager.Remove(context.Background(), remove); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("Remove = %+v err=%v", result, err)
+	}
+	newer := merged
+	newer.RequestID, newer.IdempotencyKey = "newer", "newer"
+	newer.Title, newer.State, newer.MergedAt = "Newer", "merged", time.Now().UTC().Format(time.RFC3339Nano)
+	if result, _, err := manager.Report(context.Background(), newer); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("newer Report = %+v err=%v", result, err)
+	}
+	if result, err := manager.Remove(context.Background(), remove); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("Remove replay after newer report = %+v err=%v", result, err)
+	}
+	rows, err := host.changeRequestLedger().ListChangeRequestsByTask(context.Background(), host.installationID, "workspace-change-requests", "task-1")
+	if err != nil {
+		t.Fatalf("list rows after remove replay: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Number != 31 || rows[0].Title != "Newer" {
+		t.Fatalf("rows after remove replay = %+v, want the newer row", rows)
+	}
+}
+
+func TestExactChangeRequestUncertainRetryDoesNotRewrite(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	digestManifest := changeRequestManifestDigest(t, host)
+	input := pluginsdk.ExactTaskChangeRequestReport{
+		RequestID: "uncertain", WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 41,
+		URL: "https://forge.example.test/pulls/41", Title: "Old", State: "open",
+		IdempotencyKey: "uncertain", ApprovalRevision: 1, ManifestDigest: digestManifest,
+	}
+	payloadDigest, err := exactTaskChangeRequestReportDigest(input)
+	if err != nil {
+		t.Fatalf("payload digest: %v", err)
+	}
+	if _, _, err := host.commandStore.Admit(context.Background(), state.CommandIntent{
+		InstallationID: host.installationID, WorkspaceID: input.WorkspaceID,
+		RequestID: input.RequestID, IdempotencyKey: input.IdempotencyKey,
+		Method: exactTaskChangeRequestReportMethod, CapabilityID: exactTaskChangeRequestCapability,
+		PayloadDigest: payloadDigest, TargetID: input.TaskID,
+		ExpectedResourceVersion: changeRequestAdmissionVersion(input.TaskID),
+		ApprovalRevision:        1, ManifestDigest: digestManifest,
+	}); err != nil {
+		t.Fatalf("admit accepted receipt: %v", err)
+	}
+	first, _, err := manager.Report(context.Background(), input)
+	if err != nil || first == nil || first.Status != pluginsdk.CommandUncertain {
+		t.Fatalf("uncertain Report = result:%+v err:%v", first, err)
+	}
+	newer := input
+	newer.RequestID, newer.IdempotencyKey = "newer", "newer"
+	newer.Title, newer.State, newer.MergedAt = "Newer", "merged", time.Now().UTC().Format(time.RFC3339Nano)
+	if result, _, err := manager.Report(context.Background(), newer); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("newer Report = result:%+v err:%v", result, err)
+	}
+	replayed, change, err := manager.Report(context.Background(), input)
+	if err != nil || replayed == nil || replayed.Status != pluginsdk.CommandUncertain || change.ID != "" {
+		t.Fatalf("uncertain replay = result:%+v change:%+v err:%v", replayed, change, err)
+	}
+	rows, err := host.changeRequestLedger().ListChangeRequestsByTask(context.Background(), host.installationID, input.WorkspaceID, input.TaskID)
+	if err != nil {
+		t.Fatalf("list rows: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Title != "Newer" || rows[0].State != "merged" {
+		t.Fatalf("rows after uncertain replay = %+v, want the newer row", rows)
+	}
+}
+
+func TestExactChangeRequestFailedCompleteThenNewerReportIsNotRewritten(t *testing.T) {
+	host := newExactChangeRequestHost(t, []string{"forgejo"})
+	connection, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open command database: %v", err)
+	}
+	connection.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = connection.Close() })
+	pool := db.NewPool(connection, connection)
+	commandStore, err := state.NewCommandStore(pool)
+	if err != nil {
+		t.Fatalf("NewCommandStore: %v", err)
+	}
+	ledger, err := state.NewChangeRequestStore(pool)
+	if err != nil {
+		t.Fatalf("NewChangeRequestStore: %v", err)
+	}
+	host.commandStore = commandStore
+	host.changeRequestsDep = func() *state.ChangeRequestStore { return ledger }
+
+	if _, err := connection.Exec(`
+		CREATE TRIGGER fail_change_request_receipt
+		BEFORE UPDATE ON plugin_host_command_receipts
+		WHEN NEW.operation_id IN (
+			SELECT operation_id FROM plugin_host_command_intents WHERE idempotency_key = 'uncertain'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'injected receipt completion failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create receipt failure trigger: %v", err)
+	}
+
+	manager, ok := pluginsdk.HostTaskChangeRequests(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task change requests")
+	}
+	digestManifest := changeRequestManifestDigest(t, host)
+	old := pluginsdk.ExactTaskChangeRequestReport{
+		RequestID: "uncertain", WorkspaceID: "workspace-change-requests", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 51,
+		URL: "https://forge.example.test/pulls/51", Title: "Old", State: "open",
+		IdempotencyKey: "uncertain", ApprovalRevision: 1, ManifestDigest: digestManifest,
+	}
+	failed, _, err := manager.Report(context.Background(), old)
+	if err != nil || failed == nil || failed.Status != pluginsdk.CommandUncertain {
+		t.Fatalf("failed Report = result:%+v err:%v, want UNCERTAIN", failed, err)
+	}
+	if _, err := connection.Exec(`DROP TRIGGER fail_change_request_receipt`); err != nil {
+		t.Fatalf("drop receipt failure trigger: %v", err)
+	}
+
+	newer := old
+	newer.RequestID, newer.IdempotencyKey = "newer", "newer"
+	newer.Title, newer.State, newer.MergedAt = "Newer", "merged", time.Now().UTC().Format(time.RFC3339Nano)
+	if result, _, err := manager.Report(context.Background(), newer); err != nil || result == nil || result.Status != pluginsdk.CommandApplied {
+		t.Fatalf("newer Report = result:%+v err:%v", result, err)
+	}
+	replayed, change, err := manager.Report(context.Background(), old)
+	if err != nil || replayed == nil {
+		t.Fatalf("old replay = result:%+v change:%+v err:%v", replayed, change, err)
+	}
+	rows, err := ledger.ListChangeRequestsByTask(context.Background(), host.installationID, old.WorkspaceID, old.TaskID)
+	if err != nil {
+		t.Fatalf("list after old replay: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Title != "Newer" || rows[0].State != "merged" {
+		t.Fatalf("rows after old replay = %+v, want the newer merged row", rows)
+	}
+	if replayed.Status != pluginsdk.CommandUncertain || change.ID != "" {
+		t.Fatalf("old replay = result:%+v change:%+v, want UNCERTAIN with no row", replayed, change)
+	}
+}
+
+func TestWorkspaceDeletedRemovesOnlyThatWorkspaceChangeRequests(t *testing.T) {
+	eventBus := bus.NewMemoryEventBus(testLogger(t))
+	ledger := newChangeRequestEvidenceStore(t)
+	service := NewService(nil, NewRegistry(), eventBus, testLogger(t))
+	service.SetChangeRequestStore(ledger)
+	service.subscribeWorkspaceDeletedEvents()
+	t.Cleanup(service.closeWorkspaceDeletedEvents)
+
+	for _, record := range []state.ChangeRequestRecord{
+		{InstallationID: "inst-1", WorkspaceID: "ws-1", TaskID: "task-1", ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1, State: state.ChangeRequestStateOpen},
+		{InstallationID: "inst-1", WorkspaceID: "ws-2", TaskID: "task-2", ProviderID: "forgejo", RepositoryID: "repo-1", Number: 2, State: state.ChangeRequestStateOpen},
+	} {
+		if _, _, err := ledger.ReportChangeRequest(context.Background(), record); err != nil {
+			t.Fatalf("report %+v: %v", record, err)
+		}
+	}
+	event := bus.NewEvent(events.WorkspaceDeleted, "task-service", map[string]interface{}{"id": "ws-1"})
+	if err := eventBus.Publish(context.Background(), events.WorkspaceDeleted, event); err != nil {
+		t.Fatalf("publish workspace.deleted: %v", err)
+	}
+	deleted, err := ledger.ListChangeRequestsByTask(context.Background(), "inst-1", "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list deleted workspace: %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("ws-1 rows = %d, want 0", len(deleted))
+	}
+	remaining, err := ledger.ListChangeRequestsByTask(context.Background(), "inst-1", "ws-2", "task-2")
+	if err != nil {
+		t.Fatalf("list remaining workspace: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("ws-2 rows = %d, want 1", len(remaining))
 	}
 }

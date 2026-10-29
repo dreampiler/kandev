@@ -2,8 +2,11 @@ package state
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -206,18 +209,29 @@ func normalizeChangeRequestRecord(record ChangeRequestRecord, now string) Change
 // states, so a stale poll cannot reopen or unmerge a row. The second return
 // reports whether the row already existed.
 func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record ChangeRequestRecord) (ChangeRequestRecord, bool, error) {
-	if err := validateChangeRequestRecord(record); err != nil {
-		return ChangeRequestRecord{}, false, err
-	}
-	now := time.Now().UTC().Format(changeRequestTimestampLayout)
-	record = normalizeChangeRequestRecord(record, now)
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	stored, created, err := s.reportChangeRequestTx(ctx, tx, record)
+	if err != nil {
+		return ChangeRequestRecord{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ChangeRequestRecord{}, false, err
+	}
+	return stored, !created, nil
+}
+
+func (s *ChangeRequestStore) reportChangeRequestTx(ctx context.Context, tx *sqlx.Tx, record ChangeRequestRecord) (ChangeRequestRecord, bool, error) {
+	if err := validateChangeRequestRecord(record); err != nil {
+		return ChangeRequestRecord{}, false, err
+	}
+	now := time.Now().UTC().Format(changeRequestTimestampLayout)
+	record = normalizeChangeRequestRecord(record, now)
 	var existing ChangeRequestRecord
-	err = tx.GetContext(ctx, &existing, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
+	err := tx.GetContext(ctx, &existing, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
 		record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ChangeRequestRecord{}, false, err
@@ -261,10 +275,7 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record Cha
 	if stored.TaskID != record.TaskID {
 		return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
 	}
-	if err := tx.Commit(); err != nil {
-		return ChangeRequestRecord{}, false, err
-	}
-	return stored, !created, nil
+	return stored, created, nil
 }
 
 // RemoveChangeRequest deletes one plugin-reported task change request owned
@@ -311,6 +322,28 @@ func (s *ChangeRequestStore) DeleteByInstallation(ctx context.Context, installat
 	return err
 }
 
+// DeleteByWorkspace removes every reported row for a deleted workspace, across
+// installations. The workspace.deleted handler owns this cleanup.
+func (s *ChangeRequestStore) DeleteByWorkspace(ctx context.Context, workspaceID string) error {
+	if workspaceID == "" {
+		return errors.New("plugin task change request: workspace id is required")
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		DELETE FROM plugin_task_change_requests WHERE workspace_id = ?
+	`), workspaceID)
+	return err
+}
+
 const changeRequestColumns = `id, installation_id, workspace_id, task_id, provider_id, provider_host,
 	repository_id, number, url, title, state, head_branch, base_branch,
 	created_at, merged_at, closed_at, updated_at`
+
+// ChangeRequestResourceVersion is the stable version of one reported row.
+func ChangeRequestResourceVersion(record ChangeRequestRecord) string {
+	canonical := record.InstallationID + "\x00" + record.WorkspaceID + "\x00" + record.TaskID +
+		"\x00" + record.ProviderID + "\x00" + record.ProviderHost + "\x00" + record.RepositoryID +
+		"\x00" + record.ID + "\x00" + strconv.FormatInt(record.Number, 10) +
+		"\x00" + record.State + "\x00" + record.UpdatedAt
+	digest := sha256.Sum256([]byte(canonical))
+	return "sha256:" + hex.EncodeToString(digest[:])
+}

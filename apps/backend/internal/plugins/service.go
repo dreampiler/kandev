@@ -96,27 +96,28 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir                 string
-	store                      store.Store
-	approvals                  *approvalLedger
-	registry                   *Registry
-	state                      *state.Store
-	exactCommandStore          *state.CommandStore
-	userState                  *state.UserStore
-	instances                  *instances.Store
-	instanceState              *state.InstanceStore
-	webArtifacts               *webapp.ArtifactStore
-	webRuntime                 *webapp.Runtime
-	eventHub                   *webapp.EventHub
-	eventSubscription          bus.Subscription
-	userStateCleanup           userStateCleanupStore
-	agentConvs                 AgentConversationService
-	managedConvs               ManagedAgentConversationService
-	managedAutomationSchedules ManagedConversationScheduleService
-	eventBus                   bus.EventBus
-	conversationTokens         *conversationTokenManager
-	conversationEpoch          string
-	log                        *logger.Logger
+	pluginsDir                   string
+	store                        store.Store
+	approvals                    *approvalLedger
+	registry                     *Registry
+	state                        *state.Store
+	exactCommandStore            *state.CommandStore
+	userState                    *state.UserStore
+	instances                    *instances.Store
+	instanceState                *state.InstanceStore
+	webArtifacts                 *webapp.ArtifactStore
+	webRuntime                   *webapp.Runtime
+	eventHub                     *webapp.EventHub
+	eventSubscription            bus.Subscription
+	workspaceDeletedSubscription bus.Subscription
+	userStateCleanup             userStateCleanupStore
+	agentConvs                   AgentConversationService
+	managedConvs                 ManagedAgentConversationService
+	managedAutomationSchedules   ManagedConversationScheduleService
+	eventBus                     bus.EventBus
+	conversationTokens           *conversationTokenManager
+	conversationEpoch            string
+	log                          *logger.Logger
 
 	deliverer                       Deliverer
 	agentToolCatalogListener        AgentToolCatalogListener
@@ -812,6 +813,7 @@ func (s *Service) Shutdown() {
 
 // Close stops plugin runtimes after workers stop.
 func (s *Service) Close() error {
+	s.closeWorkspaceDeletedEvents()
 	s.Shutdown()
 	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -170,12 +169,16 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 	if err != nil {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandInvalid, Reason: "invalid_request"}, pluginsdk.TaskChangeRequest{}, nil
 	}
-	store, record, unlock, result := h.admitTaskChangeRequest(ctx, input.WorkspaceID, input.RequestID, input.IdempotencyKey,
+	store, record, existingReceipt, unlock, result := h.admitTaskChangeRequest(ctx, input.WorkspaceID, input.RequestID, input.IdempotencyKey,
 		exactTaskChangeRequestReportMethod, digest, input.TaskID, input.ApprovalRevision, input.ManifestDigest)
 	if result != nil {
 		return result, pluginsdk.TaskChangeRequest{}, nil
 	}
 	defer unlock()
+	if existingReceipt && record.Receipt.State != exactReceiptStateCompleted {
+		_, _ = store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandUncertain), "change_request_outcome_uncertain", record.Intent.TargetID, "")
+		return uncertainTaskChangeRequest("change_request_outcome_uncertain"), pluginsdk.TaskChangeRequest{}, nil
+	}
 	ledger := h.changeRequestLedger()
 	if ledger == nil {
 		return unavailableTaskChangeRequest("task_change_requests_unsupported"), pluginsdk.TaskChangeRequest{}, nil
@@ -205,23 +208,19 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		resultStatus, reason := exactChangeRequestTargetError(err)
 		return h.completeChangeRequestFailure(ctx, store, record, resultStatus, reason, input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
 	}
-	reported, _, err := ledger.ReportChangeRequest(ctx, state.ChangeRequestRecord{
+	reported, completed, err := ledger.ReportChangeRequestWithReceipt(ctx, state.ChangeRequestRecord{
 		InstallationID: h.installationID, WorkspaceID: input.WorkspaceID, TaskID: input.TaskID,
 		ProviderID: strings.TrimSpace(input.ProviderID), ProviderHost: strings.TrimSpace(input.ProviderHost),
 		RepositoryID: strings.TrimSpace(input.RepositoryID), Number: input.Number,
 		URL: input.URL, Title: input.Title, State: input.State,
 		HeadBranch: input.HeadBranch, BaseBranch: input.BaseBranch,
 		CreatedAt: input.CreatedAt, MergedAt: input.MergedAt, ClosedAt: input.ClosedAt,
-	})
+	}, store, record.Intent.OperationID, string(pluginsdk.CommandApplied))
 	if errors.Is(err, state.ErrChangeRequestTaskConflict) {
 		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandConflict, "task_changed", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
 	}
 	if err != nil {
-		return unavailableTaskChangeRequest("task_change_request_store_unavailable"), pluginsdk.TaskChangeRequest{}, nil
-	}
-	completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", reported.ID, changeRequestResourceVersion(reported))
-	if err != nil {
-		return uncertainTaskChangeRequest("command_receipt_unavailable"), taskChangeRequestToSDK(reported), nil
+		return uncertainTaskChangeRequest("task_change_request_transaction_failed"), pluginsdk.TaskChangeRequest{}, nil
 	}
 	return commandResultFromRecord(completed), taskChangeRequestToSDK(reported), nil
 }
@@ -250,12 +249,16 @@ func (h *pluginHost) removeTaskChangeRequestExact(ctx context.Context, input plu
 	if err != nil {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandInvalid, Reason: "invalid_request"}, nil
 	}
-	store, record, unlock, result := h.admitTaskChangeRequest(ctx, input.WorkspaceID, input.RequestID, input.IdempotencyKey,
+	store, record, existingReceipt, unlock, result := h.admitTaskChangeRequest(ctx, input.WorkspaceID, input.RequestID, input.IdempotencyKey,
 		exactTaskChangeRequestRemoveMethod, digest, changeRequestAdmissionVersion(""), input.ApprovalRevision, input.ManifestDigest)
 	if result != nil {
 		return result, nil
 	}
 	defer unlock()
+	if existingReceipt && record.Receipt.State != exactReceiptStateCompleted {
+		_, _ = store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandUncertain), "change_request_outcome_uncertain", record.Intent.TargetID, "")
+		return uncertainTaskChangeRequest("change_request_outcome_uncertain"), nil
+	}
 	ledger := h.changeRequestLedger()
 	if ledger == nil {
 		return unavailableTaskChangeRequest("task_change_requests_unsupported"), nil
@@ -269,43 +272,41 @@ func (h *pluginHost) removeTaskChangeRequestExact(ctx context.Context, input plu
 	if record.Receipt.State == exactReceiptStateCompleted {
 		return commandResultFromRecord(record), nil
 	}
-	if err := ledger.RemoveChangeRequest(ctx, h.installationID, input.WorkspaceID,
-		strings.TrimSpace(input.ProviderID), strings.TrimSpace(input.RepositoryID), input.Number); err != nil {
-		return unavailableTaskChangeRequest("task_change_request_store_unavailable"), nil
-	}
-	completed, err := store.Complete(ctx, record.Intent.OperationID, string(pluginsdk.CommandApplied), "", "", "")
+	completed, err := ledger.RemoveChangeRequestWithReceipt(ctx, h.installationID, input.WorkspaceID,
+		strings.TrimSpace(input.ProviderID), strings.TrimSpace(input.RepositoryID), input.Number,
+		store, record.Intent.OperationID, string(pluginsdk.CommandApplied))
 	if err != nil {
-		return uncertainTaskChangeRequest("command_receipt_unavailable"), nil
+		return uncertainTaskChangeRequest("task_change_request_transaction_failed"), nil
 	}
 	return commandResultFromRecord(completed), nil
 }
 
 func (h *pluginHost) admitTaskChangeRequest(ctx context.Context, workspaceID, requestID, idempotencyKey, method, payloadDigest, targetID string,
 	approvalRevision uint64, manifestDigest string,
-) (*state.CommandStore, state.CommandRecord, func(), *pluginsdk.CommandResult) {
+) (*state.CommandStore, state.CommandRecord, bool, func(), *pluginsdk.CommandResult) {
 	if h.service == nil || h.installationID == "" {
-		return nil, state.CommandRecord{}, nil, unavailableTaskChangeRequest("authorization_unavailable")
+		return nil, state.CommandRecord{}, false, nil, unavailableTaskChangeRequest("authorization_unavailable")
 	}
 	h.service.approvalEffectMu.Lock()
 	unlock := h.service.approvalEffectMu.Unlock
 	installed := h.service.installedRecordByInstallationID(h.installationID)
 	if installed == nil || (h.pluginID != "" && installed.ID != h.pluginID) {
 		unlock()
-		return nil, state.CommandRecord{}, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(ApprovalDenyForeignInstallation)}
+		return nil, state.CommandRecord{}, false, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(ApprovalDenyForeignInstallation)}
 	}
 	if installed.Status != StatusActive {
 		unlock()
-		return nil, state.CommandRecord{}, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "plugin_not_active"}
+		return nil, state.CommandRecord{}, false, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "plugin_not_active"}
 	}
 	if ManifestCapabilityDigest(installed.Manifest) != manifestDigest {
 		unlock()
-		return nil, state.CommandRecord{}, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(ApprovalDenyUnavailableCapability)}
+		return nil, state.CommandRecord{}, false, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(ApprovalDenyUnavailableCapability)}
 	}
 	decision := h.service.authorizePluginCapability(h.installationID, workspaceID, exactTaskChangeRequestCapability, approvalRevision,
 		payloadDigest, CanonicalApprovalDigest("host-method", method, "v2"))
 	if !decision.Allowed {
 		unlock()
-		return nil, state.CommandRecord{}, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(decision.Reason)}
+		return nil, state.CommandRecord{}, false, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(decision.Reason)}
 	}
 	store := h.commandStore
 	if store == nil {
@@ -313,14 +314,14 @@ func (h *pluginHost) admitTaskChangeRequest(ctx context.Context, workspaceID, re
 	}
 	if store == nil {
 		unlock()
-		return nil, state.CommandRecord{}, nil, unavailableTaskChangeRequest(exactReasonCommandStoreUnavailable)
+		return nil, state.CommandRecord{}, false, nil, unavailableTaskChangeRequest(exactReasonCommandStoreUnavailable)
 	}
 	changeRequests := h.changeRequestLedger()
 	if changeRequests == nil {
 		unlock()
-		return nil, state.CommandRecord{}, nil, unavailableTaskChangeRequest("task_change_requests_unsupported")
+		return nil, state.CommandRecord{}, false, nil, unavailableTaskChangeRequest("task_change_requests_unsupported")
 	}
-	record, _, err := store.Admit(ctx, state.CommandIntent{
+	record, existingReceipt, err := store.Admit(ctx, state.CommandIntent{
 		InstallationID: h.installationID, WorkspaceID: workspaceID,
 		RequestID: requestID, IdempotencyKey: idempotencyKey,
 		Method: method, CapabilityID: exactTaskChangeRequestCapability,
@@ -329,13 +330,13 @@ func (h *pluginHost) admitTaskChangeRequest(ctx context.Context, workspaceID, re
 	})
 	if errors.Is(err, state.ErrCommandPayloadConflict) {
 		unlock()
-		return nil, state.CommandRecord{}, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandConflict, Reason: "idempotency_payload_mismatch"}
+		return nil, state.CommandRecord{}, false, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandConflict, Reason: "idempotency_payload_mismatch"}
 	}
 	if err != nil {
 		unlock()
-		return nil, state.CommandRecord{}, nil, unavailableTaskChangeRequest("command_admission_unavailable")
+		return nil, state.CommandRecord{}, false, nil, unavailableTaskChangeRequest("command_admission_unavailable")
 	}
-	return store, record, unlock, nil
+	return store, record, existingReceipt, unlock, nil
 }
 
 // changeRequestAdmissionVersion carries the intent's target through the
@@ -393,21 +394,12 @@ func exactChangeRequestTargetError(err error) (pluginsdk.CommandStatus, string) 
 	}
 }
 
-func changeRequestResourceVersion(record state.ChangeRequestRecord) string {
-	canonical := record.InstallationID + "\x00" + record.WorkspaceID + "\x00" + record.TaskID +
-		"\x00" + record.ProviderID + "\x00" + record.ProviderHost + "\x00" + record.RepositoryID +
-		"\x00" + record.ID + "\x00" + strconv.FormatInt(record.Number, 10) +
-		"\x00" + record.State + "\x00" + record.UpdatedAt
-	digest := sha256.Sum256([]byte(canonical))
-	return "sha256:" + hex.EncodeToString(digest[:])
-}
-
 func taskChangeRequestToSDK(record state.ChangeRequestRecord) pluginsdk.TaskChangeRequest {
 	out := pluginsdk.TaskChangeRequest{ID: record.ID, WorkspaceID: record.WorkspaceID, TaskID: record.TaskID,
 		ProviderID: record.ProviderID, ProviderHost: record.ProviderHost, RepositoryID: record.RepositoryID,
 		Number: record.Number, URL: record.URL, Title: record.Title, State: record.State,
 		HeadBranch: record.HeadBranch, BaseBranch: record.BaseBranch, CreatedAt: record.CreatedAt,
-		ResourceVersion: changeRequestResourceVersion(record)}
+		ResourceVersion: state.ChangeRequestResourceVersion(record)}
 	if record.MergedAt != "" {
 		mergedAt := record.MergedAt
 		out.MergedAt = &mergedAt

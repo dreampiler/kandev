@@ -34,7 +34,8 @@ id.
 - A first report fixes the task association; merged and closed are terminal.
 - `UNCERTAIN` when a ledger write succeeds but the durable receipt cannot be
   completed; the same idempotency key reconciles.
-- Disable fences new writes; uninstall deletes the installation's rows.
+- Disable fences new writes; uninstall deletes the installation's rows;
+  workspace deletion removes every row for that workspace.
 - `ListChangeRequestEvidenceExact` returns the caller's plugin rows with the real
   provider id and keeps GitHub failure and unsupported states visible.
 - Required-store wiring, conformance, SDK transport, and the frozen contract

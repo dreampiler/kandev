@@ -124,6 +124,7 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	} else if changeRequestStore != nil {
 		svc.SetChangeRequestStore(changeRequestStore)
 	}
+	svc.subscribeWorkspaceDeletedEvents()
 
 	configureWebAppStorage(cfg, svc, instanceStore, instanceState, log)
 	svc.SetSecrets(secrets)
