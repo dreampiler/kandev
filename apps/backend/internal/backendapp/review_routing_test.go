@@ -515,5 +515,16 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 		if _, ok := scoped["one\x00main.go"]; !ok {
 			t.Fatalf("multi-repo map key must be the panel scope key: %v", scoped)
 		}
+		rooted := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "r", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+			{RepositoryID: "root", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
+		}}, executorType: taskmodels.ExecutorTypeLocal}}
+		pair, err := rooted.LocalReviewFiles(context.Background(), "r", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := pair["\x00main.go"]; !ok {
+			t.Fatalf("multi-repo root key must be the empty scope key: %v", pair)
+		}
 	})
 }
