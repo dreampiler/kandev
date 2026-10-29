@@ -90,7 +90,11 @@ session to resume does not drop the prompt or leave it for manual recovery.
   part of the prompt reached the agent, Kandev shall return the entry to its
   session queue with its identity, payload, and order unchanged and settle its
   dispatch claim. A reservation for an exact session incarnation shall restore
-  onto that incarnation.
+  onto that incarnation. While the backend is shutting down, if Stop reaches
+  the reserved-prompt callback teardown before the restore runs, the restore is
+  refused and the dispatch claim is retained; the existing startup
+  reconciliation then parks the session for explicit recovery and returns the
+  same entry to its queue when that recovery completes. The entry is not lost.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** The returned entry shall wait for the
   next existing delivery trigger. Kandev shall not add a timer, retry loop, or
   new resume attempt for it, and a cancelled resume after a delivery attempt

@@ -246,8 +246,12 @@ message was dropped rather than lost (`003.3`).
 
 The restore runs on the reservation's recovery owner. If `Stop` reaches
 `stopReservedPromptCallbacks` before the restore is launched, the restore is
-refused and the claim stays for the existing startup reconciliation, which is
-the previous outcome.
+refused and the claim stays for the existing startup reconciliation. That
+reconciliation parks the session for explicit recovery with the
+`unknown_queue_dispatch_outcome` reason instead of making the entry visible
+immediately, and the entry returns to its queue when the operator completes
+that recovery (`restorePendingQueueDispatchesForRecovery`). The entry is not
+lost across the shutdown boundary.
 
 ## Responsive behavior
 
