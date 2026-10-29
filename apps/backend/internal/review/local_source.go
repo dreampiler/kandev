@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,7 +84,8 @@ func localCommit(ctx context.Context, path, ref string) (string, error) {
 }
 
 // CollectLocalChanges reads a committed three-dot range when HeadRef is set;
-// otherwise it reads the working tree (including untracked files) against BaseRef.
+// otherwise it reads the tracked index and working tree (including untracked
+// files) against BaseRef.
 func CollectLocalChanges(ctx context.Context, source Source) ([]ChangedFile, error) {
 	path, base, head, err := prepareLocalSource(ctx, source)
 	if err != nil {
@@ -97,17 +99,24 @@ func CollectLocalChanges(ctx context.Context, source Source) ([]ChangedFile, err
 	}
 	entries := strings.Split(strings.TrimSuffix(status, "\x00"), "\x00")
 	files := make([]ChangedFile, 0)
+	covered := make(map[string]struct{})
 	used := 0
 	for i := 0; i+1 < len(entries); i += 2 {
 		file, err := localChangedFile(ctx, path, base, head, entries[i+1], entries[i], &used)
 		if err != nil {
 			return nil, err
 		}
+		covered[entries[i+1]] = struct{}{}
 		if file.Diff != "" {
 			files = append(files, file)
 		}
 	}
 	if head == "" {
+		staged, err := localStagedChanges(ctx, path, base, covered, &used)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, staged...)
 		untracked, err := localUntrackedFiles(ctx, path, &used)
 		if err != nil {
 			return nil, err
@@ -118,10 +127,57 @@ func CollectLocalChanges(ctx context.Context, source Source) ([]ChangedFile, err
 	return files, nil
 }
 
+// localStagedChanges reads index-only changes (BaseRef to the index) that the
+// working-tree diff did not already cover. `git diff BaseRef` compares BaseRef
+// to the working tree, so a staged change the working tree reverted to the base
+// content would otherwise be dropped; agentctl's collection keeps it.
+func localStagedChanges(ctx context.Context, path, base string, covered map[string]struct{}, used *int) ([]ChangedFile, error) {
+	statusArgs := append(localCachedDiffArgs(base), "--name-status", "-z", "--")
+	status, err := localGit(ctx, path, localMaxTotalDiffBytes, statusArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read staged changes: %v", ErrWorkspaceUnavailable, err)
+	}
+	entries := strings.Split(strings.TrimSuffix(status, "\x00"), "\x00")
+	files := make([]ChangedFile, 0)
+	for i := 0; i+1 < len(entries); i += 2 {
+		name := entries[i+1]
+		if _, ok := covered[name]; ok {
+			continue
+		}
+		file, err := localStagedFile(ctx, path, base, name, entries[i], used)
+		if err != nil {
+			return nil, err
+		}
+		if file.Diff != "" {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
+
+func localStagedFile(ctx context.Context, path, base, file, status string, used *int) (ChangedFile, error) {
+	if *used >= localMaxTotalDiffBytes {
+		return ChangedFile{}, nil
+	}
+	if localFileTooLarge(ctx, path, base, "", file) {
+		return ChangedFile{}, nil
+	}
+	args := append(localCachedDiffArgs(base), "--", file)
+	diff, err := localGit(ctx, path, localMaxDiffOutputSize, args...)
+	if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
+		return ChangedFile{}, fmt.Errorf("%w: read staged diff for %q: %v", ErrWorkspaceUnavailable, file, err)
+	}
+	return localFile(file, status, diff, false, used), nil
+}
+
 func localDiffArgs(base, head string) []string {
 	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--ignore-submodules=all", base}
 	if head != "" {
 		args = append(args, head)
 	}
 	return args
+}
+
+func localCachedDiffArgs(base string) []string {
+	return []string{"diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--ignore-submodules=all", base}
 }

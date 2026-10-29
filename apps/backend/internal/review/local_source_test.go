@@ -58,6 +58,21 @@ func TestCollectLocalChangesIncludesUntrackedAndKeepsWorkingTreeContent(t *testi
 	}
 }
 
+func TestCollectLocalChangesIncludesStagedOnlyChange(t *testing.T) {
+	dir := localReviewRepo(t)
+	localReviewGit(t, dir, "add", "a.go")
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := CollectLocalChanges(context.Background(), Source{WorktreePath: dir, BaseRef: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || !strings.Contains(files[0].Diff, "+new") {
+		t.Fatalf("files = %+v", files)
+	}
+}
+
 func TestCollectLocalChangesRejectsInvalidRefs(t *testing.T) {
 	dir := localReviewRepo(t)
 	for _, source := range []Source{
