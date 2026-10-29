@@ -387,3 +387,30 @@ func TestSQLiteWriterJournalSizeLimit(t *testing.T) {
 
 	require.Equal(t, int64(-1), sqliteJournalSizeLimit(t, ctx, reader), "reader keeps the SQLite default")
 }
+
+func TestSQLiteReaderPoolSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reader-pool-size.db")
+	writer, err := internaldb.OpenSQLite(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+
+	for _, test := range []struct {
+		readerConns int
+		want        int
+	}{
+		{readerConns: 0, want: 4},
+		{readerConns: 1, want: 1},
+		{readerConns: 7, want: 7},
+		{readerConns: 64, want: 64},
+	} {
+		reader, err := internaldb.OpenSQLiteReaderWithConns(path, test.readerConns)
+		require.NoError(t, err)
+		require.Equal(t, test.want, reader.Stats().MaxOpenConnections)
+		require.NoError(t, reader.Close())
+	}
+
+	for _, readerConns := range []int{-1, 65} {
+		_, err := internaldb.OpenSQLiteReaderWithConns(path, readerConns)
+		require.Error(t, err)
+	}
+}

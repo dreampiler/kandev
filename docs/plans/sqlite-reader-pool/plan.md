@@ -31,11 +31,13 @@ required-store probes, and failure semantics unchanged.
 
 ## Verification
 
-Run from `apps/backend` unless stated otherwise. New-behavior checks ran from a
-temporary Go overlay outside the repository's permanent test tree, then the
-temporary files were removed.
+Run from `apps/backend` unless stated otherwise. The initial implementation used
+one-off overlays; the upstream review follow-up moved the required behavior
+checks into the existing permanent test files.
 
-- One-off overlay: `go test -trimpath -overlay <temp overlay> ./internal/db ./internal/common/config ./internal/persistence -run 'TestP50' -count=1 -v`
+- `go test -trimpath ./internal/common/config -run 'TestSQLiteReaderConns|TestConfigurationCatalog' -count=1`
+- `go test -trimpath ./internal/db -run 'TestSQLiteReaderPoolSize' -count=1`
+- `go test -trimpath ./internal/persistence -run 'TestProvideAppliesSQLiteReaderPoolSize' -count=1`
 - Existing suites: `go test -trimpath ./internal/db -count=1` and `go test -trimpath ./internal/persistence/requiredstores -count=1`
 - Configuration catalog consistency: `go test -trimpath ./internal/common/config -run 'TestConfigurationCatalog' -count=1 -v`
 - `go build -trimpath ./internal/db ./internal/persistence ./internal/common/config`
@@ -74,24 +76,16 @@ value is absent, the raw YAML value is parsed strictly. An explicitly present
 empty environment value is invalid, not absent. This also keeps a nonnumeric
 YAML value from failing a PostgreSQL startup.
 
-Verification used one-off Go overlay tests outside the permanent test tree.
-They covered the default, YAML and environment overrides, environment-over-YAML
-precedence, boundaries, invalid values, actual open and idle counts,
-persistence wiring, and PostgreSQL startup with invalid and nonnumeric YAML and
-environment values. The temporary files and overlay were removed after the run.
-No new permanent behavior test was added.
-
-The catalog's audited environment inventory line for
-`KANDEV_SQLITE_READER_CONNS` remains in `catalog_test.go`. It is the minimum
-consistency update for a catalog that already requires every stable environment
-variable; it is not a new behavior test. A permanent companion test for this
-feature would need a separate narrow proposal and explicit approval, and is
-recorded as an unresolved follow-up rather than assumed.
+The upstream review follow-up added the required permanent coverage in existing
+files: configuration resolution, provenance, and file-aware YAML errors in
+`source_test.go`; reader factory sizing in `sqlite_test.go`; and persistence
+wiring in `provider_legacy_test.go`. The initial temporary overlays were
+removed; the permanent tests are the current evidence. The catalog's audited
+environment inventory line remains as the minimum consistency update for a
+catalog that already requires every stable environment variable.
 
 ## Unresolved contract
 
 The P50b probe policy remains deliberately unresolved: probe timeout,
 consecutive-failure hysteresis, and reader-contention classification are not
-part of this change and require the existing maintainer direction. A permanent
-upstream companion test for the SQLite reader override, if maintainers require
-one, is also a separate proposal.
+part of this change and require the existing maintainer direction.

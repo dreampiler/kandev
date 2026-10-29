@@ -416,40 +416,40 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 // environment value is absent, the raw YAML value is parsed strictly. A
 // PostgreSQL selection ignores both values so a SQLite-only setting cannot
 // change its startup.
-func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) error {
+func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) (bool, error) {
 	if !sqliteReaderConnsApplies(cfg) {
-		return nil
+		return false, nil
 	}
 	entry, ok := CatalogEntryForKey(sqliteReaderConnsKey)
 	if !ok {
-		return nil
+		return false, nil
 	}
 	if raw, envName, found := presentEnv(env, entry.EnvVars...); found {
 		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil {
-			return fmt.Errorf("%s: invalid integer %q from %s", sqliteReaderConnsKey, raw, envName)
+			return false, fmt.Errorf("%s: invalid integer %q from %s", sqliteReaderConnsKey, raw, envName)
 		}
 		if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
-			return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+			return false, fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
 		}
 		cfg.Database.SQLiteReaderConns = parsed
 		sources[sqliteReaderConnsKey] = SourceEnvironment
-		return nil
+		return false, nil
 	}
 	if !yamlKeys[sqliteReaderConnsKey] {
-		return nil
+		return false, nil
 	}
 	raw := v.Get(sqliteReaderConnsKey)
 	parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
 	if err != nil {
-		return fmt.Errorf("%s: invalid integer %v", sqliteReaderConnsKey, raw)
+		return true, fmt.Errorf("%s: invalid integer %v", sqliteReaderConnsKey, raw)
 	}
 	if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
-		return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+		return true, fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
 	}
 	cfg.Database.SQLiteReaderConns = parsed
 	sources[sqliteReaderConnsKey] = SourceConfiguration
-	return nil
+	return false, nil
 }
 
 // sqliteReaderConnsApplies reports whether the selected database driver uses

@@ -76,10 +76,9 @@ value is absent, the raw YAML value is parsed strictly. An explicitly present
 empty environment value is invalid, not absent. An invalid or nonnumeric
 SQLite-only value therefore cannot reject a PostgreSQL startup.
 
-New-behavior checks ran from a temporary Go overlay outside the permanent test
-tree and were removed after execution. They covered the default, override,
-boundaries, rejection, actual open and idle counts, persistence wiring, and
-PostgreSQL startup with invalid values. Existing package tests continue to
-cover immediate fail-closed behavior. The catalog audited-inventory line is the
-minimum consistency update for the existing catalog contract; a permanent
-feature test would be a separate proposal.
+The upstream review follow-up added the required permanent coverage in existing
+files: configuration resolution, provenance, and file-aware YAML errors in
+`source_test.go`; reader factory sizing in `sqlite_test.go`; and persistence
+wiring in `provider_legacy_test.go`. Existing package tests continue to cover
+immediate fail-closed behavior. The catalog audited-inventory line remains the
+minimum consistency update for the existing catalog contract.
