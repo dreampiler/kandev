@@ -306,6 +306,23 @@ Use **Auto-run** for queue processing:
 
 **Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
 
+### Recover from low disk space
+
+Kandev reads capacity from the executor that runs the agent. A warning row
+appears above the chat composer at 90% disk usage and clears below 85%. Work
+continues while the warning is shown. Open **Details** for measurements, or
+**Storage** for a local session. A remote warning names the executor and does
+not link to local cleanup.
+
+A session that stops because storage is full shows **Session interrupted by low
+disk space**. Free space on the executor filesystem, then use **Resume
+session**. Do not delete delivery data or start a fresh conversation to fix
+physical capacity. A journal limit, delivery limit, or oversized output uses its
+own cause and guidance, and technical details stay collapsed.
+
+These controls do not clean up storage automatically. Cleanup policy remains in
+**Settings > System > Storage**.
+
 ### Send while a session resumes
 
 You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
@@ -626,7 +643,7 @@ In **Commits**, each row starts collapsed. Select a row to inspect its files
 inline; the saved flat or tree Changes layout applies to this list. Select
 the icon labeled **Open commit** to open the historical commit detail. Its flat file index can
 be collapsed independently of the file sections, and selecting an index entry
-opens that file's diff. These controls also work on phones.
+opens that file's diff. Use **Copy identifier** beside the short identifier in the commit detail to copy the full identifier. These controls also work on phones.
 
 Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
 

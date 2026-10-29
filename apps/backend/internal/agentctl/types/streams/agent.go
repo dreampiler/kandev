@@ -339,6 +339,10 @@ type AgentEvent struct {
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
 
+	// Storage carries host-owned storage evidence for this error. It is never
+	// populated from provider prose or tool output.
+	Storage *DeliveryStorageDiagnostic `json:"storage,omitempty"`
+
 	// ProviderError contains a validated, sanitized provider diagnostic for a
 	// terminal error. Raw stderr never crosses this boundary.
 	ProviderError *ProviderError `json:"provider_error,omitempty"`
@@ -473,9 +477,17 @@ type AgentEvent struct {
 	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
-	// SupportsPromptSuggestions indicates this session asked a Claude Code agent
-	// for native next-prompt suggestions. Only such sessions show suggestions.
+	// SupportsPromptSuggestions indicates this session asked an agent with
+	// established native support for next-prompt suggestions. It is the
+	// effective enablement value: support alone is not enough. Only such
+	// sessions show suggestions.
 	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
+
+	// NativePromptSuggestionsSupported reports provider support independently
+	// of user preference and session scope. A new ACP producer emits an explicit
+	// true or false; nil/absence means unknown from an older producer or another
+	// transport. Consumers must not treat it as effective enablement.
+	NativePromptSuggestionsSupported *bool `json:"native_prompt_suggestions_supported,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`

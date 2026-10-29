@@ -686,6 +686,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''")
 	_ = r.migrate.Apply("workflows.created_by_user_id", "ALTER TABLE workflows ADD COLUMN created_by_user_id TEXT NOT NULL DEFAULT ''")
 
+	if err := r.migrateTurnChangeHistorySchema(); err != nil {
+		return err
+	}
+
 	// A task message send operation is claimed before the first delivery side
 	// effect so a caller that lost the response can read the outcome back
 	// instead of retrying blind. It carries no foreign key: a retained

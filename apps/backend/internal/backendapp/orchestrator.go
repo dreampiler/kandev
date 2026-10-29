@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -212,8 +213,22 @@ func provideOrchestrator(
 	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
 	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
 	turnChangeCoordinator.SetLogger(log.Zap())
-	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
-		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	turnChangeCoordinator.SetTurnChangeOperationGuard(runtimeTurnChangeOperationGuard{reader: lifecycleMgr})
+	exportLimiter := taskchanges.NewExportLimiter()
+	turnChangeCoordinator.SetExportLimiter(exportLimiter)
+	turnChangeCoordinator.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor := taskchanges.NewExportProcessor(taskRepo, turnChangeCoordinator)
+	turnChangeExportProcessor.SetClientProvider(runtimeTurnChangeExportProviderAdapter{manager: lifecycleMgr})
+	turnChangeExportProcessor.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor.SetLogger(log.Zap())
+	if ctx != nil {
+		context.AfterFunc(ctx, turnChangeExportProcessor.Stop)
+		startup.AfterReady(ctx, func() {
+			if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+				log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+			}
+			turnChangeExportProcessor.Start(ctx)
+		})
 	}
 	agentruntime.InstallTurnChangeCaptureHandler(
 		lifecycleMgr,
