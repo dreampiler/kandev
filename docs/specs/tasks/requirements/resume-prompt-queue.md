@@ -81,7 +81,10 @@ runtime ran out.
 ### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A cancelled resume keeps queued work
 
 **Intent:** Stopping or restarting Kandev while a queued prompt waits for its
-session to resume does not drop the prompt or leave it for manual recovery.
+session to resume never drops the prompt. The entry returns to its session
+queue as soon as the cancelled resume is observed, or, when shutdown wins the
+race, is retained and returned to the queue when explicit session recovery
+completes.
 
 #### Acceptance criteria
 
