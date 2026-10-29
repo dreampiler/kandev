@@ -25,8 +25,19 @@ func localPath(path string) bool {
 	return filepath.IsAbs(path) && !strings.HasPrefix(path, `\\`) && !strings.HasPrefix(path, "//")
 }
 
+// hasTraversalParent reports whether any path segment is "..", so a path cannot
+// climb out of the directory it names before it is resolved.
+func hasTraversalParent(path string) bool {
+	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 func prepareLocalSource(ctx context.Context, source Source) (string, string, string, error) {
-	if !localPath(source.WorktreePath) {
+	if !localPath(source.WorktreePath) || hasTraversalParent(source.WorktreePath) {
 		return "", "", "", fmt.Errorf("%w: worktree_path must be an absolute local path", ErrWorkspaceUnavailable)
 	}
 	path, err := filepath.EvalSymlinks(source.WorktreePath)

@@ -63,6 +63,7 @@ func TestCollectLocalChangesRejectsInvalidRefs(t *testing.T) {
 	for _, source := range []Source{
 		{WorktreePath: dir}, {WorktreePath: dir, BaseRef: "missing"}, {WorktreePath: dir, BaseRef: "--help"},
 		{WorktreePath: dir, BaseRef: "HEAD", HeadRef: "missing"}, {WorktreePath: `\\server\share`, BaseRef: "HEAD"},
+		{WorktreePath: dir + string(filepath.Separator) + ".." + string(filepath.Separator) + filepath.Base(dir), BaseRef: "HEAD"},
 	} {
 		_, err := CollectLocalChanges(context.Background(), source)
 		if !errors.Is(err, ErrWorkspaceUnavailable) {
