@@ -41,17 +41,19 @@ owners:
   Concurrent calls and plugins shall remain separate; canceled, returned or
   unidentified domain callbacks shall not regain legacy authority when enabled.
   Verified native plugin RPC contexts remain distinct from conversations.
+- **AC-TASKS-WORKSPACE-COLLABORATION-001.9:** When enabled, native workspace
+  managers shall be able to open the grant editor from desktop task actions,
+  mobile task navigation and the integrated-control conversation.
 
 ## Scope
 
-The first slice covers task/session conversation callers, native grant APIs,
-task-domain read/prompt/control boundaries and append-only reports. Profile
-inheritance, delegated authority, taskless Office principals, a full grant-editor
-UI and the independent aggregate-navigation feature remain subsequent slices.
-Task 02 carries verified conversation origin through the generic plugin Host
-broker. The dedicated report remains an HTTP/WS primitive; an advertised plugin
-report consumer is separate remaining work. The first API/domain slice alone
-does not claim transport coverage or completion of the overall goal.
+The current slice covers task/session conversation callers, native grant APIs,
+task-domain read/prompt/control boundaries, append-only reports and the grant
+editor on desktop and mobile task surfaces. Task 02 carries verified
+conversation origin through the generic plugin Host broker. The report action
+is available through `message_task_kandev` for Kanban and automation
+conversations. Profile inheritance, delegated authority, taskless Office
+principals and independent aggregate navigation remain subsequent work.
 
 ## System design
 

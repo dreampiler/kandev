@@ -62,8 +62,9 @@ An enabled store/identity failure returns an error and never takes this off path
 The native API reads and replaces grants under
 `/api/v1/tasks/:id/workspace-collaboration`; reports have a separate task/session
 entry point. Server route identity determines the grantee; a body cannot replace
-the caller task, session, source workspace or user identity. The current grant API
-is the first usable settings surface; a full per-conversation editor is follow-up.
+the caller task, session, source workspace or user identity. Workspace managers
+can open the grant editor from desktop task actions, mobile task navigation or
+the integrated-control conversation.
 
 ## Settings UI composition
 
@@ -72,7 +73,7 @@ Settings > System > Feature Toggles
   Workspace collaboration                         [ OFF / ON ]
   Restart required. Off restores native permissions; saved grants remain.
 
-Conversation > Workspace collaboration (subsequent editor)
+Task actions > Workspace collaboration
   Source: [logical conversation] in [current workspace]
   Target workspace        Read  Report  Prompt  Control
   [workspace selector]    [ ]   [ ]     [ ]     [ ]
@@ -85,7 +86,8 @@ Conversation > Workspace collaboration (subsequent editor)
 Use existing native authorization and typed flag checks plus disposable SQLite
 and dispatcher overlays. Exercise false/default grants, independent actions,
 same-workspace/native browser behavior, session replacement, spoofed request
-identity, native RBAC denial, store failure, human-only edits and report isolation.
+identity, native RBAC denial, store failure, human-only edits, report isolation
+and the desktop/mobile editor entry points.
 Fresh/replayed schema initialization must preserve grants and existing records.
 No new poller, queue, permanent test framework or operating ACL update is needed.
 
@@ -152,8 +154,8 @@ API/domain/store checks remain valid and need not be repeated.
 The implemented boundary consumes trusted conversation contexts at task-domain
 entry points. The native in-session stream installs those contexts through
 `agent/runtime/lifecycle/mcp_identity.go` and `mcp/scope/principal.go`; ordinary
-human HTTP/WS and internal scheduler calls remain native. The new report primitive
-is an HTTP/WS API, not yet an advertised MCP tool or full grant-editor UI.
+human HTTP/WS and internal scheduler calls remain native. The report operation
+uses its task/session API and the `message_task_kandev` report delivery mode.
 
 Task 01 recorded the generic Host return path's missing origin as a transport
 gap. Task 02 closes that callback boundary with the live SDK context bridge
@@ -164,9 +166,8 @@ and write-authorized management claim, rather than accidentally requiring a
 separate collaboration read grant for its internal CAS preflight. Existing
 resource versions and management claim generations still fence the mutation.
 
-The dedicated report remains an HTTP/WS primitive. Existing generic Host messages
-are prompts, including when the caller only holds report permission. Advertising
-a dedicated report consumer, profile inheritance, delegation, taskless callers
-and the full grant editor remain original subsequent work. Aggregate navigation
-is independent. None of these increments changes operating permissions, installs
-plugins, starts a model on grant edits or derives authority from watches.
+Existing generic Host messages remain prompts, including when the caller only
+holds report permission. Profile inheritance, delegation, taskless Office
+principals and aggregate navigation remain subsequent work. Grant edits do not
+change native permissions, install plugins, start a model or derive authority
+from watches.

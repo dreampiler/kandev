@@ -30,17 +30,20 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	executorMutationChecker func(context.Context, string) error
-	repo                    *repository.Repository
-	logger                  *logger.Logger
-	workflowProvider        WorkflowProvider
-	workspaceProvider       WorkspaceProvider
-	resolveProfile          models.AgentProfileResolver
-	matchProfile            models.AgentProfileMatcher
-	lookupProfile           models.AgentProfileLookup
-	importProfileCatalog    ImportProfileCatalog
-	syncOps                 SyncWorkflowOps
-	sessionAccessChecker    func(context.Context, string) error
+	executorMutationChecker        func(context.Context, string) error
+	workflowMutationPolicyChecker  func(context.Context, string) (bool, bool, error)
+	workspaceMutationPolicyChecker func(context.Context, string) (bool, error)
+	workflowAuthorizationRequired  func(context.Context) bool
+	repo                           *repository.Repository
+	logger                         *logger.Logger
+	workflowProvider               WorkflowProvider
+	workspaceProvider              WorkspaceProvider
+	resolveProfile                 models.AgentProfileResolver
+	matchProfile                   models.AgentProfileMatcher
+	lookupProfile                  models.AgentProfileLookup
+	importProfileCatalog           ImportProfileCatalog
+	syncOps                        SyncWorkflowOps
+	sessionAccessChecker           func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
 	// per-user visibility rule into this package (see access.go).
 	workflowAccessChecker  func(context.Context, string) error
@@ -374,6 +377,9 @@ func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID stri
 
 // CreateStepsFromTemplate creates workflow steps for a workflow from a template.
 func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error {
+	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+		return err
+	}
 	template, err := s.repo.GetTemplate(ctx, templateID)
 	if err != nil {
 		s.logger.Error("failed to get template for step creation",
@@ -845,6 +851,9 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.EnsureWorkspaceMutable(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if err := export.NormalizeCompletionPolicy(); err != nil {
 		return nil, fmt.Errorf("invalid export data: %w", err)
 	}
@@ -1084,6 +1093,9 @@ func (s *Service) SetExecutorMutationChecker(check func(context.Context, string)
 	s.executorMutationChecker = check
 }
 func (s *Service) authorizeExecutorMutation(ctx context.Context, workflowID string) error {
+	if err := s.EnsureWorkflowMutable(ctx, workflowID); err != nil {
+		return err
+	}
 	if s.executorMutationChecker == nil {
 		return nil
 	}

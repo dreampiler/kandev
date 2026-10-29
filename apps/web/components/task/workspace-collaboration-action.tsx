@@ -9,20 +9,27 @@ export function WorkspaceCollaborationAction({
   taskId,
   title,
   workspace,
+  workspaceId,
+  mobile = false,
 }: {
   taskId: string;
-  title: string;
-  workspace: { id: string; name: string; scopes?: string[] };
+  title?: string;
+  workspace?: { id: string; name: string; scopes?: string[] };
+  workspaceId?: string;
+  mobile?: boolean;
 }) {
   const { t } = useTranslation();
-  const menu = useWorkspaceCollaborationMenu(taskId, workspace.id, workspace);
+  const sourceWorkspaceId = workspace?.id ?? workspaceId ?? null;
+  const menu = useWorkspaceCollaborationMenu(taskId, sourceWorkspaceId, workspace);
   if (!menu.entries.length || !menu.sourceId) return null;
   return (
     <>
       <Button
         type="button"
         variant="outline"
-        className={settingsActionClassName("cursor-pointer")}
+        className={settingsActionClassName(
+          mobile ? "min-h-11 w-full justify-start cursor-pointer" : "cursor-pointer",
+        )}
         data-testid="conversation-workspace-collaboration"
         onClick={menu.show}
       >
@@ -33,7 +40,7 @@ export function WorkspaceCollaborationAction({
           key={`${taskId}:${menu.sourceId}`}
           taskId={taskId}
           workspaceId={menu.sourceId}
-          title={title}
+          title={title ?? t("task:taskDetails")}
           sourceName={menu.sourceName}
           open
           onOpenChange={(next) => {

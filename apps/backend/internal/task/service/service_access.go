@@ -296,6 +296,19 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 
 // authorizeWorkflowAction intersects native reach with the conversation action.
 func (s *Service) authorizeWorkflowAction(ctx context.Context, workflowID string, action models.WorkspaceCollaborationAction) error {
+	scope := authz.ScopeWorkspaceRead
+	if action == models.CollaborationControl {
+		scope = authz.ScopeWorkspaceManage
+	}
+	return s.authorizeWorkflowScopeAction(ctx, workflowID, scope, action)
+}
+
+func (s *Service) authorizeWorkflowScopeAction(
+	ctx context.Context,
+	workflowID string,
+	scope authz.Scope,
+	action models.WorkspaceCollaborationAction,
+) error {
 	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
@@ -307,6 +320,9 @@ func (s *Service) authorizeWorkflowAction(ctx context.Context, workflowID string
 		return repoerrors.ErrWorkflowNotFound
 	}
 	if workflow.WorkspaceID == "" {
+		if s.collaborationApplies(ctx) && action == models.CollaborationControl {
+			return repoerrors.ErrWorkflowNotFound
+		}
 		return nil
 	}
 	// A workflow whose workspace cannot be resolved has no owner to check
@@ -332,12 +348,16 @@ func (s *Service) authorizeWorkflowAction(ctx context.Context, workflowID string
 		// letting a transient database error read as either allow or deny.
 		return err
 	}
-	if !s.workspaceDecision(ctx, workspace).CanRead() {
+	decision := s.workspaceDecision(ctx, workspace)
+	if !decision.CanRead() {
 		// Collapse to the workflow's own not-found sentinel, matching
 		// authorizeTaskScope's equivalent branch, so a workflow that exists in
 		// a workspace the caller cannot reach reads identically to one that
 		// does not exist at all.
 		return repoerrors.ErrWorkflowNotFound
+	}
+	if !decision.Has(scope) {
+		return ErrForbidden
 	}
 	return s.authorizeWorkspaceCollaboration(ctx, workflow.WorkspaceID, action)
 }
@@ -357,15 +377,28 @@ func (s *Service) WorkflowMutationReadOnly(ctx context.Context, workflowID strin
 	if workflow.WorkspaceID == "" {
 		return false, false, nil
 	}
-	readOnly, err := s.WorkspaceWorkflowMutationReadOnly(ctx, workflow.WorkspaceID)
+	readOnly, err := s.workspaceWorkflowMutationReadOnly(ctx, workflow.WorkspaceID)
 	return false, readOnly, err
 }
 
 // WorkspaceWorkflowMutationReadOnly exposes only the mutation policy decision.
 func (s *Service) WorkspaceWorkflowMutationReadOnly(ctx context.Context, workspaceID string) (bool, error) {
-	workspace, err := s.getWorkspaceAction(ctx, workspaceID, models.CollaborationControl)
+	if _, err := s.requireWorkspaceScopeAction(ctx, workspaceID, authz.ScopeWorkspaceManage, repoerrors.ErrWorkspaceNotFound, models.CollaborationControl); err != nil {
+		return false, err
+	}
+	return s.workspaceWorkflowMutationReadOnly(ctx, workspaceID)
+}
+
+func (s *Service) workspaceWorkflowMutationReadOnly(ctx context.Context, workspaceID string) (bool, error) {
+	if workspaceID == "" && s.collaborationApplies(ctx) {
+		return false, repoerrors.ErrWorkspaceNotFound
+	}
+	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return false, err
+	}
+	if workspace == nil {
+		return false, repoerrors.ErrWorkspaceNotFound
 	}
 	return workspace.IsImproveKandev(), nil
 }
@@ -398,6 +431,12 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 // by ID but does not own workspace permissions.
 func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string) error {
 	return s.authorizeWorkflowID(ctx, workflowID)
+}
+
+// WorkflowAuthorizationRequired reports whether workflow access callbacks must
+// delegate to this service for native or conversation authorization.
+func (s *Service) WorkflowAuthorizationRequired(ctx context.Context) bool {
+	return s.needsWorkspaceAuthorization(ctx)
 }
 
 // AuthorizeWorkflowStepAccess resolves a step's owning workflow before
@@ -479,6 +518,9 @@ func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, 
 	}
 	if session == nil || session.TaskID != taskID {
 		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) || scope == authz.ScopeWorkspaceManage {
+		return s.authorizeSessionExecutor(ctx, session)
 	}
 	return nil
 }
@@ -621,6 +663,28 @@ func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string
 		return nil
 	}
 	if err := s.authorizeWorkspaceID(ctx, repo.WorkspaceID); err != nil {
+		return repoerrors.ErrRepositoryNotFound
+	}
+	return nil
+}
+
+// authorizeRepositoryMutation requires native repository management and the
+// conversation control grant before a script changes repository behavior.
+func (s *Service) authorizeRepositoryMutation(ctx context.Context, repositoryID string) error {
+	if !s.needsWorkspaceAuthorization(ctx) {
+		return nil
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	if repo == nil {
+		return repoerrors.ErrRepositoryNotFound
+	}
+	if err := s.AuthorizeWorkspaceScope(ctx, repo.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
+		if IsForbidden(err) {
+			return err
+		}
 		return repoerrors.ErrRepositoryNotFound
 	}
 	return nil
