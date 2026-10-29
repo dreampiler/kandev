@@ -209,6 +209,13 @@ func (s *Service) discardCeilingDeferral(
 		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonClear
 	}
 	run := automationRunFromCeilingPayload(deferral.Payload)
+	if !s.failQueuedAutomationRun(ctx, deferral.Payload, settlementReason) {
+		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonSettlement
+	}
+	// Eligibility is evaluated on the state settlement just produced: a queued
+	// or triggered run only becomes a failed, unbound run after it settles, and
+	// deciding before that would leave its marker behind on a successful
+	// discard.
 	releaseOwner := ""
 	if atomicOwnership && run != nil {
 		plan := s.discardOwnershipPlan(ctx, task, run.RunID)
@@ -216,9 +223,6 @@ func (s *Service) discardCeilingDeferral(
 			return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonOwnership
 		}
 		releaseOwner = plan.owner
-	}
-	if !s.failQueuedAutomationRun(ctx, deferral.Payload, settlementReason) {
-		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonSettlement
 	}
 	if onSettled != nil {
 		onSettled()
@@ -238,13 +242,12 @@ func (s *Service) discardCeilingDeferral(
 	}
 }
 
-// discardOwnershipPlan decides, from read-only evidence, whether this discard
-// must release the automation start ownership marker and whether it may proceed
-// at all. It reuses the existing eligibility rule for a dropped launch: only a
-// failed, unbound run with no persisted session leaves a marker that is still
-// the failed start's to release. A bound or live run keeps its marker under the
-// existing reconciliation contract, and a marker naming another run is not this
-// request's to touch.
+// discardOwnershipPlan decides, from read-only evidence taken after settlement,
+// whether this discard must release the automation start ownership marker. Only
+// a failed, unbound run with no persisted session leaves a marker that is still
+// the settled start's to release. A bound or live run keeps its marker: the
+// explicit discard never reconciles another execution's ownership, and every
+// release it does make happens inside the same transaction as the clear.
 func (s *Service) discardOwnershipPlan(
 	ctx context.Context, task *models.Task, runID string,
 ) discardOwnershipPlan {
@@ -265,7 +268,6 @@ func (s *Service) discardOwnershipPlan(
 		return discardOwnershipPlan{}
 	}
 	if run.RetryGroupID != "" || run.Status != automation.RunStatusFailed || run.SessionID != "" || run.TurnID != "" {
-		s.reconcileAutomationStartOwnership(ctx, task)
 		return discardOwnershipPlan{}
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
