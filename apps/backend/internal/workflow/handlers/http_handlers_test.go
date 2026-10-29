@@ -108,6 +108,19 @@ func (p *fakeWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskm
 	return nil
 }
 
+// ensureWorkflowRow mirrors a workflow row under a wrapper-returned ID when a
+// test provider replaces the base provider's generated ID.
+func (p *fakeWorkflowProvider) ensureWorkflowRow(id, workspaceID, name string) {
+	if p.db == nil {
+		return
+	}
+	now := time.Now().UTC()
+	p.db.MustExec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, id, workspaceID, name, now, now)
+}
+
 // fakeWorkspaceProvider resolves workspaces for the read-only guard.
 type fakeWorkspaceProvider struct {
 	workspaces map[string]*taskmodels.Workspace
