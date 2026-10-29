@@ -247,6 +247,8 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
+	case streams.EventTypePromptSuggestion:
+		s.handlePromptSuggestionEvent(ctx, payload)
 	case streams.EventTypeBackgroundWorkUpdated:
 		s.handleBackgroundWorkUpdatedEvent(ctx, payload)
 
@@ -1056,7 +1058,10 @@ func (s *Service) trackBackgroundToolUpdate(
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
 			kind := backgroundWorkKind(payload.Data.Normalized)
-			if kind == streams.BackgroundWorkKindShell {
+			// Only attest the parked projection for a workload whose provider
+			// can confirm later liveness on this connection. An identified but
+			// unverified launch stays inspectable without claiming to be live.
+			if kind == streams.BackgroundWorkKindShell && payload.Data.Normalized.IsVerifiedBackgroundWork() {
 				// Waiting-attribution spec (docs/specs/disambiguate-waiting):
 				// this is the recognised condition for "a detached
 				// background-shell launch happened during this turn" — the
@@ -4241,25 +4246,39 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 	if sessionID == "" {
 		return
 	}
+	// A capability event from an obsolete execution or resume attempt must not
+	// restore a native suggestion source. The stream dispatcher filters this
+	// too; the check stays here because recording is admission state, not only
+	// a broadcast.
+	if !s.resumeAttemptAllowsExecution(sessionID, payload.ExecutionID, payload.AttemptID) {
+		s.logger.Debug("ignoring agent capabilities from a stale resume attempt",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", payload.ExecutionID),
+			zap.String("attempt_id", payload.AttemptID))
+		return
+	}
 	// Record the negotiated prompt-queueing advertisement before the event-bus
 	// guard. It gates prompt handoff and mid-turn steering, so it must land as
 	// soon as the agent advertises it — recording is admission state, whereas the
 	// bus below is only broadcast. Skipping it when no bus is configured would
 	// silently make a capable agent ineligible.
 	s.recordSessionPromptQueueing(sessionID, payload.Data.SupportsPromptQueueing)
+	s.recordPromptSuggestionSource(ctx, sessionID, payload.Data.SupportsPromptSuggestions)
 	if s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
-		TaskID:                  payload.TaskID,
-		SessionID:               sessionID,
-		AgentID:                 payload.AgentID,
-		SupportsImage:           payload.Data.SupportsImage,
-		SupportsAudio:           payload.Data.SupportsAudio,
-		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
-		SupportsPromptQueueing:  payload.Data.SupportsPromptQueueing,
-		AuthMethods:             payload.Data.AuthMethods,
-		Timestamp:               time.Now().UTC().Format(time.RFC3339),
+		TaskID:                           payload.TaskID,
+		SessionID:                        sessionID,
+		AgentID:                          payload.AgentID,
+		SupportsImage:                    payload.Data.SupportsImage,
+		SupportsAudio:                    payload.Data.SupportsAudio,
+		SupportsEmbeddedContext:          payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:           payload.Data.SupportsPromptQueueing,
+		SupportsPromptSuggestions:        payload.Data.SupportsPromptSuggestions,
+		NativePromptSuggestionsSupported: payload.Data.NativePromptSuggestionsSupported,
+		AuthMethods:                      payload.Data.AuthMethods,
+		Timestamp:                        time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildAgentCapabilitiesSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AgentCapabilitiesUpdated, "orchestrator", eventPayload))

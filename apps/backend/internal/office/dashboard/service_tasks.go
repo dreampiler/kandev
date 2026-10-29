@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"go.uber.org/zap"
 )
@@ -612,6 +613,9 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
 
 	preStatus := ""
 	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
@@ -626,14 +630,14 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	}
 
 	if dbState == stateCompleted {
-		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
+		updated, err := s.taskStateWriter.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, v1.TaskState(dbState))
 		if err != nil {
 			return fmt.Errorf("update task state: %w", err)
 		}
 		if !updated {
 			return &WorkflowStepChangedError{TaskID: req.TaskID}
 		}
-	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
+	} else if err := s.taskStateWriter.UpdateTaskState(ctx, req.TaskID, v1.TaskState(dbState)); err != nil {
 		return fmt.Errorf("update task state: %w", err)
 	}
 

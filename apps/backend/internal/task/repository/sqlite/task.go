@@ -136,9 +136,9 @@ func taskScanColumnSQL(alias string, useExpressions bool) string {
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
 // when the task is owned by office: either it has a non-empty project_id
-// (explicit office task) or its workflow matches the workspace's
-// office_workflow_id (the canonical "office workflow"). Kanban tasks live
-// in any other workflow and have no project.
+// (explicit office task), its workflow matches the canonical office_workflow_id,
+// or it belongs to that Office workspace's system-owned builtin Routine workflow.
+// Ordinary Kanban and user-owned routine-template workflows remain distinct.
 func isFromOfficeProjection(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
@@ -150,6 +150,15 @@ func isFromOfficeProjection(alias string) string {
 			WHERE w.id = ` + alias + `.workspace_id
 			  AND COALESCE(w.office_workflow_id, '') != ''
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
+		)
+		OR EXISTS (
+			SELECT 1 FROM workspaces w
+			JOIN workflows wf ON wf.workspace_id = w.id
+			WHERE w.id = ` + alias + `.workspace_id
+			  AND COALESCE(w.office_workflow_id, '') != ''
+			  AND wf.id = ` + alias + `.workflow_id
+			  AND wf.is_system = 1
+			  AND wf.workflow_template_id = 'routine'
 		)
 	)`
 }
@@ -472,6 +481,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 			`UPDATE tasks SET assignment_generation = 1 WHERE id = ?`), task.ID); err != nil {
 			return "", err
 		}
+	}
+	if err := r.claimCreationAttachmentsTx(ctx, tx, task); err != nil {
+		return "", err
 	}
 	return entryID, nil
 }
@@ -3776,6 +3788,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
 		return "", err
 	}
+	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
+		return "", err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return "", err
@@ -4362,6 +4377,17 @@ func (r *Repository) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*mo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+func (r *Repository) ListTasksByWorkspaceForCommandPanel(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	if workflowID == "" || query != "" {
+		return nil, 0, fmt.Errorf("command panel listing requires a workflow and empty query")
+	}
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+func (r *Repository) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, commandPanelVisible bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -4401,7 +4427,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort, commandPanelVisible)
 	} else {
 		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort)
 	}
@@ -4436,7 +4462,7 @@ func (r *Repository) ListTasksForDeletion(
 	if pageSize <= 0 {
 		pageSize = 1
 	}
-	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "")
+	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "", false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -4515,7 +4541,7 @@ func (r *Repository) RestoreTaskParentIfUnchanged(
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string, commandPanelVisible bool) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -4526,17 +4552,26 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		args = append(args, repositoryID)
 	}
 	var total int
-	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+taskFilter), args...).Scan(&total); err != nil {
+	countFilter, selectFilter := taskFilter, rewriteFilterForAlias(taskFilter, "t")
+	if commandPanelVisible {
+		countFilter += commandPanelStepPredicate("tasks")
+		selectFilter += commandPanelStepPredicate("t")
+	}
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+countFilter), args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
+		WHERE t.workspace_id = ?`+selectFilter+`
 		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func commandPanelStepPredicate(alias string) string {
+	return ` AND EXISTS (SELECT 1 FROM workflow_steps panel_step WHERE panel_step.id = ` + alias + `.workflow_step_id AND panel_step.workflow_id = ` + alias + `.workflow_id AND panel_step.show_in_command_panel = 1)`
 }
 
 func taskListOrderBy(driver, alias, sort string) string {
@@ -5733,6 +5768,56 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 		return err
 	}
 	return tx.Commit()
+}
+
+// UpdateTaskStateIfWorkflowStep atomically checks the current workflow step,
+// applies completion guards, and writes the new state.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var currentState v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&currentState, &workflowID, &stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	if stepID != expectedStepID {
+		return false, nil
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
+		workflowID, stepID, workflowID, stepID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`), state, r.nowUTC(), taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskStateIfSessionState atomically ties a task-state write to the

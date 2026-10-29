@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -811,6 +812,9 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		zap.String("pending_id", data.PendingID),
 		zap.String("title", data.Title))
 
+	if data.OwnerKind == string(lifecycle.ExecutionOwnerRun) {
+		return
+	}
 	if data.TaskSessionID == "" {
 		s.logger.Warn("missing session_id for permission_request",
 			zap.String("task_id", data.TaskID),
@@ -1269,7 +1273,7 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
-	); err != nil {
+	); err != nil && !errors.Is(err, github.ErrPRWatchRetired) {
 		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),
 			zap.Error(err))
