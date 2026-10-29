@@ -68,7 +68,7 @@ func (e *Executor) resolveCoordinatorSessionStart(ctx context.Context, taskID st
 }
 
 // coordinatorMatchesAbsentTask reports whether taskID (whose task row cannot
-// be read — deleted or never existed) is nonetheless some coordinator's
+// be read ??deleted or never existed) is nonetheless some coordinator's
 // current conversation task. A match or a lookup error fails the caller's
 // session start; only "no lookup wired" (feature off) or "no match" lets the
 // caller fall through to the ordinary no-row behavior
@@ -181,7 +181,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
 			return mcpprofile.Context{}, err
 		}
-		return e.withCanvasCapability(profile), nil
+		return e.withTaskCapabilities(profile), nil
 	}
 	if noRow {
 		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
@@ -206,7 +206,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 
 	if noRow {
@@ -218,10 +218,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
+		return e.withTaskCapabilities(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -238,7 +238,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
@@ -254,9 +254,16 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
 }
 
-func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
-	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
-		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
+	if e == nil {
+		return profile
+	}
+	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	if e.workspaceCollaborationEnabled &&
+		(profile.Surface == mcpprofile.SurfaceKanbanTask || profile.Surface == mcpprofile.SurfaceAutomation) {
+		profile = profile.WithCapability(mcpprofile.CapabilityWorkspaceCollaborationReport)
 	}
 	return profile
 }
@@ -907,9 +914,9 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 		return
 	}
 	// When onTaskStateChange is configured, it owns event publishing for
-	// this write (see its doc comment) — keep routing through it rather
+	// this write (see its doc comment) ??keep routing through it rather
 	// than bypassing it. Only when NEITHER callback is set (no orchestrator
-	// wiring at all — production always wires both, see service.go's
+	// wiring at all ??production always wires both, see service.go's
 	// exec.SetOnTaskStateChange/SetOnTaskReviewStateReconcile) do we fall
 	// back to the archive-aware UpdateTaskStateIfCurrentIn CAS directly on
 	// the repository, so even that raw path can't race an archive that
@@ -1984,7 +1991,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// is called when the agent is actually started (auto-start, user click).
 	// Without this lock both run env-prep + executionStore.Add in parallel and
 	// the second one fails at register with "already has an agent running
-	// (race resolved during register)" — visible in the UI as
+	// (race resolved during register)" ??visible in the UI as
 	// "Environment setup failed". Multi-repo amplifies this because the
 	// per-repo prep runs sequentially, widening the race window.
 	sessionLock := e.getSessionLock(sessionID)
@@ -2198,7 +2205,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		//   - office wakeups where startAgentOnExistingWorkspace returned
 		//     ErrStaleExecution (in-memory exec gone after IDLE), and
 		//   - kanban / quick-chat re-launches that hit the full path.
-		// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
+		// Unlike ResumeSession we do NOT clear req.TaskDescription ??wakeups
 		// deliver the new comment / event as the prompt.
 		if startAgent && opts.PriorACPSession != "" {
 			req.ACPSessionID = opts.PriorACPSession
@@ -2694,7 +2701,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		// usual path.
 		//
 		// Detach from the caller context so a client disconnect / WS timeout
-		// right after launch returns can't drop this write — that would leave
+		// right after launch returns can't drop this write ??that would leave
 		// the row stuck on "starting", which is the exact UX this fix closes.
 		statusCtx := context.WithoutCancel(ctx)
 		if err := e.repo.UpdateExecutorRunningStatus(statusCtx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
@@ -2752,7 +2759,7 @@ func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskE
 // describeInheritedEnvironmentUnavailable builds a diagnostic reason for a
 // missing inherited task_environments row (session.TaskEnvironmentID no
 // longer resolves). For an inherit_parent task it names the parent and, when
-// the parent was archived, calls that out explicitly — archive tears down
+// the parent was archived, calls that out explicitly ??archive tears down
 // the parent's runtime resources (worktree, container/sandbox) but
 // preserves its own task_environments row, and leaves the parent's
 // session.TaskEnvironmentID pointer in place either way, so a child that
@@ -2835,7 +2842,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// SSH is included so env-authenticated agents (e.g. claude-acp reading
 	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
 	// configured profile/secret store rather than from a blanket forward of the
-	// control-plane process env — the SSH executor only forwards req.Env keys.
+	// control-plane process env ??the SSH executor only forwards req.Env keys.
 	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
@@ -2973,7 +2980,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.CopyFiles = info.Repository.CopyFiles
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
-		// the single-repo path (best-effort — skipped if Repository is nil).
+		// the single-repo path (best-effort ??skipped if Repository is nil).
 		if info.Repository != nil {
 			if u := repositoryCloneURL(info.Repository); u != "" {
 				spec.RepositoryURL = u
@@ -3120,7 +3127,7 @@ func dockerLocalCloneSource(repositoryPath string) string {
 //
 // The in-memory ExecutionStore is the single source of truth here: if no execution
 // exists for this session in the store, the workspace is gone (or was never
-// created in this process — e.g. after restart) and the caller must take the full
+// created in this process ??e.g. after restart) and the caller must take the full
 // re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
@@ -3435,7 +3442,7 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	}
 	// GetGitStatus returns (nil, nil) when the execution or agentctl client
 	// has been torn down (e.g. the task was deleted between LaunchAgent and
-	// this async capture). Skip silently — there's nothing to record.
+	// this async capture). Skip silently ??there's nothing to record.
 	if status == nil {
 		return
 	}
@@ -3576,7 +3583,7 @@ func (e *Executor) persistTaskEnvironment(
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Re-fetch under the lock — a sibling launch for the same task may have
+	// Re-fetch under the lock ??a sibling launch for the same task may have
 	// just created or rebound the env and released the lock. The launch-local
 	// snapshot remains useful for detecting a stale writer, but never becomes
 	// the source of truth for the update.
@@ -3647,7 +3654,7 @@ func (e *Executor) persistTaskEnvironment(
 		previousStatus := existingEnv.Status
 		previousMaterializationSessionID := existingEnv.MaterializationSessionID
 		repos := environmentReposForLaunch(req, resp)
-		// agent_execution_id is no longer stored on task_environments — the column
+		// agent_execution_id is no longer stored on task_environments ??the column
 		// is being dropped (executors_running is the single source of truth).
 		// Status, workspace, and container fields are still env-row-owned; the
 		// physical worktree lives on task_environment_repos. Status is decided
@@ -3655,7 +3662,7 @@ func (e *Executor) persistTaskEnvironment(
 		// always transitions to ready (its inventory publishes atomically in
 		// the same call), but a non-materializing sibling must not force ready
 		// onto an environment whose canonical inventory turned out empty for a
-		// repo-backed task — that permanently bricks reuse (see
+		// repo-backed task ??that permanently bricks reuse (see
 		// validateReuseEnvironmentInventory).
 		// Refresh workspace + container/sandbox fields. The original update
 		// branch only touched AgentExecutionID/Status, so envs created with
@@ -3691,7 +3698,7 @@ func (e *Executor) persistTaskEnvironment(
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
-		// Refresh TaskDirName when the request carries a new value — covers
+		// Refresh TaskDirName when the request carries a new value ??covers
 		// resume-after-failure where the original env row was stamped with an
 		// empty task_dir_name and the resume regenerates it.
 		if req.TaskDirName != "" {
@@ -3722,7 +3729,7 @@ func (e *Executor) persistTaskEnvironment(
 		// write one row here too. Ordering matters: writing status=ready first
 		// and these rows second leaves a window where a crash or a concurrent
 		// reader observes a ready environment with an empty inventory for a
-		// repo-backed task — exactly the state the guards elsewhere in this PR
+		// repo-backed task ??exactly the state the guards elsewhere in this PR
 		// exist to prevent (see validateReuseEnvironmentInventory).
 		repoBacked := e.taskIsRepoBacked(ctx, taskID)
 		// A sibling can finish while the initial materializer still owns a
@@ -3741,7 +3748,7 @@ func (e *Executor) persistTaskEnvironment(
 		// when inventory is present: already recorded before this launch,
 		// about to be written by this launch, or not required because the
 		// task has no configured repositories at all. A launch whose prepare
-		// step failed produces an empty repos slice here — leaving the
+		// step failed produces an empty repos slice here ??leaving the
 		// environment's existing status untouched (it can only already be
 		// ready or stopped by the time this branch runs) keeps that launch
 		// from bricking future reuse instead of silently corrupting the row.
@@ -3785,7 +3792,7 @@ func (e *Executor) persistTaskEnvironment(
 		ExecutorType:      req.ExecutorType,
 		ExecutorID:        execCfg.ExecutorID,
 		ExecutorProfileID: session.ExecutorProfileID,
-		// AgentExecutionID is intentionally not set here — see executors_running
+		// AgentExecutionID is intentionally not set here ??see executors_running
 		// for the active execution per session.
 		Status:                            models.TaskEnvironmentStatusReady,
 		WorkspacePath:                     workspacePath,
@@ -3948,7 +3955,7 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 }
 
 // buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.
-// TaskEnvironmentID is left blank — it is set by the env Create transaction.
+// TaskEnvironmentID is left blank ??it is set by the env Create transaction.
 func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnvironmentRepo {
 	out := make([]*models.TaskEnvironmentRepo, 0, len(worktrees))
 	for i, w := range worktrees {
