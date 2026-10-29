@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // InternalConfigFileEnv pins a managed child process to the configuration
@@ -199,15 +201,24 @@ func selectConfigFile(configPath, homeDir string) (configSelection, bool, error)
 	return configSelection{}, false, nil
 }
 
-func readSelectedConfig(v *viper.Viper, selection configSelection) error {
+func readSelectedConfig(v *viper.Viper, selection configSelection) (map[string]interface{}, error) {
 	v.SetConfigFile(selection.path)
-	if err := v.ReadInConfig(); err != nil {
-		return fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	contents, err := os.ReadFile(selection.path)
+	if err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	}
+	// Keep raw file values separate because Viper getters can apply AutomaticEnv.
+	var yamlConfig map[string]interface{}
+	if err := yaml.Unmarshal(contents, &yamlConfig); err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	}
+	if err := v.ReadConfig(bytes.NewReader(contents)); err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
 	}
 	if selection.isHome && v.InConfig("homeDir") {
-		return fmt.Errorf("configuration file %q cannot set homeDir because a home configuration file cannot relocate itself", selection.path)
+		return nil, fmt.Errorf("configuration file %q cannot set homeDir because a home configuration file cannot relocate itself", selection.path)
 	}
-	return nil
+	return yamlConfig, nil
 }
 
 func bindCatalogEnvironment(v *viper.Viper) {
@@ -416,7 +427,7 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 // environment value is absent, the raw YAML value is parsed strictly. A
 // PostgreSQL selection ignores both values so a SQLite-only setting cannot
 // change its startup.
-func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) (bool, error) {
+func applySQLiteReaderConns(cfg *Config, yamlConfig map[string]interface{}, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) (bool, error) {
 	if !sqliteReaderConnsApplies(cfg) {
 		return false, nil
 	}
@@ -439,7 +450,10 @@ func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]boo
 	if !yamlKeys[sqliteReaderConnsKey] {
 		return false, nil
 	}
-	raw := v.Get(sqliteReaderConnsKey)
+	raw, found := selectedYAMLValue(yamlConfig, sqliteReaderConnsKey)
+	if !found {
+		return true, fmt.Errorf("%s: value not found in selected configuration file", sqliteReaderConnsKey)
+	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
 	if err != nil {
 		return true, fmt.Errorf("%s: invalid integer %v", sqliteReaderConnsKey, raw)
@@ -740,6 +754,28 @@ func configKeys(v *viper.Viper) map[string]bool {
 		keys[entry.Key] = v.InConfig(entry.Key)
 	}
 	return keys
+}
+
+func selectedYAMLValue(config map[string]interface{}, key string) (interface{}, bool) {
+	var value interface{} = config
+	for _, part := range strings.Split(key, ".") {
+		fields, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		found := false
+		for name, fieldValue := range fields {
+			if strings.EqualFold(name, part) {
+				value = fieldValue
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, false
+		}
+	}
+	return value, true
 }
 
 func buildConfigSource(selection configSelection, v *viper.Viper, sources map[string]SettingSource, warnings []string) ConfigSource {

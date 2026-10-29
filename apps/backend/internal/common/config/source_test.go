@@ -513,6 +513,59 @@ func TestSQLiteReaderConnsStartupResolution(t *testing.T) {
 	}
 }
 
+func TestSQLiteReaderConnsYAMLResolutionIgnoresAutomaticEnvironment(t *testing.T) {
+	t.Setenv("KANDEV_DATABASE_DRIVER", "")
+	unsetSQLiteReaderConnsEnv(t)
+
+	tests := []struct {
+		name         string
+		automaticEnv string
+		canonicalEnv string
+		wantValue    int
+		wantSource   SettingSource
+	}{
+		{
+			name:         "valid automatic alias does not override YAML",
+			automaticEnv: "7",
+			wantValue:    6,
+			wantSource:   SourceConfiguration,
+		},
+		{
+			name:         "invalid automatic alias does not invalidate YAML",
+			automaticEnv: "invalid",
+			wantValue:    6,
+			wantSource:   SourceConfiguration,
+		},
+		{
+			name:         "documented alias overrides YAML and automatic alias",
+			automaticEnv: "7",
+			canonicalEnv: "8",
+			wantValue:    8,
+			wantSource:   SourceEnvironment,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DATABASE_SQLITEREADERCONNS", tt.automaticEnv)
+			if tt.canonicalEnv != "" {
+				t.Setenv("KANDEV_SQLITE_READER_CONNS", tt.canonicalEnv)
+			}
+
+			cfg, err := LoadWithPath(writeSQLiteReaderConnsConfig(t, "database:\n  driver: sqlite\n  sqliteReaderConns: 6\n"))
+			if err != nil {
+				t.Fatalf("LoadWithPath: %v", err)
+			}
+			if cfg.Database.SQLiteReaderConns != tt.wantValue {
+				t.Fatalf("database.sqliteReaderConns = %d, want %d", cfg.Database.SQLiteReaderConns, tt.wantValue)
+			}
+			if got := cfg.SourceFor(sqliteReaderConnsKey); got != tt.wantSource {
+				t.Fatalf("database.sqliteReaderConns source = %q, want %q", got, tt.wantSource)
+			}
+		})
+	}
+}
+
 func TestSQLiteReaderConnsRejectsInvalidValues(t *testing.T) {
 	t.Setenv("KANDEV_DATABASE_DRIVER", "")
 	validYAML := "database:\n  driver: sqlite\n  sqliteReaderConns: 6\n"
