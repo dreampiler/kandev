@@ -16,8 +16,10 @@ import (
 // This route, its verb, and these fields are a candidate contract proposed to
 // upstream, not an agreed one; the durable safety rules live in the shared
 // settlement service, so a different public shape does not weaken them. A
-// client must branch on outcome and never infer success from the 200 alone: a
-// retained outcome means the queued launch is still owned and may still run.
+// client must branch on outcome and never infer success from the 200 alone. A
+// retained outcome means the durable record remains; after clear_incomplete,
+// its automation run may already be terminal and the next sweep can finish the
+// cleanup without replaying it.
 type deferredLaunchDiscardResponse struct {
 	Outcome models.DeferredLaunchDiscardOutcome `json:"outcome"`
 	Reason  models.DeferredLaunchDiscardReason  `json:"reason,omitempty"`

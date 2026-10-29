@@ -1,7 +1,7 @@
 ---
 id: "01-explicit-deferred-launch-discard"
 title: "Explicit deferred-launch discard"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -40,41 +40,30 @@ agreed public contract.
 - `internal/orchestrator`: the shared settlement routine, the identity-bound
   dispatch claim taken before any settlement effect, the guarded clear that
   refuses a live foreign claim, the conditional automation-start ownership
-  release, and the exported discard entry point.
+  release using exact stopped-retry evidence, the pre-settlement ownership and
+  session-inventory checks, and the exported discard entry point.
 - `internal/task/service`: task-write plus executor-mutation authorization and a
   narrow injected settler; an unwired settler is an explicit error.
 - `internal/task/handlers`: one thin route and response.
 - Composition wiring in `internal/backendapp`.
-- One-off verification injected with `go test -overlay` from outside the
-  repository and removed afterwards; no permanent test file or auto-collected
-  test addition is part of this work order.
+- Permanent regression tests for orchestrator outcomes and ordering, SQLite
+  atomic rollback, service authorization, and handler status mapping.
 
 ## Out of scope
 
 - Frontend affordance or copy.
 - Session start, resume, stop, or steering; task-state writes.
 - New schema, permissions, configuration, metrics, or queue.
-- Permanent companion tests. Making the one-off checks permanent needs a
-  separate narrow proposal with its repeated-execution rationale.
-
 ## Validation
 
 - `gofmt` on every touched Go file.
-- `go build ./...` in `apps/backend`.
-- `go vet` on the touched packages and `golangci-lint --new-from-rev` on the
-  changed delta.
-- One-off `-overlay` checks covering no-op, success with a coexisting non-ceiling
-  key and a running session left untouched, settlement failure, an unreadable
-  ownership inventory, another run's ownership marker, atomic rollback of the
-  record write when the ownership removal inside the same transaction is
-  refused, a live claim, a claim
-  appearing after the read, a successor after the read, and route registration.
-  The same file replayed over the previous implementation fails exactly on the
-  ordering and ownership cases this work order fixes.
-- Existing repository tests for the touched packages.
-- `python3 scripts/list-docs.py validate` and
-  `python3 scripts/lint-spec-files.py --all`.
-- A local `pr-docs.cjs validateCoverage` run over the real changed-file set.
+- `go test -trimpath ./internal/orchestrator -run '^TestDiscardDeferredCeilingLaunch' -count=1`
+- `go test -trimpath ./internal/task/repository/sqlite -run 'TestClearTaskDeferredLaunchAndReleaseOwnershipRollsBackBothWrites|TestSetTaskDeferredLaunch' -count=1`
+- `go test -trimpath ./internal/task/service -run '^TestDiscardDeferredLaunchRejectsUnauthorizedTaskBeforeDelegating$' -count=1`
+- `go test -trimpath ./internal/task/handlers -run '^TestHTTPDiscardDeferredLaunchMapsSuccessUnavailableAndUnauthorized$' -count=1`
+
+The focused commands above are the local validation for this remediation. CI
+runs the broader package, lint, and documentation gates on the pushed head.
 
 ## Open contract questions for the maintainer
 

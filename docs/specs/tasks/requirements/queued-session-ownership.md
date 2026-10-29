@@ -189,9 +189,13 @@ happened to the durable record.
   including a coexisting WIP or dependency intent, untouched.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.3:** When settlement or the durable
   clear cannot be proven complete, the discard shall report a distinct retained
-  outcome naming the incomplete step. The original record and its ownership
-  shall remain recoverable for a later attempt. A failed discard shall never be
-  reported as a no-op or as a success.
+  outcome naming the incomplete step. Before settlement, an ownership or
+  session-inventory read failure shall leave the run and record unchanged. If
+  the final clear fails after the user-requested settlement succeeds, the record
+  and ownership marker shall remain durable for cleanup retry; the run stays
+  terminal and a replay sweep shall finish the discard without replaying it.
+  `retained` reports that the record remains, not that its launch can still run.
+  A failed discard shall never be reported as a no-op or as a success.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.4:** An explicit discard shall not
   clear a record that another dispatcher currently claims, and shall not clear a
   successor record that replaced the one it observed. Both cases report the

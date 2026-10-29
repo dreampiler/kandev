@@ -264,28 +264,38 @@ settled, and the launch's automation start ownership was released or never
 belonged to it), and `retained` (the record is still durable). A retained
 outcome carries one closed reason: `claim_in_flight`, `settlement_incomplete`,
 `ownership_incomplete`, `clear_incomplete`, `record_unreadable`, or
-`record_superseded`. A failure is never reported as a no-op or as a success.
+`record_superseded`. `retained` reports the record state. If the reason is
+`clear_incomplete`, the user-requested run settlement may already be terminal;
+the next discard or sweep completes cleanup and does not replay that run.
+A failure is never reported as a no-op or as a success.
 
 The durable work reuses the established ceiling boundaries. The request first
 takes the existing dispatch claim for the exact record it observed, under the
 entry-admission lock and bound to the record's full identity, so no replay or
 Send Now can start dispatching in between and a successor record with the same
 destination session is never settled under the old decision. Only after that
-claim is held does the shared routine settle the automation run the launch
-serves, then remove only `ceiling_`-prefixed keys under the same identity-bound
-compare-and-set and, in the same task transaction, release the automation start
-ownership while it still holds the captured marker value, then publish the task
-update. Because the clear and the release share one transaction, a failure rolls
-back both: the record cannot be gone while the marker survives, and the marker
-cannot be released while the record survives. A failure at settlement or at that
-atomic write returns `retained`, releases the claim, and leaves the record and
-its ownership exactly as recoverable as they were.
+claim is held does the explicit path reload the task. If its automation-start
+marker belongs to the served run, it proves session-inventory readability and
+the atomic-clear capability before settling anything. It then settles the
+automation run, reads release eligibility again, removes only `ceiling_`
+prefixed keys under the same identity-bound compare-and-set, and releases the
+captured automation owner in the same task transaction. Automatic replay drops
+keep their existing eligibility checks. Because the clear and release share
+one transaction, neither task-metadata effect can commit alone. A failure before
+settlement returns `retained` with the run unchanged. If the final task
+transaction fails after settlement, it rolls back both task-metadata effects,
+releases the claim, and returns `retained`; the run stays terminal because the
+user explicitly chose discard. The durable record and ownership marker remain
+for retry, and the next discard or sweep completes cleanup instead of replaying
+the closed run.
 
 Ownership release is conditional on the captured marker value. A marker that is
 absent, already replaced, or that belongs to a bound or live run is not this
-request's to remove; only a failed, unbound run with no persisted session is
-released. An unreadable run or session inventory stops the request before it
-settles anything, because the discard cannot prove which effect is safe.
+request's to remove; a failed, unbound ordinary run with no persisted session
+is released. A retry run's marker is released only when the exact retry ledger
+proves the reserved launch stopped. An unreadable run or session inventory
+detected before settlement leaves the run unchanged. If the post-settlement
+eligibility read fails, the record and marker remain for cleanup retry.
 
 A live dispatch claim is authoritative for this path: the claim is another
 dispatcher's key and may already be launching, so the discard reports
