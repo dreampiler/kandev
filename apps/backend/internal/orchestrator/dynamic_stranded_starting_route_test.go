@@ -346,10 +346,15 @@ func TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible(t *testing.T) {
 		routeDone <- actionErr
 	}()
 
+	require.Eventually(t, func() bool {
+		return svc.isRouteActionInFlight(sessionID)
+	}, 2*time.Second, 10*time.Millisecond,
+		"the route action must reach the per-session operation lock")
+
 	select {
 	case <-handlerEntered:
 		t.Fatal("a route action ran before the retained entry was released")
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
 
 	close(paused.release)

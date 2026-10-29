@@ -191,7 +191,9 @@ require the current exclusive probe lease.
   `ensureSessionRunning` and fails because a WAITING_FOR_INPUT session's
   `starting` route has no executor row applies the orphan-sweep release at
   that moment, then restores or releases the entry for manual recovery instead
-  of requeueing it. The route recovery banner is the visible block, and the
+  of requeueing it. A retained durable delivery is released in place and
+  remains one row with the same id; only an entry removed by the reservation is
+  restored. The route recovery banner is the visible block, and the
   successor launch from Retry or Try next drains the visible entry. A session
   without a dynamic route keeps the runtime-unavailable requeue, because its
   missing executor row can belong to a launch that has not run yet.
