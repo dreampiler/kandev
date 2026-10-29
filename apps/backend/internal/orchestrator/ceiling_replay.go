@@ -376,6 +376,7 @@ func (s *Service) dropCeilingDeferral(
 					zap.String("task_id", task.ID), zap.String("session_id", sessionID), zap.Error(err))
 			}
 		},
+		false,
 	)
 }
 
@@ -404,16 +405,19 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string,
 	if len(expected) > 0 {
 		want = &expected[0]
 	}
-	return s.clearCeilingDeferredRecordOutcome(ctx, taskID, want, false) == ceilingClearStored
+	cleared, _ := s.clearCeilingDeferredRecordOutcome(ctx, taskID, want, false, "")
+	return cleared == ceilingClearStored
 }
 
 // clearCeilingDeferredRecordOutcome is the single clear implementation.
 // refuseLiveClaim makes a dispatch claim authoritative rather than advisory, so
 // a caller that is not the claim owner (an explicit discard) can never strip a
-// record another dispatcher may be launching.
+// record another dispatcher may be launching. A non-empty releaseOwner removes
+// that automation start ownership marker in the same task transaction as the
+// clear; the second return value reports whether the marker was removed.
 func (s *Service) clearCeilingDeferredRecordOutcome(
-	ctx context.Context, taskID string, expected *models.CeilingDeferral, refuseLiveClaim bool,
-) ceilingClearResult {
+	ctx context.Context, taskID string, expected *models.CeilingDeferral, refuseLiveClaim bool, releaseOwner string,
+) (ceilingClearResult, bool) {
 	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer release()
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
@@ -421,29 +425,45 @@ func (s *Service) clearCeilingDeferredRecordOutcome(
 		if err != nil {
 			s.logger.Zap().Warn("could not read deferred launch while clearing a ceiling record",
 				zap.String("task_id", taskID), zap.Error(err))
-			return ceilingClearFailed
+			return ceilingClearFailed, false
 		}
 		if outcome := s.ceilingClearPrecondition(ctx, taskID, existingRaw, expected, refuseLiveClaim); outcome != ceilingClearStored {
-			return outcome
+			return outcome, false
 		}
 		record := stripCeilingRecordKeys(existingRaw)
-		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
-		if err != nil {
+		var (
+			stored, lostCompare, released bool
+			writeErr                      error
+		)
+		if releaseOwner == "" {
+			stored, lostCompare, writeErr = s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
+		} else {
+			clearer, ok := s.repo.(deferredLaunchOwnershipClearer)
+			if !ok {
+				s.logger.Zap().Warn("deferred launch repository cannot release ownership atomically; retaining the record",
+					zap.String("task_id", taskID))
+				return ceilingClearFailed, false
+			}
+			stored, lostCompare, released, writeErr = clearer.ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged(
+				ctx, taskID, prior, record, releaseOwner,
+			)
+		}
+		if writeErr != nil {
 			s.logger.Zap().Warn("could not clear a ceiling deferred record",
-				zap.String("task_id", taskID), zap.Error(err))
-			return ceilingClearFailed
+				zap.String("task_id", taskID), zap.Error(writeErr))
+			return ceilingClearFailed, false
 		}
 		if stored {
-			return ceilingClearStored
+			return ceilingClearStored, released
 		}
 		if lostCompare {
 			continue
 		}
-		return ceilingClearFailed
+		return ceilingClearFailed, false
 	}
 	s.logger.Zap().Warn("could not clear a ceiling deferred record after repeated compare-and-set losses",
 		zap.String("task_id", taskID))
-	return ceilingClearFailed
+	return ceilingClearFailed, false
 }
 
 // ceilingClearPrecondition reports whether the observed record may be cleared.

@@ -19,20 +19,28 @@ import (
 // decision is being applied.
 const ceilingClaimOwnerDiscard = "user_discard"
 
-// automationStartOwnershipRelease reports what happened to the automation start
-// ownership a discarded launch carries.
-type automationStartOwnershipRelease int
+// deferredLaunchOwnershipClearer is the atomic clear-and-release capability the
+// discard needs. It is asserted on the repository, following the
+// RemoveTaskMetadataKeyIfValue idiom, so the shared task repository interface
+// and its many existing fakes do not grow a method only this path uses. A
+// repository that cannot provide it fails closed: the discard retains the
+// record rather than separating the two effects.
+type deferredLaunchOwnershipClearer interface {
+	ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged(
+		ctx context.Context, taskID string, prior interface{}, value map[string]interface{}, expectedOwner string,
+	) (stored bool, lostCompare bool, ownershipReleased bool, err error)
+}
 
-const (
-	// automationStartOwnershipNotOurs means the task holds no marker for this
-	// run, or the marker belongs to a run the existing reconciliation contract
-	// keeps. Nothing is removed for that case.
-	automationStartOwnershipNotOurs automationStartOwnershipRelease = iota
-	automationStartOwnershipReleased
-	// automationStartOwnershipFailed means this request should have released the
-	// marker and could not prove that it did.
-	automationStartOwnershipFailed
-)
+// discardOwnershipPlan is the read-only decision about the automation start
+// ownership a discarded launch carries.
+type discardOwnershipPlan struct {
+	// owner is the marker value to release inside the same task transaction as
+	// the record clear. Empty means this discard has nothing to release.
+	owner string
+	// retain means ownership could not be proven, so the discard must apply
+	// neither the clear nor the release.
+	retain bool
+}
 
 // DiscardDeferredCeilingLaunch removes a pending ceiling-deferred launch at an
 // explicit user's request. It is the only user-facing entry point into the
@@ -40,10 +48,10 @@ const (
 // stopped and no manual launch is performed.
 //
 // The three outcomes are distinct by construction (see
-// models.DeferredLaunchDiscardOutcome). A failed settlement, ownership release,
-// or clear retains the durable record and its ownership, so the queued launch
-// stays exactly as recoverable as it was before the request, and the caller is
-// told that rather than being handed a success for work that did not happen.
+// models.DeferredLaunchDiscardOutcome). A failed settlement, ownership read, or
+// durable clear retains the record and its ownership, so the queued launch stays
+// exactly as recoverable as it was before the request, and the caller is told
+// that rather than being handed a success for work that did not happen.
 //
 // Only the ceiling half of the shared deferred_launch record is removed, and
 // only for the record this call observed. A different owner's keys (a
@@ -101,7 +109,7 @@ func (s *Service) DiscardDeferredCeilingLaunch(
 	defer claim.releaseIfHeld(ctx)
 	outcome, reason := s.discardCeilingDeferral(
 		withCeilingDispatchClaim(ctx, claim), task, claim.deferral,
-		"the queued launch was discarded by the user", nil,
+		"the queued launch was discarded by the user", nil, true,
 	)
 	return models.DeferredLaunchDiscardResult{Outcome: outcome, Reason: reason}, nil
 }
@@ -186,32 +194,41 @@ func (s *Service) classifyUnclaimedDiscard(
 // discard both use it, so the two cannot drift apart on ordering or ownership.
 //
 // The order is load-bearing. The automation run the launch serves is settled
-// first, then the automation start ownership this launch holds is released, and
-// only then is the durable record cleared under the observed identity CAS. A
-// failure at any of those steps returns a retained outcome and removes nothing,
-// leaving the record and its ownership recoverable. onSettled runs after
-// ownership is settled and before the clear, so a caller can record the
+// first, then the durable record is cleared. When atomicOwnership is set, the
+// automation start ownership this launch holds is removed inside that same task
+// transaction, so a failed clear cannot leave the marker released and a failed
+// release cannot leave the record cleared. A failure at any step returns a
+// retained outcome, leaving the record and its ownership recoverable. onSettled
+// runs after settlement and before the durable write, so a caller can record the
 // disposition without acting on a launch that is still owned.
 func (s *Service) discardCeilingDeferral(
 	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
-	settlementReason string, onSettled func(),
+	settlementReason string, onSettled func(), atomicOwnership bool,
 ) (models.DeferredLaunchDiscardOutcome, models.DeferredLaunchDiscardReason) {
 	if task == nil || task.ID == "" {
 		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonClear
 	}
-	if !s.failQueuedAutomationRun(ctx, deferral.Payload, settlementReason) {
-		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonSettlement
-	}
-	if run := automationRunFromCeilingPayload(deferral.Payload); run != nil {
-		if s.releaseDiscardedLaunchOwnership(ctx, task, run.RunID) == automationStartOwnershipFailed {
+	run := automationRunFromCeilingPayload(deferral.Payload)
+	releaseOwner := ""
+	if atomicOwnership && run != nil {
+		plan := s.discardOwnershipPlan(ctx, task, run.RunID)
+		if plan.retain {
 			return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonOwnership
 		}
+		releaseOwner = plan.owner
+	}
+	if !s.failQueuedAutomationRun(ctx, deferral.Payload, settlementReason) {
+		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonSettlement
 	}
 	if onSettled != nil {
 		onSettled()
 	}
-	switch s.clearCeilingDeferredRecordOutcome(ctx, task.ID, &deferral, true) {
+	result, _ := s.clearCeilingDeferredRecordOutcome(ctx, task.ID, &deferral, true, releaseOwner)
+	switch result {
 	case ceilingClearStored:
+		if !atomicOwnership && run != nil {
+			s.releaseDroppedAutomationStartOwnership(ctx, task, run.RunID)
+		}
 		s.publishTaskUpdatedByID(ctx, task.ID)
 		return models.DeferredLaunchDiscardDiscarded, ""
 	case ceilingClearClaimed:
@@ -221,48 +238,46 @@ func (s *Service) discardCeilingDeferral(
 	}
 }
 
-// releaseDiscardedLaunchOwnership releases the automation start ownership the
-// discarded launch holds, and reports whether it had to act. It reuses the
-// existing conditional release, so a marker captured from this task can never
-// erase a successor's ownership. A run that is bound or live keeps its marker:
-// the existing reconciliation contract owns that case, and a user discard must
-// not erase another execution's ownership.
-func (s *Service) releaseDiscardedLaunchOwnership(
+// discardOwnershipPlan decides, from read-only evidence, whether this discard
+// must release the automation start ownership marker and whether it may proceed
+// at all. It reuses the existing eligibility rule for a dropped launch: only a
+// failed, unbound run with no persisted session leaves a marker that is still
+// the failed start's to release. A bound or live run keeps its marker under the
+// existing reconciliation contract, and a marker naming another run is not this
+// request's to touch.
+func (s *Service) discardOwnershipPlan(
 	ctx context.Context, task *models.Task, runID string,
-) automationStartOwnershipRelease {
+) discardOwnershipPlan {
 	binding, ok := s.automationService.(automationRunBinding)
 	owner, _ := task.Metadata[models.MetaKeyAutomationStartOwned].(string)
 	if !ok || owner == "" || owner != runID {
-		return automationStartOwnershipNotOurs
+		return discardOwnershipPlan{}
 	}
 	run, err := binding.GetRun(ctx, runID)
 	if err != nil {
 		// Without the run row this request cannot tell whether the marker is
-		// still its own to release, so it must not report the launch settled.
+		// still its own to release, so it must not change anything.
 		s.logger.Zap().Warn("could not read the automation run of a discarded launch",
 			zap.String("task_id", task.ID), zap.String("run_id", runID), zap.Error(err))
-		return automationStartOwnershipFailed
+		return discardOwnershipPlan{retain: true}
 	}
 	if run == nil || run.TaskID != task.ID {
-		return automationStartOwnershipNotOurs
+		return discardOwnershipPlan{}
 	}
 	if run.RetryGroupID != "" || run.Status != automation.RunStatusFailed || run.SessionID != "" || run.TurnID != "" {
 		s.reconcileAutomationStartOwnership(ctx, task)
-		return automationStartOwnershipNotOurs
+		return discardOwnershipPlan{}
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
 	if err != nil {
 		s.logger.Zap().Warn("could not list sessions before releasing discarded launch ownership",
 			zap.String("task_id", task.ID), zap.String("run_id", runID), zap.Error(err))
-		return automationStartOwnershipFailed
+		return discardOwnershipPlan{retain: true}
 	}
 	if len(sessions) != 0 {
-		return automationStartOwnershipNotOurs
+		return discardOwnershipPlan{}
 	}
-	if !s.releaseAutomationStartOwnership(ctx, task.ID, owner) {
-		return automationStartOwnershipFailed
-	}
-	return automationStartOwnershipReleased
+	return discardOwnershipPlan{owner: owner}
 }
 
 // ceilingDeferralClaimed reports whether the record carries a dispatch claim

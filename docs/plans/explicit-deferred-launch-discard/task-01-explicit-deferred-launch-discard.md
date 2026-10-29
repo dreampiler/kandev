@@ -64,8 +64,10 @@ agreed public contract.
 - `go vet` on the touched packages and `golangci-lint --new-from-rev` on the
   changed delta.
 - One-off `-overlay` checks covering no-op, success with a coexisting non-ceiling
-  key and a running session left untouched, settlement failure, ownership-release
-  failure, another run's ownership marker, clear failure, a live claim, a claim
+  key and a running session left untouched, settlement failure, an unreadable
+  ownership inventory, another run's ownership marker, atomic rollback of the
+  record write when the ownership removal inside the same transaction is
+  refused, a live claim, a claim
   appearing after the read, a successor after the read, and route registration.
   The same file replayed over the previous implementation fails exactly on the
   ordering and ownership cases this work order fixes.

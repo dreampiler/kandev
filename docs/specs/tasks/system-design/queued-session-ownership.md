@@ -272,17 +272,20 @@ entry-admission lock and bound to the record's full identity, so no replay or
 Send Now can start dispatching in between and a successor record with the same
 destination session is never settled under the old decision. Only after that
 claim is held does the shared routine settle the automation run the launch
-serves, release the automation start ownership this launch holds, remove only
-`ceiling_`-prefixed keys under the same identity-bound compare-and-set, and
-publish the task update. A failure at settlement, ownership release, or clear
-returns `retained`, removes nothing, and releases the claim, so the record and
-its ownership stay as recoverable as they were.
+serves, then remove only `ceiling_`-prefixed keys under the same identity-bound
+compare-and-set and, in the same task transaction, release the automation start
+ownership while it still holds the captured marker value, then publish the task
+update. Because the clear and the release share one transaction, a failure rolls
+back both: the record cannot be gone while the marker survives, and the marker
+cannot be released while the record survives. A failure at settlement or at that
+atomic write returns `retained`, releases the claim, and leaves the record and
+its ownership exactly as recoverable as they were.
 
 Ownership release is conditional on the captured marker value. A marker that is
 absent, already replaced, or that belongs to a bound or live run is not this
 request's to remove; only a failed, unbound run with no persisted session is
-released, and a read failure at that point retains the record instead of
-reporting success.
+released. An unreadable run or session inventory stops the request before it
+settles anything, because the discard cannot prove which effect is safe.
 
 A live dispatch claim is authoritative for this path: the claim is another
 dispatcher's key and may already be launching, so the discard reports

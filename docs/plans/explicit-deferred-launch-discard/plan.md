@@ -51,10 +51,12 @@ handler.
   incomplete discard is never reported as a no-op or a success.
 - One settlement routine shared by the automatic replay drop and the explicit
   path. The request takes the existing dispatch claim for the observed record
-  first, then settles the served automation run, releases the automation start
-  ownership this launch holds, clears only the ceiling keys under the same
-  identity CAS, and publishes. Settlement, ownership, or clear failure retains
-  the record.
+  first, then settles the served automation run, then clears only the ceiling
+  keys and releases the automation start ownership this launch holds inside one
+  task transaction, and publishes. Because the clear and the release share that
+  transaction, a failure leaves both the record and the marker in place.
+  Settlement failure, an unreadable ownership/session inventory, or a failed
+  atomic write retains the record.
 - A live dispatch claim, a successor record, and another execution's ownership
   marker are never cleared.
 - Task-write plus executor-mutation authorization, reused from task mutation.
@@ -85,7 +87,8 @@ implementation as a negative control, which fails exactly on the ordering and
 ownership cases this package fixes. No new permanent test file, test framework,
 or append to an auto-collected test file is part of this change; the verified
 cases are no-op, success with a coexisting non-ceiling key, settlement failure,
-ownership-release failure, another run's ownership marker, clear failure, live
+an unreadable ownership inventory, another run's ownership marker, atomic
+rollback when the ownership removal is refused after the record write, live
 claim, a claim appearing after the read, a successor after the read, and a
 running session left untouched. The route registration is checked the same way.
 The transport's HTTP authorization path reuses the same helpers as the deferred
