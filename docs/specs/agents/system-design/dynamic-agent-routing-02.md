@@ -209,9 +209,14 @@ require the current exclusive probe lease.
   `startCreatedSession` calls `refuseMaterializedRouteProfileChange` before it
   persists a changed profile: when `LoadRouteState` returns a positive
   generation for a different logical profile, the start fails with
-  `ErrMaterializedRouteProfileChange` and nothing is written. A different
-  dynamic profile is reached through a new session (the workflow
-  profile-switch path), not by relabelling this one.
+  `ErrMaterializedRouteProfileChange` and nothing is written. The WebSocket
+  launch handler maps this expected refusal to a validation error. Background
+  prepared-session routing holds the same session lifecycle lock across its
+  fresh session read, route claim, and projection write. This serializes route
+  materialization with profile changes: preparation first makes a conflicting
+  start fail, while a profile change first makes preparation resolve the new
+  profile. A different dynamic profile is reached through a new session (the
+  workflow profile-switch path), not by relabelling this one.
 
 ## Scenarios
 
