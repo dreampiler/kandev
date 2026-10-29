@@ -320,6 +320,11 @@ const (
 	MetadataKeySSHProxyJump            = "ssh_proxy_jump"
 	MetadataKeySSHIdentitySource       = "ssh_identity_source"
 	MetadataKeySSHIdentityFile         = "ssh_identity_file"
+	// MetadataKeyRemoteDockerAgentctlInstanceID is the actual agentctl
+	// instance ID inside the remote container. It can differ from the backend
+	// execution ID when a live same-session process is adopted, so recovery
+	// must use it for control lookups and ownership checks.
+	MetadataKeyRemoteDockerAgentctlInstanceID = "remote_docker_agentctl_instance_id"
 	// MetadataKeySSHShell names the login shell used when running commands
 	// over SSH on the remote (probe, agentctl launch, install, setup
 	// scripts). Empty / unset falls back to "bash" at runtime — see
@@ -378,6 +383,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+
+	// Remote Docker adopted agentctl identity.
+	MetadataKeyRemoteDockerAgentctlInstanceID: true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,
@@ -482,6 +490,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteAgentctlURL:             true,
 	MetadataKeySSHRuntimeAPILocalURL:            true,
 	MetadataKeySSHRuntimeAPIRemotePort:          true,
+	MetadataKeyRemoteDockerAgentctlInstanceID:   true,
 	MetadataKeyKubernetesAuthMode:               true,
 	MetadataKeyKubernetesKubeconfigPath:         true,
 	MetadataKeyKubernetesKubeContext:            true,
@@ -712,6 +721,9 @@ type ExecutorCreateRequest struct {
 	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
 	ManagedRuntimeSource  managedruntime.OpenCodeSource
 	NativeRuntimeVersion  string
+	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
+	// Kandev integration plugin. Nil keeps the integration off.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	PromptSuggestions     bool     // Ask a native-suggestion agent to emit next-prompt suggestions
@@ -763,6 +775,11 @@ type ExecutorInstance struct {
 
 	// Runtime name (e.g., "docker", "standalone") - set by the runtime that created this instance
 	RuntimeName agentruntime.Runtime
+
+	// ReusedWorkspace reports that this instance attached to compute that
+	// already existed instead of allocating it. It is process-local launch
+	// provenance and is never inferred from a container ID alone.
+	ReusedWorkspace bool
 
 	// Agentctl client for communicating with this instance
 	Client                    *agentctl.Client
@@ -859,6 +876,12 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	// The adopted agentctl identity is process/runtime provenance, not a
+	// request preference. A fresh allocation must not inherit a stale adopted
+	// ID from the previous execution's metadata.
+	if _, ok := ri.Metadata[MetadataKeyRemoteDockerAgentctlInstanceID]; !ok {
+		delete(metadata, MetadataKeyRemoteDockerAgentctlInstanceID)
+	}
 	executorType := req.ExecutorType
 	if executorType != "" {
 		metadata[MetadataKeyExecutorType] = executorType
@@ -917,6 +940,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		ForceContextContinuation:   req.ForceContextContinuation,
 		ReplacesNativeConversation: req.ReplacesNativeConversation,
 		RuntimeName:                ri.RuntimeName,
+		attachedExistingCompute:    ri.ReusedWorkspace,
 		Status:                     v1.AgentStatusRunning,
 		StartedAt:                  time.Now(),
 		metadata:                   metadata,

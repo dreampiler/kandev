@@ -1273,6 +1273,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
+	si.enrichRoutineWorkContext(ctx, pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
