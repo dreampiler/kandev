@@ -32,10 +32,10 @@ The current head resolves the routine ID, name, and description into the prompt
 for the routine-dispatch reasons, grants Office identity only to the
 same-workspace system Routine workflow, and coalesces a routine-source wake only
 into an in-flight run from the same routine. Trusted creation persists the
-assignment minimum under the server-owned namespaced metadata key
+template's assignment minimum under the server-owned namespaced metadata key
 `kandev.office_required_subtask_count` before auto-start; the legacy generic
-`required_subtask_count` key remains inert and cannot forge or clear the
-minimum. Every task-state completion write and Done-step entry uses the task
+metadata key `required_subtask_count` remains inert and cannot forge or clear
+the minimum. Every task-state completion write and Done-step entry uses the task
 repository transaction and is blocked until enough same-workspace, durable,
 task-specific runner assignments exist. The workflow flag heal applies only to
 the Office Default template.

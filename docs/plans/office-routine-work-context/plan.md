@@ -16,9 +16,9 @@ A routine fire could lose the registered routine's work description, the
 Office identity of a task created in the workspace's system Routine workflow,
 and the trusted completion settings that belong to the routine. A heavy
 routine's task template may declare `project_id`, `blocked_by`, and a trusted
-`required_subtask_count` minimum. The minimum is persisted under the
-server-owned namespaced metadata key `kandev.office_required_subtask_count`,
-not the legacy generic `required_subtask_count` key, which remains inert.
+`required_subtask_count` minimum. The template value is persisted under the
+server-owned namespaced metadata key `kandev.office_required_subtask_count`;
+the legacy generic metadata key `required_subtask_count` remains inert.
 Every task-state completion write and Done-step entry uses the task repository
 transaction and is blocked until enough durable, task-specific runner
 assignments exist. A routine-source wake coalesces only with an in-flight run
@@ -45,8 +45,9 @@ In scope:
   namespaced assignment minimum.
 - Routine prompt context for taskless routine wakes.
 - Office identity for the same-workspace system Routine workflow.
-- The server-owned `kandev.office_required_subtask_count` key and the inert
-  legacy `required_subtask_count` key.
+- The template's `required_subtask_count` input, the server-owned
+  `kandev.office_required_subtask_count` metadata key, and the inert legacy
+  generic metadata key.
 - Guarded completion in every task-state write and Done-step entry, plus the
   bounded completion reads.
 - Same-routine-only coalescing for routine-source wakes.
