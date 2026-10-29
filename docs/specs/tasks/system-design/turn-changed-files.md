@@ -20,9 +20,9 @@ owners:
 
 Tasks owns the immutable interval and transcript anchor.
 Runtime provides ordered executor access; agentctl owns Git capture; user settings owns policy resolution.
-Frontend consumers reuse the existing diff renderer and responsive workbench.
+Frontend uses the existing diff renderer and responsive workbench.
 
-The [source inventory](../../../plans/turn-changed-files/plan.md#source-inventory) distinguishes existing and proposed contracts; mutable Git status and event subscribers cannot establish interval ordering.
+The [inventory](../../../plans/turn-changed-files/plan.md#source-inventory) separates existing/proposed contracts. Mutable Git status and event subscribers cannot order intervals.
 
 ## Requirement mapping
 
@@ -298,22 +298,26 @@ Proposed authenticated endpoints, registered through normal task handlers:
 - `GET /api/tasks/:task_id/sessions/:session_id/turn-changes/:change_set_id` returns one summary and paged file metadata.
 - `GET /api/tasks/:task_id/sessions/:session_id/turn-changes/:change_set_id/files/:file_entry_id/diff?ignore_whitespace=false` returns one historical patch/rendering payload.
 
-The URL nesting validates ownership; the browser supplies no repository path or Git ref.
+URL nesting validates ownership. Browsers supply no repository paths or Git refs.
 Require normal task read authorization on every summary/content request, including cache hits.
 Resolve file-entry IDs through the selected change set. Reject cross-task, cross-session, and cross-checkout mismatches.
 Do not expose the content-addressed store as an unauthenticated blob endpoint.
 
-The diff response contains typed availability, canonical counts, patch variant, old/new modes, binary state, and truncation details.
+Diff responses include typed availability, canonical counts, patch variant, old/new modes, binary state, and truncation.
 Return `410` with an expired body for removed historical content; use typed pending/unavailable/failed states for other missing content.
-A partially available turn can open retained files, with affected checkout states visible.
+Partial turns open retained files and show affected checkout states.
 A lost historical target never silently becomes current changes or the latest turn.
 
-Add optional compact `change_set` projection to turn history and boot/conversation hydration.
-Reuse conversation revision ordering and the event bus/gateway fan-out.
-Introduce `session.turn.changes.updated` carrying turn/change-set IDs, summary revision, compact availability/totals, and bounded root preview data.
-Large file catalogs are paged through the summary endpoint; full patches and rendering blobs never enter transcript WS payloads.
-Old clients ignore the optional field/event. New clients hide cards for old rows with no captured policy/endpoints.
-Merge changes by revision and immutable identity, protecting live updates from stale pagination responses.
+Add optional `change_set` summaries to turn history and boot/conversation hydration.
+Reuse conversation revisions and event bus/gateway fan-out.
+`session.turn.changes.updated` carries turn/change-set IDs, revision, availability, totals, and bounded root previews.
+Page file catalogs; never send patches or rendering blobs through transcript WS.
+Old clients ignore optional additions. New clients hide uncaptured legacy rows.
+Merge by revision and immutable identity; stale pages cannot replace live updates.
+After subscription acknowledgment or reconnect, refresh page one, finishing any
+pre-acknowledgment read first. Release the lease and skip obsolete refreshes and
+errors on session change or unmount. Keep initial HTTP reads independent of WS.
+
 
 ## Recovery
 
@@ -344,16 +348,12 @@ Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVi
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
-The shared tree groups exact paths under checkout roots and aggregates known counts plus binary/unknown markers.
-Folders start collapsed; root files stay visible; status icons have accessible labels.
-Full paths appear on focus/hover, with touch disclosure on phones.
-Open diff, folder toggles, and expand-all remain independent actions.
+The tree groups paths by checkout. Folders start collapsed. Preserve known counts, binary/unknown markers, accessible labels, full-path disclosure, and independent navigation.
 
-Store expansion and selected entry by session/change-set ID in existing UI persistence conventions.
-Namespace user-private state; prune it when its owning session is removed.
-Do not store patch contents in localStorage or mutate the live Git cache.
-Use nested semantic disclosure buttons, or a tree with complete roving-focus behavior.
-Do not add `role=tree` without its keyboard contract.
+AC-TASKS-TURN-CHANGES-005.10 through 005.12 use `FileIcon` and `LineStat` in `TurnChangedFilesCard`, with Changes colors for textual kinds. Unknown/binary counts retain labels. Historical rows never gain live Git controls.
+Add non-collapsing 16px space outside the card border at both transcript anchors. Preserve scroll ownership and phone targets.
+
+Persist user-private expansion/selection by session/change-set; prune on session removal. Never persist patches in localStorage or mutate live Git state. Use semantic disclosure buttons unless full tree keyboard support exists.
 
 Availability projection:
 
@@ -370,7 +370,7 @@ Availability projection:
 | Expired nonzero summary | Counts, History expired explanation, disabled Open diff |
 | Known overlap | Shared checkout note with interval detail |
 
-Delayed card growth uses the transcript content ResizeObserver. A native scroll event cannot revoke existing bottom-follow ownership without reader intent. Explicit navigation releases still reconcile against viewport geometry. Content resize events blocked by history loading are retained and retried on the next render when the existing follow guards permit it. This covers both late summaries and asynchronous file rows without extra observers or layout polling.
+The transcript ResizeObserver handles late summaries and asynchronous file rows without new observers or layout polling. Native scroll cannot revoke bottom-follow ownership without reader intent. Explicit navigation releases reconcile viewport geometry. Resize events blocked by history loading retry on the next render under existing follow guards.
 
 ## Historical navigation
 
@@ -455,3 +455,5 @@ No source-only latency claims are acceptable.
 - [Prompt completion ownership](../../platform/system-design/prompt-completion-ownership.md)
 - [Git diff metadata](../../platform/system-design/git-diff-file-metadata.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
+
+[Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).

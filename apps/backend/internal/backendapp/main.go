@@ -1199,7 +1199,7 @@ func startGatewayAndServe(
 	if cfg.Features.Canvases {
 		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
 	}
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetSessionGitRefreshProvider(buildSessionGitRefreshProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetConversationSourceReader(services.Task)
@@ -2156,6 +2156,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	if services.Task != nil {
+		orchScheduler.SetTaskCreationAttachmentReader(services.Task)
+	}
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)

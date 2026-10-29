@@ -77,12 +77,32 @@ errors does not take its own healthy account out of rotation.
   route only with complete diagnostic identity, known pre-result evidence and
   no observed output or effect. Startup and later phases, ordinary manual
   recovery, typed-limit precedence and existing routing policy remain unchanged.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
+  opening `free usage limit reached` line without an error-envelope label shall
+  classify as a quota limit. This criterion covers only the unlabelled
+  provider-specific form.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
+  with `Rate limit exceeded: free-models-per-day...` or
+  `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
+  when sanitization masks the cadence token. The recorded excerpt remains
+  sanitized, and these signatures shall not outrank existing typed signals or
+  earlier payment, credit, and quota rules.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8:** An opening labeled JSON error
+  envelope containing `error_type` with the value `provider_unavailable`
+  shall classify as provider unavailable. Bare JSON examples and quoted
+  mid-sentence prose shall not trigger it.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.9:** OpenCode's opening
+  `Rate limit exceeded. Please try again later` line, optionally wrapped by
+  its provider error label, shall classify as rate limited without inferring a
+  daily reset period.
 
 ## Out of scope
 
-- Changing rule order, confidence levels, or classification flags.
-- Changing other provider-neutral rules or the runtime-environment rules. The
-  named prompt-send context-length signature in criterion 001.7 is in scope.
+- Changing rule order, confidence levels, or classification flags beyond the
+  narrow additions in criteria 001.6, 001.7, 001.8, 001.9 and 001.10.
+- Changing other or unrelated provider-neutral rules or any runtime-environment
+  rules. The named prompt-send context-length signature in criterion 001.7 is in
+  scope.
 - Changing how classified failures suspend candidates or select a successor.
 
 ## Literal catalog follow-up
@@ -91,9 +111,11 @@ Recognize bounded upstream error envelopes for timeout, transport, capacity,
 model/endpoint availability, subscription and usage exhaustion, request
 compatibility, and malformed or empty upstream responses. Preserve existing
 provider-specific signatures and their precedence. This catalogue includes
-the error-labelled OpenCode Free usage notice. The unlabelled notice remains
-a separate desired increment in #4826, together with named daily/raw reasons
-and the general labelled error_type envelope; it is not duplicated here.
+the error-labelled OpenCode Free usage notice. The unlabelled notice, the named
+daily/raw reasons and the general labelled error_type envelope are supplied by
+upstream main's bounded catalogue follow-up, which the current-main
+synchronization integrates alongside this catalogue; they are not duplicated
+here.
 Do not add another Go quota expression when its existing rule already matches.
 Keep the context-length rule restricted to prompt-send.
 

@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 )
 
 const (
 	deliveryWriterBatchBytes = 64 << 10
 	deliveryWriterBatchWait  = 20 * time.Millisecond
-	deliveryWriterQueueBytes = 4 << 20
+	deliveryWriterQueueBytes = int(deliverylimits.WriterQueueBytes)
 )
 
 var errDeliveryWriterClosed = errors.New("durable delivery writer is closed")
@@ -74,7 +74,8 @@ func (w *deliveryEventWriter) persist(ctx context.Context, update adapter.AgentE
 		return update, err
 	}
 	if size > deliveryWriterQueueBytes {
-		return update, fmt.Errorf("%w: delivery queue item is %d bytes", journal.ErrJournalFull, size)
+		return update, journal.NewStorageError(journal.StorageReasonEventTooLarge, journal.ErrEventTooLarge,
+			journal.WithEventBytes(int64(size)))
 	}
 	request := deliveryWriteRequest{update: update, size: size, result: make(chan deliveryWriteResult, 1)}
 	if err := w.reserve(ctx, size); err != nil {

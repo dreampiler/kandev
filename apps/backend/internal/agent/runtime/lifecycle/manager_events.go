@@ -340,7 +340,7 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
-		copyDeliveryTerminalIdentity(&claim.readyPayload, event)
+		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -516,7 +516,7 @@ func (m *Manager) retainPromptFailureRuntime(
 		current.ErrorMessage = ""
 		current.promptSettlementGeneration = event.PromptGeneration
 		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
-		copyDeliveryTerminalIdentity(&payload, event)
+		copyDeliveryTerminalIdentity(&payload, event, current)
 		payload.ErrorMessage = extractErrorMessage(event)
 		payload.PromptFailureDisposition = event.PromptFailureDisposition
 		if event.AttemptID != "" {
@@ -1597,6 +1597,11 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypePromptSuggestion:
+		// Bound only to its originating prompt; an unknown origin gets no turn.
+		if event.TurnID == "" {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case streams.EventTypeUsageObservation:
 		if event.TurnID == "" {
 			if event.PromptGeneration != 0 {

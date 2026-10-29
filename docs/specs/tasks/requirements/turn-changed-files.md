@@ -114,6 +114,8 @@ The card does not claim exclusive agent authorship.
 - **AC-TASKS-TURN-CHANGES-004.7:** Missing repositories, comparison failures, truncated enumeration, and missing required content shall prevent a fully ready label.
   Available entries shall remain usable with explicit partial completeness.
 
+- **AC-TASKS-TURN-CHANGES-004.8:** A capture that finalizes while a user opens or reconnects to its session shall appear without a manual reload.
+
 ### REQ-TASKS-TURN-CHANGES-005: Transcript card
 
 **Intent:** Readers can inspect each terminal turn without opening collapsed tools.
@@ -144,6 +146,10 @@ The card does not claim exclusive agent authorship.
   Existing bottom-follow behavior shall remain authoritative.
   When bottom-follow owns the viewport, delayed summaries and file rows shall stay in view after completion and reload.
   Manual reading, disabled auto-scroll, and explicit message navigation shall retain their positions.
+
+- **AC-TASKS-TURN-CHANGES-005.10:** File and folder line counts shall use the same addition and deletion colors as the Changes panel. File kind labels shall use matching status colors, including amber for modified files. Text and signs shall remain visible independently of color.
+- **AC-TASKS-TURN-CHANGES-005.11:** File rows shall use the same filename-specific icons and unknown-file fallback as the file tree.
+- **AC-TASKS-TURN-CHANGES-005.12:** A card shall leave at least 16 CSS pixels before the next message on desktop and phone. Expanded rows, long paths, and status text shall remain readable without document horizontal overflow.
 
 ### REQ-TASKS-TURN-CHANGES-006: Existing desktop and mobile diff surfaces
 
@@ -193,5 +199,9 @@ Backfill from current HEAD or workspace content and an off-by-default release to
 ## Related artifacts
 
 - [System design](../system-design/turn-changed-files.md)
+- [Subscription reconciliation design](../system-design/turn-changed-files-subscription.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
+- [Subscription reconciliation plan](../../../plans/turn-changes-subscription-reconciliation/plan.md)
 - [Actor attribution](human-assignee.md)
+
+Presentation refinement: [plan](../../../plans/turn-changed-files-presentation/plan.md).
