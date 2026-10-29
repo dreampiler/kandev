@@ -66,11 +66,10 @@ func (s *Service) retainQueuedMessageForDynamicRouteAction(
 	releaseRouteAction := s.acquireRouteActionOperationLock(queuedMsg.SessionID)
 	defer releaseRouteAction()
 
-	session, ok := s.reloadDynamicRouteSession(ctx, queuedMsg.SessionID)
+	session, ok := s.releaseStrandedQueuedRoute(ctx, queuedMsg.SessionID, reservation)
 	if !ok {
 		return false
 	}
-	session = s.releaseStrandedStartingRoute(ctx, session)
 	if !s.dynamicRouteAwaitsUserAction(ctx, session) {
 		return false
 	}
@@ -94,15 +93,23 @@ func (s *Service) retainQueuedMessageForDynamicRouteAction(
 	return true
 }
 
-func (s *Service) reloadDynamicRouteSession(
+func (s *Service) releaseStrandedQueuedRoute(
 	ctx context.Context,
 	sessionID string,
+	reservation *queuedDispatchReservation,
 ) (*models.TaskSession, bool) {
+	// Deletion and identity replacement cannot cross the route settlement.
+	guard := s.lockCancelInFlightGuard(sessionID)
+	defer guard.release()
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return nil, false
 	}
-	return session, true
+	if !reservation.matchesSessionIdentity(session.TaskID, session.ID, session.QueueIncarnationID) {
+		return nil, false
+	}
+	return s.releaseStrandedStartingRoute(ctx, session), true
 }
 
 func (s *Service) releaseStrandedStartingRoute(

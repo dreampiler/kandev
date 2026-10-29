@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -227,6 +228,60 @@ func newStrandedQueueFixture(
 	workerDone := make(chan struct{}, 4)
 	svc.onQueuedMessageExecutionComplete = func() { workerDone <- struct{}{} }
 	return repo, svc, workerDone
+}
+
+func TestStrandedQueuedDispatchDoesNotChangeReplacementRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		durable bool
+	}{{name: "ordinary"}, {name: "durable", durable: true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			const taskID, sessionID = "task-replaced-route", "session-replaced-route"
+			repo, svc, _ := newStrandedQueueFixture(t, taskID, sessionID, "execution-replaced-route")
+			identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
+			require.NoError(t, err)
+			_, err = svc.messageQueue.QueueMessageWithMetadata(
+				ctx, sessionID, taskID, "old queued prompt", "", "user", false, nil,
+				map[string]interface{}{messagequeue.MetadataLifecycleDurable: tc.durable},
+			)
+			require.NoError(t, err)
+			queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.NotNil(t, queued)
+			guard := svc.lockCancelInFlightGuard(sessionID)
+			reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queued.ID, queued)
+			guard.release()
+			require.NotNil(t, reservation)
+			t.Cleanup(func() { svc.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation) })
+
+			_, err = repo.DB().ExecContext(ctx,
+				`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+				"replacement-incarnation", sessionID,
+			)
+			require.NoError(t, err)
+			dispatchErr := fmt.Errorf("%w: %w", ErrSessionRuntimeUnavailable, errSessionAwaitingRuntimeLaunch)
+			svc.finishQueuedMessageExecution(
+				ctx, sessionID, sessionID, queued, reservation, false, false, false, dispatchErr,
+			)
+
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			require.NoError(t, err)
+			require.Equal(t, "replacement-incarnation", session.QueueIncarnationID)
+			require.Equal(t, "starting", session.RouteState)
+			require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+			route, err := repo.LoadRouteState(ctx, sessionID)
+			require.NoError(t, err)
+			require.NotNil(t, route)
+			require.Equal(t, "starting", route.Status)
+			replacement := identity
+			replacement.SessionIncarnationID = session.QueueIncarnationID
+			entries, _, err := svc.messageQueue.SnapshotSessionForIdentity(ctx, replacement)
+			require.NoError(t, err)
+			require.Empty(t, entries)
+		})
+	}
 }
 
 // A retained durable delivery keeps its queued_messages row while it is
