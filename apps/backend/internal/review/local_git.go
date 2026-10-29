@@ -76,7 +76,7 @@ func localChangedFile(ctx context.Context, path, base, head, file, status string
 	if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
 		return ChangedFile{}, fmt.Errorf("%w: read local diff for %q: %v", ErrWorkspaceUnavailable, file, err)
 	}
-	return localFile(file, status, diff, head != "", used), nil
+	return localFile(file, localChangeStatus(status), diff, head != "", used), nil
 }
 
 func localFileTooLarge(ctx context.Context, path, base, head, file string) bool {
@@ -110,15 +110,50 @@ func localFile(path, status, diff string, committed bool, used *int) ChangedFile
 	if committed {
 		file.Source = sourceCommitted
 	}
+	file.Additions, file.Deletions = localHunkLineCounts(diff)
+	return file
+}
+
+// localHunkLineCounts counts added and removed lines inside hunks only. Diff
+// header lines (`+++`/`---`) sit before the first `@@ `, so a code line whose
+// content begins with `+` or `-` is still counted correctly.
+func localHunkLineCounts(diff string) (additions, deletions int) {
+	inHunk := false
 	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			file.Additions++
+		if strings.HasPrefix(line, "diff --git ") {
+			inHunk = false
+			continue
 		}
-		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			file.Deletions++
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			additions++
+		} else if strings.HasPrefix(line, "-") {
+			deletions++
 		}
 	}
-	return file
+	return additions, deletions
+}
+
+// localChangeStatus maps a `git --name-status` code to the file status
+// vocabulary agentctl stamps (added, modified, deleted, renamed). Unknown
+// codes, including a type change, read as modified.
+func localChangeStatus(code string) string {
+	switch {
+	case strings.HasPrefix(code, "A"):
+		return "added"
+	case strings.HasPrefix(code, "D"):
+		return "deleted"
+	case strings.HasPrefix(code, "R"):
+		return "renamed"
+	default:
+		return "modified"
+	}
 }
 
 func localUntrackedFiles(ctx context.Context, path string, used *int) ([]ChangedFile, error) {
@@ -133,6 +168,10 @@ func localUntrackedFiles(ctx context.Context, path string, used *int) ([]Changed
 		}
 		info, err := os.Lstat(filepath.Join(path, filepath.FromSlash(name)))
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// The file can disappear between `ls-files` and this stat.
+				continue
+			}
 			return nil, fmt.Errorf("%w: read untracked file %q", ErrWorkspaceUnavailable, name)
 		}
 		if !info.Mode().IsRegular() || info.Size() > localMaxDiffFileSize {

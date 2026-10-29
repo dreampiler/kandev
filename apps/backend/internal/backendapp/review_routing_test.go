@@ -348,6 +348,67 @@ func (r localReviewSessionRepo) GetRepository(_ context.Context, id string) (*ta
 	return &taskmodels.Repository{ID: id, Name: "repo-" + id}, nil
 }
 
+// TestReviewLocalFallbackAnchorsOnLiveTarget keeps changes that already landed
+// on the target branch out of a task review when the session stored base is
+// older than the target the task merged.
+func TestReviewLocalFallbackAnchorsOnLiveTarget(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init")
+	git("config", "user.email", "review@example.test")
+	git("config", "user.name", "Review Test")
+	write("base.txt", "base\n")
+	git("add", ".")
+	git("commit", "-m", "base")
+	base := git("rev-parse", "HEAD")
+	git("checkout", "-b", "upstream")
+	write("upstream.txt", "upstream\n")
+	git("add", ".")
+	git("commit", "-m", "upstream")
+	git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
+	git("checkout", "-b", "task", base)
+	git("merge", "--no-ff", "-m", "merge upstream", "upstream")
+	write("task.txt", "task\n")
+	git("add", ".")
+	git("commit", "-m", "task change")
+	r := localReviewSessionRepo{session: &taskmodels.TaskSession{
+		ID: "s", ExecutorID: "exec", BaseBranch: "main", BaseCommitSHA: base,
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{{WorktreePath: dir}},
+	}, executorType: taskmodels.ExecutorTypeLocal}
+	files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(nil, reviewSessionReader{repo: r}), "s", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, file := range files {
+		if file.Path == "upstream.txt" {
+			t.Fatalf("merged upstream change was reviewed: %+v", files)
+		}
+		if file.Path == "task.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("task change missing: %+v", files)
+	}
+}
+
 func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) {
@@ -395,7 +456,7 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 	execution.SetAgentCtlClientForTesting(agentctl.NewClient(u.Hostname(), port, log))
 	for _, typ := range []taskmodels.ExecutorType{taskmodels.ExecutorTypeLocal, taskmodels.ExecutorTypeWorktree, taskmodels.ExecutorTypeSSH} {
 		t.Run(string(typ), func(t *testing.T) {
-			r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", BaseBranch: "review-base", Worktrees: []*taskmodels.TaskEnvironmentRepo{{WorktreePath: dir}}}, executorType: typ}
+			r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", BaseBranch: "review-base", Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "primary", WorktreePath: dir}}}, executorType: typ}
 			src := handlers.NewReviewChangeSource(unavailableReviewExecution{execution}, reviewSessionReader{repo: r})
 			files, err := review.CollectChanges(context.Background(), src, "s", "")
 			if typ == taskmodels.ExecutorTypeSSH {
@@ -410,18 +471,28 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 			if len(files) != 2 || files[0].Path != "committed.go" || !strings.Contains(files[1].Diff, "+new") {
 				t.Fatalf("files = %+v", files)
 			}
+			for _, file := range files {
+				if file.RepositoryName != "" || file.RepositoryID != "" || file.Key() != file.Path {
+					t.Fatalf("single-repo scope must be the legacy bare path: %+v", file)
+				}
+			}
 		})
 	}
 	t.Run("repository scopes", func(t *testing.T) {
 		r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
-			{RepositoryID: "one", WorktreePath: dir}, {RepositoryID: "two", WorktreePath: dir},
+			{RepositoryID: "one", WorkspaceRelativePath: "one", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
 		}}, executorType: taskmodels.ExecutorTypeLocal}
 		files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(nil, reviewSessionReader{repo: r}), "s", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(files) != 2 || files[0].RepositoryName == files[1].RepositoryName {
-			t.Fatalf("repositories must stay separate: %+v", files)
+		keys := make(map[string]bool, len(files))
+		for _, file := range files {
+			keys[file.Key()] = true
+		}
+		if len(files) != 2 || !keys["one\x00main.go"] || !keys["two\x00main.go"] {
+			t.Fatalf("multi-repo scope keys = %+v", files)
 		}
 	})
 }

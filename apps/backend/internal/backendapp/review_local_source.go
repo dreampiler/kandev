@@ -12,10 +12,6 @@ type reviewExecutorGetter interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 }
 
-type localReviewRepositoryGetter interface {
-	GetRepository(ctx context.Context, id string) (*models.Repository, error)
-}
-
 type localReviewTaskRepositories interface {
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 }
@@ -67,7 +63,6 @@ func (r reviewSessionReader) LocalReviewFiles(ctx context.Context, sessionID str
 			return nil, err
 		}
 		for _, file := range changes {
-			file.RepositoryID = repo.RepositoryID
 			files[repo.RepositoryID+"\x00"+file.Path] = map[string]any{
 				"path": file.Path, "diff": file.Diff, "status": file.Status,
 				"additions": file.Additions, "deletions": file.Deletions,
@@ -82,41 +77,48 @@ func (r reviewSessionReader) LocalReviewFiles(ctx context.Context, sessionID str
 func (r reviewSessionReader) localReviewRepo(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo, committed, multi bool) ([]review.ChangedFile, error) {
 	source := review.Source{WorktreePath: repo.WorktreePath, BaseRef: "HEAD"}
 	if committed {
-		base, err := r.localReviewBase(ctx, session, repo.RepositoryID, multi)
-		if err != nil || base == "" {
+		base, ok, err := r.localReviewBase(ctx, session, repo, multi)
+		if err != nil || !ok {
 			return nil, err
 		}
 		source.BaseRef, source.HeadRef = base, "HEAD"
-	}
-	name := ""
-	if repo.RepositoryID != "" {
-		if getter, ok := r.repo.(localReviewRepositoryGetter); ok {
-			row, err := getter.GetRepository(ctx, repo.RepositoryID)
-			if err != nil || row == nil {
-				return nil, fmt.Errorf("local review repository unavailable")
-			}
-			name = row.Name
-		} else if multi {
-			return nil, fmt.Errorf("local review repository identity unavailable")
-		}
 	}
 	files, err := review.CollectLocalChanges(ctx, source)
 	if err != nil {
 		return nil, err
 	}
+	// Match the Review panel's scope identity: a multi-repository task scopes a
+	// file by its workspace-relative repository path, while a single repository
+	// keeps the legacy bare-path key (both fields empty).
+	scopeName, scopeID := "", ""
+	if multi {
+		scopeName, scopeID = repo.WorkspaceRelativePath, repo.RepositoryID
+	}
 	for i := range files {
-		files[i].RepositoryID, files[i].RepositoryName = repo.RepositoryID, name
+		files[i].RepositoryID, files[i].RepositoryName = scopeID, scopeName
 	}
 	return files, nil
 }
 
-func (r reviewSessionReader) localReviewBase(ctx context.Context, session *models.TaskSession, repoID string, multi bool) (string, error) {
-	if !multi || repoID == session.RepositoryID {
-		if session.BaseCommitSHA != "" {
-			return session.BaseCommitSHA, nil
+// localReviewBase prefers the live target branch so changes already merged from
+// it stay out of the review, and falls back to the stored session base only
+// when the target cannot be compared.
+func (r reviewSessionReader) localReviewBase(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo, multi bool) (string, bool, error) {
+	target, stored := session.BaseBranch, session.BaseCommitSHA
+	if multi && repo.RepositoryID != session.RepositoryID {
+		linkTarget, err := r.localReviewLinkBase(ctx, session, repo)
+		if err != nil {
+			return "", false, err
 		}
-		return session.BaseBranch, nil
+		target, stored = linkTarget, ""
 	}
+	base, ok := review.ResolveLocalComparisonBase(ctx, repo.WorktreePath, target, stored)
+	return base, ok, nil
+}
+
+// localReviewLinkBase resolves a non-primary repository's own base branch from
+// its task repository link.
+func (r reviewSessionReader) localReviewLinkBase(ctx context.Context, session *models.TaskSession, repo *models.TaskEnvironmentRepo) (string, error) {
 	getter, ok := r.repo.(localReviewTaskRepositories)
 	if !ok {
 		return "", fmt.Errorf("local review comparison base unavailable")
@@ -126,7 +128,7 @@ func (r reviewSessionReader) localReviewBase(ctx context.Context, session *model
 		return "", err
 	}
 	for _, link := range links {
-		if link != nil && link.RepositoryID == repoID {
+		if link != nil && link.RepositoryID == repo.RepositoryID {
 			return link.BaseBranch, nil
 		}
 	}

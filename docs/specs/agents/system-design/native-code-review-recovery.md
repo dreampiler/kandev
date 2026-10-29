@@ -56,6 +56,13 @@ tree, staging-area (index) changes the working tree no longer shows, and
 untracked files, distinct from the committed base-to-head range, and keep
 multi-repository files scoped to their own repository.
 
+The committed range anchors on the live target branch (`origin/<branch>` first,
+then the local branch), so changes already merged from the target are excluded;
+the stored session base is used only when the target cannot be compared. A
+single repository keeps the legacy bare-path scope key while a multi-repository
+task scopes a file by its workspace-relative repository path, matching the
+Review panel.
+
 
 ## Permanent verification
 

@@ -347,3 +347,61 @@ func TestCollectLocalChangesLinkedWorktree(t *testing.T) {
 		t.Fatalf("files = %+v", files)
 	}
 }
+
+func TestCollectLocalChangesCountsHunkLinesBeginningWithMarkers(t *testing.T) {
+	dir := t.TempDir()
+	localReviewGit(t, dir, "init")
+	localReviewGit(t, dir, "config", "user.email", "review@example.test")
+	localReviewGit(t, dir, "config", "user.name", "Review Test")
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("keep\n--decoy\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	localReviewGit(t, dir, "add", ".")
+	localReviewGit(t, dir, "commit", "-m", "base")
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("keep\n++plus\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := CollectLocalChanges(context.Background(), Source{WorktreePath: dir, BaseRef: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Additions != 1 || files[0].Deletions != 1 {
+		t.Fatalf("line counts = %+v", files)
+	}
+}
+
+func TestCollectLocalChangesUsesAgentctlStatusVocabulary(t *testing.T) {
+	dir := t.TempDir()
+	localReviewGit(t, dir, "init")
+	localReviewGit(t, dir, "config", "user.email", "review@example.test")
+	localReviewGit(t, dir, "config", "user.name", "Review Test")
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("keep.txt", "base\n")
+	write("gone.txt", "gone\n")
+	localReviewGit(t, dir, "add", ".")
+	localReviewGit(t, dir, "commit", "-m", "base")
+	base := localReviewGit(t, dir, "rev-parse", "HEAD")
+	write("keep.txt", "changed\n")
+	write("new.txt", "new\n")
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	localReviewGit(t, dir, "add", ".")
+	localReviewGit(t, dir, "commit", "-m", "change")
+	files, err := CollectLocalChanges(context.Background(), Source{WorktreePath: dir, BaseRef: base, HeadRef: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := make(map[string]string, len(files))
+	for _, file := range files {
+		status[file.Path] = file.Status
+	}
+	if status["keep.txt"] != "modified" || status["new.txt"] != "added" || status["gone.txt"] != "deleted" {
+		t.Fatalf("statuses = %+v", status)
+	}
+}

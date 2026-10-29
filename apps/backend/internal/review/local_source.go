@@ -83,6 +83,31 @@ func localCommit(ctx context.Context, path, ref string) (string, error) {
 	return strings.TrimSpace(commit), nil
 }
 
+// ResolveLocalComparisonBase picks the base a local cumulative diff compares
+// against, mirroring agentctl: the live target branch (origin/<target> first,
+// then <target>) so changes already merged from the target are excluded, and
+// the stored base only when no target ref can be compared with HEAD. It never
+// fetches.
+func ResolveLocalComparisonBase(ctx context.Context, worktreePath, targetBranch, storedBase string) (string, bool) {
+	for _, ref := range localComparisonRefs(targetBranch) {
+		if mergeBase, err := localGit(ctx, worktreePath, localMaxTotalDiffBytes, "merge-base", "HEAD", ref); err == nil && strings.TrimSpace(mergeBase) != "" {
+			return ref, true
+		}
+	}
+	if stored := strings.TrimSpace(storedBase); stored != "" {
+		return stored, true
+	}
+	return "", false
+}
+
+func localComparisonRefs(targetBranch string) []string {
+	target := strings.TrimSpace(targetBranch)
+	if target == "" {
+		return nil
+	}
+	return []string{"origin/" + target, target}
+}
+
 // CollectLocalChanges reads a committed three-dot range when HeadRef is set;
 // otherwise it reads the tracked index and working tree (including untracked
 // files) against BaseRef.
@@ -167,7 +192,7 @@ func localStagedFile(ctx context.Context, path, base, file, status string, used 
 	if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
 		return ChangedFile{}, fmt.Errorf("%w: read staged diff for %q: %v", ErrWorkspaceUnavailable, file, err)
 	}
-	return localFile(file, status, diff, false, used), nil
+	return localFile(file, localChangeStatus(status), diff, false, used), nil
 }
 
 func localDiffArgs(base, head string) []string {
