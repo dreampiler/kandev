@@ -19,6 +19,10 @@ const pluginCallMetadata = "x-kandev-plugin-call"
 // private value is not part of the public context surface.
 type pluginHandlerReferenceKey struct{}
 
+// pluginHandlerReference is a function value so fmt.Sprint / %#v on a handler
+// context prints only an opaque pointer, never the bearer reference.
+type pluginHandlerReference func() string
+
 func withPluginCallReference(ctx context.Context) context.Context {
 	incoming, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -30,7 +34,10 @@ func withPluginCallReference(ctx context.Context) context.Context {
 	}
 	clean := incoming.Copy()
 	clean.Delete(pluginCallMetadata)
-	return context.WithValue(metadata.NewIncomingContext(ctx, clean), pluginHandlerReferenceKey{}, refs[0])
+	reference := refs[0]
+	return context.WithValue(metadata.NewIncomingContext(ctx, clean), pluginHandlerReferenceKey{}, pluginHandlerReference(func() string {
+		return reference
+	}))
 }
 
 // HostCallContextPolicy is implemented by the host application. The SDK does
@@ -161,8 +168,10 @@ func (c hostCallClientConn) Invoke(ctx context.Context, method string, args, rep
 	outgoing, _ := metadata.FromOutgoingContext(ctx)
 	outgoing = outgoing.Copy()
 	outgoing.Delete(pluginCallMetadata)
-	if ref, ok := ctx.Value(pluginHandlerReferenceKey{}).(string); ok && ref != "" {
-		outgoing.Set(pluginCallMetadata, ref)
+	if get, ok := ctx.Value(pluginHandlerReferenceKey{}).(pluginHandlerReference); ok {
+		if ref := get(); ref != "" {
+			outgoing.Set(pluginCallMetadata, ref)
+		}
 	}
 	ctx = metadata.NewOutgoingContext(ctx, outgoing)
 	return c.ClientConnInterface.Invoke(ctx, method, args, reply, opts...)

@@ -2,6 +2,8 @@ package pluginsdk
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -376,8 +378,14 @@ func (p *hostCallProbe) OnEvent(ctx context.Context, event *Event) error {
 	if call == "reference-visibility" {
 		incoming, _ := metadata.FromIncomingContext(ctx)
 		if refs := incoming.Get(pluginCallMetadata); len(refs) != 0 {
-			p.results <- probeResult{call: call, err: status.Error(codes.Internal, "call reference visible to handler")}
+			p.results <- probeResult{call: call, err: status.Error(codes.Internal, "call reference visible in metadata")}
 			return nil
+		}
+		if get, ok := ctx.Value(pluginHandlerReferenceKey{}).(pluginHandlerReference); ok {
+			if ref := get(); ref != "" && strings.Contains(fmt.Sprint(ctx), ref) {
+				p.results <- probeResult{call: call, err: status.Error(codes.Internal, "call reference visible in context string")}
+				return nil
+			}
 		}
 		p.results <- probeResult{call: call}
 		return nil
