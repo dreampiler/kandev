@@ -736,7 +736,7 @@ func TestStartCreatedSession_RefusesProfileChangeOnMaterializedDynamicRoute(t *t
 		"the session label must keep the route's logical profile")
 	require.Equal(t, materializedRouteConcrete, session.ExecutionProfileID)
 	require.Zero(t, launches.Load(), "no agent may launch under the mismatched label")
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrMaterializedRouteProfileChange)
 	state, stateErr := repo.LoadRouteState(ctx, materializedRouteSessionID)
 	require.NoError(t, stateErr)
 	require.Equal(t, materializedRouteLogicalProfile, state.LogicalProfileID)
@@ -744,18 +744,31 @@ func TestStartCreatedSession_RefusesProfileChangeOnMaterializedDynamicRoute(t *t
 }
 
 // The same logical profile resumes its route, and a session without a
-// materialized route keeps its first profile selection.
+// materialized route keeps its first profile selection. Both run through the
+// real StartCreatedSession entrypoint, so the guard's positive wiring is
+// covered and not only the refusal branch.
 func TestStartCreatedSession_MaterializedRouteGuardKeepsSameProfileAndFirstSelection(t *testing.T) {
 	ctx := context.Background()
-	svc, _, _ := newMaterializedRouteService(t)
-	require.NoError(t, svc.refuseMaterializedRouteProfileChange(ctx, &models.TaskSession{
-		ID: materializedRouteSessionID, AgentProfileID: materializedRouteLogicalProfile,
-	}, materializedRouteLogicalProfile))
 
+	// Same logical profile resumes its route: the guard must not refuse.
+	svc, repo, _ := newMaterializedRouteService(t)
+	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
+		materializedRouteLogicalProfile, "continue", false, false, true, nil, nil)
+	require.NotErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, getErr)
+	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
+		"a route for the requested profile must resume under the same label")
+
+	// A session without a materialized route keeps its first profile selection.
 	unrouted := setupTestRepo(t)
 	seedTaskAndSession(t, unrouted, "task-unrouted", "session-unrouted", models.TaskSessionStateCreated)
 	unroutedSvc := createTestServiceWithScheduler(unrouted, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	require.NoError(t, unroutedSvc.refuseMaterializedRouteProfileChange(ctx, &models.TaskSession{
-		ID: "session-unrouted", AgentProfileID: "profile-first",
-	}, "profile-second"))
+	_, err = unroutedSvc.StartCreatedSession(ctx, "task-unrouted", "session-unrouted",
+		"profile-first", "go", false, false, true, nil, nil)
+	require.NotErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	unroutedSession, getErr := unrouted.GetTaskSession(ctx, "session-unrouted")
+	require.NoError(t, getErr)
+	require.Equal(t, "profile-first", unroutedSession.AgentProfileID,
+		"an unrouted session must keep its first profile selection")
 }
