@@ -413,4 +413,20 @@ func TestSQLiteReaderPoolSize(t *testing.T) {
 		_, err := internaldb.OpenSQLiteReaderWithConns(path, readerConns)
 		require.Error(t, err)
 	}
+
+	ctx := t.Context()
+	reader, err := internaldb.OpenSQLiteReaderWithConns(path, 7)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	conns := make([]*sql.Conn, 0, 7)
+	for range 7 {
+		conn, err := reader.Conn(ctx)
+		require.NoError(t, err)
+		conns = append(conns, conn)
+	}
+	require.Equal(t, 7, reader.Stats().OpenConnections)
+	for _, conn := range conns {
+		require.NoError(t, conn.Close())
+	}
+	require.Equal(t, 7, reader.Stats().Idle, "configured idle capacity must be retained")
 }
