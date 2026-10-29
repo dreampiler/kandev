@@ -14,8 +14,9 @@ Users can inspect repository changes from a completed agent turn directly beneat
 Tasks owns this contract because durable turn identity binds capture policy, historical content, and transcript placement.
 Workspace repository identity, runtime execution, and reusable diff rendering remain dependencies.
 
-The count describes repository changes during the turn. Concurrent writers can contribute changes in a shared checkout.
-The card does not claim exclusive agent authorship.
+The count describes turn changes after excluding provable upstream integration changes.
+Concurrent writers can still contribute changes in a shared checkout. The card does not claim exclusive agent authorship.
+Older captures retain an explicit repository-snapshot label because they lack the evidence needed for this separation.
 
 ## Terms
 
@@ -26,6 +27,8 @@ The card does not claim exclusive agent authorship.
 - **Viewer preference:** The current reader's saved preference, which controls transcript visibility.
 - **Complete:** All admitted repositories and required entries have usable summaries and historical content.
 - **Partial:** Some repositories, entries, or required content are unavailable.
+- **History-adjusted comparison:** A comparison that excludes provable upstream changes while preserving the turn's starting local content.
+- **Legacy comparison:** An older repository-snapshot comparison without evidence for separating Git history updates.
 
 ## Requirements
 
@@ -74,6 +77,15 @@ The card does not claim exclusive agent authorship.
   Binary and unavailable counts shall remain distinguishable from known zero counts.
 - **AC-TASKS-TURN-CHANGES-002.9:** Known overlapping executions in a shared checkout shall remain visible in the retained attribution.
   Unknown external writers shall not produce an exclusivity claim.
+- **AC-TASKS-TURN-CHANGES-002.10:** When an upstream update can be separated from local changes, the summary shall exclude that update.
+  This includes rebases and merges onto the same configured comparison target.
+- **AC-TASKS-TURN-CHANGES-002.11:** History adjustment shall preserve unchanged starting local edits, including uncommitted content.
+  Subsequent local changes and legitimate reverts shall remain visible, including changes to paths also modified upstream.
+- **AC-TASKS-TURN-CHANGES-002.12:** When history cannot be separated reliably, the affected checkout shall report unavailable turn comparison.
+  It shall not present the whole repository difference as turn-edit totals or claim a successful zero-change result.
+  Other checkouts with valid comparisons shall remain usable.
+- **AC-TASKS-TURN-CHANGES-002.13:** Legacy captures shall retain their existing files and counts with an explicit repository-snapshot label.
+  An upgrade shall not manufacture missing historical evidence from the current checkout or silently replace retained comparisons.
 
 ### REQ-TASKS-TURN-CHANGES-003: Ordered capture lifecycle
 
@@ -92,6 +104,12 @@ The card does not claim exclusive agent authorship.
   Without proof, the affected endpoint shall become unavailable; a later snapshot shall not impersonate it.
 - **AC-TASKS-TURN-CHANGES-003.6:** Capture processing shall remain separate from agent completion, task completion, workflow completion gates, and autopilot policy.
   Terminal pending capture shall not extend the agent-running indicator.
+- **AC-TASKS-TURN-CHANGES-003.7:** A completed turn's unfinished export shall not imply continued writing or create an overlap with a later turn.
+  Overlap shall require intersecting writer intervals for the same checkout. A shared endpoint alone shall not constitute an overlap.
+- **AC-TASKS-TURN-CHANGES-003.8:** Reconciliation shall correct stale overlap attribution using the exact turns' recorded boundaries.
+  It shall preserve genuine overlaps and leave active turns unchanged, including when completed and active captures coexist.
+- **AC-TASKS-TURN-CHANGES-003.9:** A completed turn with a lost capture boundary shall settle with explicit historical unavailability.
+  Reconciliation shall not recapture its end, affect another execution generation, or change task and workflow completion authority.
 
 ### REQ-TASKS-TURN-CHANGES-004: Durable summaries and historical reads
 
@@ -113,6 +131,10 @@ The card does not claim exclusive agent authorship.
   Expired reads shall return an explicit expired state.
 - **AC-TASKS-TURN-CHANGES-004.7:** Missing repositories, comparison failures, truncated enumeration, and missing required content shall prevent a fully ready label.
   Available entries shall remain usable with explicit partial completeness.
+- **AC-TASKS-TURN-CHANGES-004.10:** Interrupted content preservation shall retain acknowledged files and resume from durable progress while its original source remains available.
+  Repeated delivery shall not duplicate entries, inflate retained bytes, or change the comparison.
+- **AC-TASKS-TURN-CHANGES-004.9:** Exhausted preservation attempts and executor cleanup shall leave missing content explicitly unavailable with a specific failure reason.
+  Preserved files shall remain readable. Cleanup and cancellation shall remain bounded.
 
 - **AC-TASKS-TURN-CHANGES-004.8:** A capture that finalizes while a user opens or reconnects to its session shall appear without a manual reload.
 
@@ -140,6 +162,7 @@ The card does not claim exclusive agent authorship.
   Settled summaries with zero recorded file entries shall have no card, including failed/unavailable captures.
   Retained failure status shall remain distinct from a successful zero-change capture and available through explicit history selection.
   Partial totals shall say "available changes" and identify affected repository states.
+  An unavailable history comparison is an exception: it shall use the existing unavailable state even without recorded file entries.
 - **AC-TASKS-TURN-CHANGES-005.8:** Expired content shall preserve counts and explain why Open diff is unavailable.
   Known shared-checkout overlap shall have a visible attribution note.
 - **AC-TASKS-TURN-CHANGES-005.9:** Streaming, pagination, reconnect, and checkpoint updates shall preserve card placement and the reader's scroll position.
@@ -150,6 +173,10 @@ The card does not claim exclusive agent authorship.
 - **AC-TASKS-TURN-CHANGES-005.10:** File and folder line counts shall use the same addition and deletion colors as the Changes panel. File kind labels shall use matching status colors, including amber for modified files. Text and signs shall remain visible independently of color.
 - **AC-TASKS-TURN-CHANGES-005.11:** File rows shall use the same filename-specific icons and unknown-file fallback as the file tree.
 - **AC-TASKS-TURN-CHANGES-005.12:** A card shall leave at least 16 CSS pixels before the next message on desktop and phone. Expanded rows, long paths, and status text shall remain readable without document horizontal overflow.
+- **AC-TASKS-TURN-CHANGES-005.13:** History correction shall preserve the existing card layout, controls, and styling.
+  Normal cards shall add no history-adjustment or export-progress explanations.
+  Legacy counts shall use repository wording in the existing count position.
+  Unavailable, loading, and partial results shall reuse existing status areas; detailed reasons belong in the selected historical diff.
 
 ### REQ-TASKS-TURN-CHANGES-006: Existing desktop and mobile diff surfaces
 
@@ -164,7 +191,8 @@ The card does not claim exclusive agent authorship.
   Turn and file selectors shall match adjacent desktop control text and keep their chevrons inset from the edge.
   Phone and touch controls shall retain their minimum targets and input anti-zoom font rule.
   An explicit historical selection shall not follow later turns or silently fall back to current changes.
-- **AC-TASKS-TURN-CHANGES-006.3:** Header totals, file lists, and patches shall use the same endpoint pair.
+- **AC-TASKS-TURN-CHANGES-006.3:** Header totals, file lists, and patches shall use the same accepted comparison pair.
+  History adjustment shall not replace the original captured endpoints.
   A visible whitespace filter shall change rendering only, preserving canonical totals.
 - **AC-TASKS-TURN-CHANGES-006.4:** Current-workspace, committed, PR, and commit-detail navigation shall retain their existing behavior.
   Historical navigation shall not offer rollback, staging, restore, or undo actions.
@@ -172,6 +200,9 @@ The card does not claim exclusive agent authorship.
   Its drawer shall preserve internal scrolling, safe-area clearance, direct file selection, dismissal, and focus return.
 - **AC-TASKS-TURN-CHANGES-006.6:** New copy shall use localization and count pluralization.
   Desktop, mobile, keyboard, light/dark themes, and required locale catalogs shall pass focused rendered checks.
+- **AC-TASKS-TURN-CHANGES-006.7:** Historical diff navigation shall preserve the selected comparison and its availability after reload and reconnect.
+  Detailed reasons shall use the existing selected-diff status area.
+  An unavailable comparison shall not fall back to current changes or a different turn.
 
 ### REQ-TASKS-TURN-CHANGES-007: Bounded operation and measured evidence
 
@@ -189,6 +220,8 @@ The card does not claim exclusive agent authorship.
   Operational metric labels shall exclude task, turn, session, path, and user identities.
 
 - **AC-TASKS-TURN-CHANGES-007.5:** Full tracked-file inventories shall not be rejected by the changed-file enumeration count limit. Within existing byte/time bounds, a valid repository with more than 30,000 tracked files shall support zero-change and one-file-change capture and comparison.
+- **AC-TASKS-TURN-CHANGES-007.6:** Content preservation shall bound each batch, total attempts, concurrency, and retained bytes.
+  Deadline exhaustion shall remain distinguishable from missing objects, size limits, transport failure, and cleanup interruption.
 
 ## Exclusions
 
@@ -200,8 +233,10 @@ Backfill from current HEAD or workspace content and an off-by-default release to
 
 - [System design](../system-design/turn-changed-files.md)
 - [Subscription reconciliation design](../system-design/turn-changed-files-subscription.md)
+- [History integrity design](../system-design/turn-change-history-integrity.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
 - [Subscription reconciliation plan](../../../plans/turn-changes-subscription-reconciliation/plan.md)
+- [History integrity fix plan](../../../plans/turn-change-history-integrity/plan.md)
 - [Actor attribution](human-assignee.md)
 
 Presentation refinement: [plan](../../../plans/turn-changed-files-presentation/plan.md).
