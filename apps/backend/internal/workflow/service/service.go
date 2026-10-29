@@ -1069,6 +1069,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
+		StageType:                   sp.StageType,
 	}
 	if matchDirectProfile && sp.AgentProfile != nil {
 		if s.lookupProfile != nil && !suppressLookup {
