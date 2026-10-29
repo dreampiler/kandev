@@ -1402,7 +1402,7 @@ func (r *Repository) updateTaskTx(
 		return "", 0, err
 	}
 	var currentState v1.TaskState
-	stateQuery := `SELECT state FROM tasks WHERE id = ?`
+	stateQuery := taskStateSelectQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
@@ -1533,8 +1533,27 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, false)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionReportingApplied is the automatic-
+// transition variant of UpdateTaskWithWorkflowStepAdmission. It reports the
+// transition's applied state so the orchestrator can stop destination effects
+// when admission refused the write, and it guards the commit with the state
+// observed on the caller's snapshot.
+//
+// A later business-state write owns the row: when the locked current state is
+// BLOCKED, or no longer matches the caller's observed state, admission returns
+// admitted=false, applied=false and leaves the task row untouched.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+) (admitted, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, true)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
@@ -1555,7 +1574,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect,
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect, true,
 	)
 }
 
@@ -1580,7 +1599,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil, false,
 	)
 	return admitted, err
 }
@@ -1627,6 +1646,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
 			&alreadyApplied,
 			nil,
+			false,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1654,7 +1674,7 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil, false,
 	)
 	return admitted, err
 }
@@ -1677,7 +1697,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil, true)
 	return applied, err
 }
 
@@ -1698,7 +1718,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect, true,
 	)
 	return applied, err
 }
@@ -1713,7 +1733,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil, false,
 	)
 }
 
@@ -1979,9 +1999,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	deferredMove *messagequeue.PendingMoveRecord,
 	workflowChangeSource *models.WorkflowChangeSource,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState)
 }
 
 type exactTaskMoveOperation struct {
@@ -2007,6 +2028,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -2026,6 +2048,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			exactOperation,
 			alreadyApplied,
 			effect,
+			guardBusinessState,
 		)
 		unlock()
 
@@ -2063,6 +2086,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2164,6 +2188,24 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		if latestTransitionID != deferredMove.Move.FromTransitionID {
 			return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+		}
+	}
+	// The automatic transition's business precondition is the locked current
+	// state. A BLOCKED task is owned by the decision that set it, and a state
+	// that no longer matches the caller's snapshot means another writer
+	// committed a newer outcome after this transition was decided. Either way
+	// the move is not applied: report it as a lost comparison, not an error,
+	// and leave the row, any delivery effect, and the destination untouched.
+	if guardBusinessState {
+		currentState, err := r.readTaskStateInTx(ctx, tx, task.ID)
+		if err != nil {
+			return false, false, err
+		}
+		if currentState == v1.TaskStateBlocked {
+			return false, false, nil
+		}
+		if task.State != "" && currentState != task.State {
+			return false, false, nil
 		}
 	}
 	if exactOperation != nil {
@@ -3561,7 +3603,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	var currentState v1.TaskState
-	stateQuery := `SELECT state FROM tasks WHERE id = ?`
+	stateQuery := taskStateSelectQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
