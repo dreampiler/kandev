@@ -345,49 +345,75 @@ func (s *Service) evaluateCeilingStartDropReasons(
 }
 
 // dropCeilingDeferral terminally disposes of a deferred launch that will never
-// be retried. It first fails the automation run the launch serves, if that run
-// still waits, and keeps the record when the run cannot be failed, so a later
-// sweep drops it again instead of leaving the run open with nothing to settle
-// it. It then logs the drop, writes a one-shot drop note where a session
-// exists to carry it, and clears the record.
+// be retried. It fails the automation run the launch serves, if that run still
+// waits, and keeps the record when the run cannot be failed, so a later sweep
+// drops it again instead of leaving the run open with nothing to settle it. It
+// then writes a one-shot drop note where a session exists to carry it and
+// clears the record through the same settlement path an explicit discard uses.
 func (s *Service) dropCeilingDeferral(
 	ctx context.Context, task *models.Task, sessionID string, deferral models.CeilingDeferral, reasonCode, detail string,
 ) {
-	if !s.failQueuedAutomationRun(ctx, deferral.Payload, fmt.Sprintf("the queued launch was dropped: %s", detail)) {
-		return
-	}
 	s.logger.Zap().Warn("dropping a ceiling-deferred launch",
 		zap.String("task_id", task.ID),
 		zap.String("kind", string(deferral.Kind)),
 		zap.String(ceilingFieldReasonCode, reasonCode),
 		zap.String("detail", detail))
 
-	if sessionID != "" && s.messageCreator != nil {
-		if err := s.messageCreator.CreateSessionMessage(
-			ctx, task.ID,
-			fmt.Sprintf("The queued launch for this session was dropped: %s.", detail),
-			sessionID, string(v1.MessageTypeStatus), "",
-			map[string]interface{}{metaKeyVariant: metaVariantCeiling, ceilingFieldReasonCode: reasonCode},
-			false,
-		); err != nil {
-			s.logger.Zap().Warn("could not write the ceiling drop card note",
-				zap.String("task_id", task.ID), zap.String("session_id", sessionID), zap.Error(err))
-		}
-	}
-
-	s.clearCeilingDeferredRecord(ctx, task.ID, deferral)
-	if run := automationRunFromCeilingPayload(deferral.Payload); run != nil {
-		s.releaseDroppedAutomationStartOwnership(ctx, task, run.RunID)
-	}
-	s.publishTaskUpdatedByID(ctx, task.ID)
+	s.discardCeilingDeferral(
+		ctx, task, deferral, fmt.Sprintf("the queued launch was dropped: %s", detail),
+		func() {
+			if sessionID == "" || s.messageCreator == nil {
+				return
+			}
+			if err := s.messageCreator.CreateSessionMessage(
+				ctx, task.ID,
+				fmt.Sprintf("The queued launch for this session was dropped: %s.", detail),
+				sessionID, string(v1.MessageTypeStatus), "",
+				map[string]interface{}{metaKeyVariant: metaVariantCeiling, ceilingFieldReasonCode: reasonCode},
+				false,
+			); err != nil {
+				s.logger.Zap().Warn("could not write the ceiling drop card note",
+					zap.String("task_id", task.ID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		},
+	)
 }
+
+// ceilingClearResult reports why a ceiling-record clear did or did not land.
+// Only ceilingClearStored proves the record is gone; every other value means it
+// is still durable.
+type ceilingClearResult int
+
+const (
+	ceilingClearStored ceilingClearResult = iota
+	// ceilingClearSuperseded means the stored record is no longer the one the
+	// caller observed, so it belongs to a successor and must not be touched.
+	ceilingClearSuperseded
+	// ceilingClearClaimed means a dispatcher currently owns the record.
+	ceilingClearClaimed
+	ceilingClearFailed
+)
 
 // clearCeilingDeferredRecord is AC-17's "clear the whole record" disposition,
 // applied on both a successful replay and a drop, under the same
 // compare-and-set retry loop deferCeilingRefusal itself uses. When an expected
 // deferral is supplied, the clear is also bound to that exact record. A stale
 // replay must not remove a newer successor that won the intervening CAS.
-func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string, expected ...models.CeilingDeferral) {
+func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string, expected ...models.CeilingDeferral) bool {
+	var want *models.CeilingDeferral
+	if len(expected) > 0 {
+		want = &expected[0]
+	}
+	return s.clearCeilingDeferredRecordOutcome(ctx, taskID, want, false) == ceilingClearStored
+}
+
+// clearCeilingDeferredRecordOutcome is the single clear implementation.
+// refuseLiveClaim makes a dispatch claim authoritative rather than advisory, so
+// a caller that is not the claim owner (an explicit discard) can never strip a
+// record another dispatcher may be launching.
+func (s *Service) clearCeilingDeferredRecordOutcome(
+	ctx context.Context, taskID string, expected *models.CeilingDeferral, refuseLiveClaim bool,
+) ceilingClearResult {
 	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer release()
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
@@ -395,50 +421,70 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string,
 		if err != nil {
 			s.logger.Zap().Warn("could not read deferred launch while clearing a ceiling record",
 				zap.String("task_id", taskID), zap.Error(err))
-			return
+			return ceilingClearFailed
 		}
-		if len(expected) > 0 {
-			current, readErr := models.ReadCeilingDeferral(existingRaw)
-			if readErr != nil {
-				return
-			}
-			equivalent, compareErr := sameCeilingDeferralIdentity(current, expected[0])
-			if compareErr != nil {
-				s.logger.Zap().Warn("could not compare deferred launch while clearing a ceiling record",
-					zap.String("task_id", taskID), zap.Error(compareErr))
-				return
-			}
-			if !equivalent {
-				s.logger.Zap().Info("leaving a newer ceiling deferred record in place after stale replay",
-					zap.String("task_id", taskID))
-				return
-			}
-		}
-		if claim, ok := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); ok && claim.taskID == taskID {
-			claimID, _, held := models.ReadCeilingLaunchClaim(existingRaw)
-			if !held || claimID != claim.id {
-				s.logger.Zap().Debug("skipping ceiling record clear: claim replaced by successor",
-					zap.String("task_id", taskID))
-				return
-			}
+		if outcome := s.ceilingClearPrecondition(ctx, taskID, existingRaw, expected, refuseLiveClaim); outcome != ceilingClearStored {
+			return outcome
 		}
 		record := stripCeilingRecordKeys(existingRaw)
 		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
 		if err != nil {
 			s.logger.Zap().Warn("could not clear a ceiling deferred record",
 				zap.String("task_id", taskID), zap.Error(err))
-			return
+			return ceilingClearFailed
 		}
 		if stored {
-			return
+			return ceilingClearStored
 		}
 		if lostCompare {
 			continue
 		}
-		return
+		return ceilingClearFailed
 	}
 	s.logger.Zap().Warn("could not clear a ceiling deferred record after repeated compare-and-set losses",
 		zap.String("task_id", taskID))
+	return ceilingClearFailed
+}
+
+// ceilingClearPrecondition reports whether the observed record may be cleared.
+// It returns ceilingClearStored when it may, and the specific refusal otherwise:
+// a successor record, another dispatcher's live claim, or an unreadable record
+// whose identity cannot be compared.
+func (s *Service) ceilingClearPrecondition(
+	ctx context.Context, taskID string, existingRaw map[string]interface{},
+	expected *models.CeilingDeferral, refuseLiveClaim bool,
+) ceilingClearResult {
+	if expected != nil {
+		current, readErr := models.ReadCeilingDeferral(existingRaw)
+		if readErr != nil {
+			return ceilingClearFailed
+		}
+		equivalent, compareErr := sameCeilingDeferralIdentity(current, *expected)
+		if compareErr != nil {
+			s.logger.Zap().Warn("could not compare deferred launch while clearing a ceiling record",
+				zap.String("task_id", taskID), zap.Error(compareErr))
+			return ceilingClearFailed
+		}
+		if !equivalent {
+			s.logger.Zap().Info("leaving a newer ceiling deferred record in place after stale replay",
+				zap.String("task_id", taskID))
+			return ceilingClearSuperseded
+		}
+	}
+	if refuseLiveClaim && s.ceilingDeferralClaimed(existingRaw) && !ceilingClaimOwnedByContext(ctx, taskID, existingRaw) {
+		s.logger.Zap().Info("leaving a claimed ceiling deferred record in place",
+			zap.String("task_id", taskID))
+		return ceilingClearClaimed
+	}
+	if claim, ok := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); ok && claim.taskID == taskID {
+		claimID, _, held := models.ReadCeilingLaunchClaim(existingRaw)
+		if !held || claimID != claim.id {
+			s.logger.Zap().Debug("skipping ceiling record clear: claim replaced by successor",
+				zap.String("task_id", taskID))
+			return ceilingClearSuperseded
+		}
+	}
+	return ceilingClearStored
 }
 
 // sameCeilingDeferralIdentity compares the stable identity of one queued

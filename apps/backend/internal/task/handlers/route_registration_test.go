@@ -229,3 +229,14 @@ func TestRegisterProcessRoutesWiresSessionScopedRoutes(t *testing.T) {
 		"POST /api/v1/task-sessions/:id/authenticate",
 	)
 }
+
+// TestRegisterTaskRoutesWiresDeferredLaunchDiscard pins the one route the
+// explicit deferred-launch discard adds. A silently dropped registration would
+// leave the shared settlement service reachable only from tests.
+func TestRegisterTaskRoutesWiresDeferredLaunchDiscard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterTaskRoutes(router, ws.NewDispatcher(), nil, nil, nil, nil, newTestLogger(t))
+
+	requireRoutes(t, router, "POST /api/v1/tasks/:id/deferred-launch/discard")
+}

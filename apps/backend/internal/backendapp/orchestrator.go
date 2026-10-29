@@ -286,6 +286,11 @@ func provideOrchestrator(
 		return queues
 	})
 
+	// An explicit deferred-launch discard needs the orchestrator's automation
+	// settlement and ceiling-record ownership; the task service keeps the
+	// task-write authorization and never learns the record's shape.
+	taskSvc.SetDeferredLaunchDiscarder(orchestratorSvc)
+
 	// Per-user scoping for the session-keyed WS actions. The orchestrator
 	// resolves sessions through its own repo handle, so it does not inherit the
 	// task service's authorize* checks.

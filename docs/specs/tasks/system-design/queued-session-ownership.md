@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003
+  - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
 ---
 
@@ -24,6 +25,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history; Recovery metadata and prompt turns |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004 | Explicit discard |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
 
 ## Existing components
@@ -247,6 +249,47 @@ prompt ownership on retry; a second sweep must not create a second step message.
 An already-dispatched exact execution is acknowledged through existing correlated
 launch identity. No new scheduler, fan-out queue, or launch lease system is added.
 
+## Explicit discard
+
+Criteria 004.1 through 004.6 add one user-decided disposition for a pending
+ceiling-deferred launch, delivered by the [explicit discard package](../../../plans/explicit-deferred-launch-discard/plan.md).
+It is separate from the automatic invalid-replay drop: that path cleans up a
+record no later pass could use, whereas this is a user decision about a launch
+that is still valid. Both share one settlement routine so their ordering and
+ownership rules cannot diverge.
+
+`DeferredLaunchDiscardOutcome` is a closed set: `already_clear` (nothing was
+written), `discarded` (the ceiling half is gone and the launch's automation
+ownership was settled), and `retained` (the record is still durable). A retained
+outcome carries one closed reason: `claim_in_flight`, `settlement_incomplete`,
+`clear_incomplete`, or `record_unreadable`. A failure is never reported as a
+no-op or as a success.
+
+The durable work reuses the established ceiling boundaries. The shared routine
+settles the automation run the launch serves first, then removes only
+`ceiling_`-prefixed keys under the entry-admission lock with an identity-bound
+compare-and-set against the observed record, then releases the automation start
+ownership and publishes the task update. A settlement or clear failure stops
+before the ownership release, so the record stays as recoverable as it was.
+
+A live dispatch claim is authoritative for this path: the claim is another
+dispatcher's key and may already be launching, so the discard reports
+`claim_in_flight` and leaves the record alone. A record that claims the ceiling
+half but cannot be decoded is reported as `record_unreadable` rather than
+silently removed, because its identity cannot be compared.
+
+The task service keeps authorization: `ScopeTaskWrite` plus the existing
+executor-mutation check run before any record work, exactly as the deferred
+prompt edit does. The candidate transport is a synchronous request scoped to one
+task. Its path, verb, response fields, and whether an operator receives an
+additional permission are proposals awaiting the existing maintainer direction;
+they are not an agreed public contract. Because the safety rules live in the
+shared service, a different public shape does not weaken them.
+
+No session is started, resumed, or stopped, and no manual launch occurs. A
+running sibling session and the task's state are untouched, and a coexisting WIP
+or dependency intent on the same record survives.
+
 ## Task reconciliation
 
 Within `writeTaskReviewState`, use the same task-runtime serialization as running
@@ -468,3 +511,4 @@ or claim its cause without a failing regression.
 - [Historical passive inspection decision](../../../decisions/2026-09-16-passive-session-inspection.md)
 - [Runtime state publication](runtime-state-publication-order.md)
 - [Implementation package](../../../plans/queued-session-ownership/plan.md)
+- [Explicit discard package](../../../plans/explicit-deferred-launch-discard/plan.md)
