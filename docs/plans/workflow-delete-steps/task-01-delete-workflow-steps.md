@@ -134,3 +134,48 @@ DSN is unset; no real PostgreSQL concurrency pass is claimed. The source was
 reviewed against the existing dialect and transaction-lock pattern, with the lock
 before the first marker read. No standing test, new setting or operating DB
 write is added; the temporary cases are removed after delivery.
+
+## CI regression follow-up: v0.93.0 fixture workflow row
+
+`TestPreviousStableUpgrade/{sqlite3,pgx}/v0.93.0` failed after the one-time
+prune because the v0.93.0 fixture seeded the `workflow_steps` row
+`fixture-v0930-workflow-step` with `workflow_id='fixture-v0930-workflow'` but
+never seeded the matching `workflows` row. The prune correctly removed that
+orphan, and the fixture's preserved owner-row sentinel then found no step.
+
+The fixture now seeds the missing workflow row in both SQL dumps, and the
+manifest checksums are updated to the values from the original integrated
+source. The prune behavior is unchanged: a real orphan is still deleted once,
+and live workflow steps are still preserved.
+
+Minimal regressions were added to existing test files:
+
+- `TestDeleteWorkflowRemovesOnlyItsStepsAndBindings`
+- `TestDeleteWorkflowMissingRollsBackStepAndBindingDeletes`
+- `TestDeleteWorkflowsByWorkspaceRemovesOnlySelectedSteps`
+- `TestRunMigrationsPrunesWorkflowStepOrphansOnce`
+- `TestPostgresWorkflowStepOrphanPruneSerializesAcrossConnections` (env-gated)
+
+The maintainer's proposed new test file was not applied wholesale.
+
+### Verification (2026-10-29)
+
+- On main `173d1ef`: the same storeconformance case passed all sentinel checks
+  and failed later in the storage scenario on Windows only
+  (`temporary artifact path must be an absolute path`); the scenario seeds
+  `/tmp/<id>`, which is not absolute on Windows.
+- On PR head `5b82e96` before the fixture fix: the test failed at
+  `upgrade_test.go:183` with the reported sentinel error.
+- After the fix: the test passed the sentinel and replay checks and again
+  reached the same Windows-only storage scenario failure, so the sentinel
+  regression is gone while the unrelated platform limitation remains.
+- `TestUpgradeFixtureManifest`: pass.
+- The five regressions above: four SQLite cases pass with race detection; the
+  PostgreSQL case skips locally because `KANDEV_TEST_POSTGRES_DSN` is unset.
+  CI runs it with a DSN.
+- `go run ./cmd/sqlguard ./internal`: pass.
+- `scripts/lint-go-changed` on the changed Go files: 0 issues. A shared
+  golangci-lint lock from another run required the equivalent
+  `--allow-parallel-runners` invocation.
+- Normal pre-commit hooks were used for the commit.
+

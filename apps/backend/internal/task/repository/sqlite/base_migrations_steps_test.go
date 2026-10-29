@@ -8,8 +8,11 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestBackfillPromptSeqReportsOpaqueStep covers the
@@ -141,4 +144,41 @@ func assertNoPhaseMismatchWarnings(t *testing.T, logs *observer.ObservedLogs) {
 			t.Fatalf("unexpected phase_mismatch warning: %+v", entry.ContextMap())
 		}
 	}
+}
+
+func TestRunMigrationsPrunesWorkflowStepOrphansOnce(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		workspaceID    = "ws-workflow-orphan-prune"
+		liveWorkflowID = "wf-workflow-orphan-prune-live"
+	)
+	seedWorkspace(t, repo, workspaceID)
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: liveWorkflowID, WorkspaceID: workspaceID, Name: "Live",
+	}))
+	insertWorkflowDeleteTestStep(t, repo, "step-workflow-prune-live", liveWorkflowID)
+	insertWorkflowDeleteTestStep(t, repo, "step-workflow-prune-old", "wf-workflow-prune-old")
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		DELETE FROM kandev_meta WHERE key = ?
+	`), workflowStepOrphansPrunedMetaKey)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.runMigrations(ctx))
+	require.Equal(t, 0, countWorkflowDeleteTestSteps(t, repo, "wf-workflow-prune-old"))
+	require.Equal(t, 1, countWorkflowDeleteTestSteps(t, repo, liveWorkflowID))
+	require.Equal(t, 1, countWorkflowStepOrphanMarker(t, repo))
+
+	insertWorkflowDeleteTestStep(t, repo, "step-workflow-prune-late", "wf-workflow-prune-late")
+	require.NoError(t, repo.runMigrations(ctx))
+	require.Equal(t, 1, countWorkflowDeleteTestSteps(t, repo, "wf-workflow-prune-late"))
+}
+
+func countWorkflowStepOrphanMarker(t *testing.T, repo *Repository) int {
+	t.Helper()
+	var count int
+	require.NoError(t, repo.db.Get(&count, repo.db.Rebind(`
+		SELECT COUNT(*) FROM kandev_meta WHERE key = ?
+	`), workflowStepOrphansPrunedMetaKey))
+	return count
 }
