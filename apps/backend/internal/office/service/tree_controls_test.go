@@ -6,8 +6,34 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type treeControlTaskStateWriter struct {
+	repo *officesqlite.Repository
+}
+
+func (w treeControlTaskStateWriter) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
+	_, err := w.repo.Writer().ExecContext(ctx,
+		`UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, state, taskID)
+	return err
+}
+
+func (w treeControlTaskStateWriter) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	result, err := w.repo.Writer().ExecContext(ctx, `
+		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`, state, taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
 
 type mockTaskCanceller struct {
 	mu      sync.Mutex
@@ -97,6 +123,7 @@ func TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
 
 func TestCancelAndRestoreTaskTree(t *testing.T) {
 	svc := newTestService(t)
+	svc.SetTaskStateWriter(treeControlTaskStateWriter{repo: svc.RepoForTest()})
 	ctx := context.Background()
 	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
 	insertTreeControlTask(t, svc, "child", "root", "TODO")

@@ -2,14 +2,55 @@ package dashboard_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+func TestUpdateTaskStatus_RequiredRoutineAssignmentsBlockOfficeCompletion(t *testing.T) {
+	deps := newTestDeps(t)
+	ctx := context.Background()
+	taskRepo, err := tasksqlite.NewWithDB(deps.db, deps.db, nil)
+	if err != nil {
+		t.Fatalf("task repo: %v", err)
+	}
+	deps.svc.SetTaskStateWriter(taskRepo)
+	metadata, err := json.Marshal(map[string]int{taskmodels.MetaKeyRequiredSubtaskCount: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deps.db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES ('wf-required', 'ws-g', 'Routine', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert workflow: %v", err)
+	}
+	if _, err := deps.db.Exec(`INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-required', 'wf-required', 'Done', 0, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert terminal step: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO tasks (id, workspace_id, title, state, priority, identifier, workflow_id, workflow_step_id, metadata, created_at, updated_at)
+		VALUES ('required-office-task', 'ws-g', 'Routine task', 'IN_PROGRESS', 'medium', 'ROT-1', 'wf-required', 'step-required', ?, datetime('now'), datetime('now'))
+	`, string(metadata)); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	err = deps.svc.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+		TaskID:    "required-office-task",
+		NewStatus: "done",
+	})
+	if err == nil || !strings.Contains(err.Error(), "required subtask assignments") {
+		t.Fatalf("UpdateTaskStatus error = %v, want assignment guard error", err)
+	}
+	if state := readTaskState(t, deps, "required-office-task"); state != "IN_PROGRESS" {
+		t.Fatalf("state = %q, want IN_PROGRESS", state)
+	}
+}
 
 // insertTestTaskAtNonTerminalStep creates a two-step workflow (stepID at
 // position 0, named stepName; a later step at position 1) and a task
@@ -161,6 +202,7 @@ func TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirec
 	wrapped := &erroringTerminalStepRepo{Repository: deps.repo, err: errors.New("database is locked")}
 	log := logger.Default()
 	svc := dashboard.NewDashboardService(wrapped, log, shared.NewActivityLogger(deps.repo, log), deps.agents, &stubCostChecker{})
+	svc.SetTaskStateWriter(directTaskStateWriter{db: deps.db})
 
 	err := svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:    "lookup-err",

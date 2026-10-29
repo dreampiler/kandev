@@ -937,6 +937,11 @@ type Service struct {
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
 
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
+
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
 	// crossed the process boundary and remains manual until reconciled.
@@ -1259,6 +1264,12 @@ type Service struct {
 	// identity, so the token names the session the launch actually uses.
 	// Nil is the common case; see LaunchCredentialReminter.
 	launchCredentialReminter LaunchCredentialReminter
+
+	// ceilingDeferredLaunchSettler lets the component that queued a
+	// ceiling-deferred launch settle its own durable record once the ceiling
+	// replay admits or terminally drops that launch. Nil is the common case;
+	// see CeilingDeferredLaunchSettler.
+	ceilingDeferredLaunchSettler CeilingDeferredLaunchSettler
 
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
