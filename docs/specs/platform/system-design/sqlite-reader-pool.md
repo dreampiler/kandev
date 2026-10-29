@@ -39,7 +39,8 @@ catalog and validation conventions:
   the selected file and key when the SQLite driver is selected.
 - An environment value is parsed strictly when the SQLite driver is selected;
   an unparseable or out-of-range value fails startup instead of falling back to
-  the default.
+  the default. An explicitly present empty environment value is invalid, not
+  absent.
 - Validation is driver-scoped. A PostgreSQL selection keeps its existing
   startup behavior even if the SQLite-only key or environment variable is
   invalid; the value is not used by the PostgreSQL provider.

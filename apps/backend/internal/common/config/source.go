@@ -264,6 +264,18 @@ func envValue(snapshot map[string]string, names ...string) (string, bool) {
 	return "", false
 }
 
+// presentEnv distinguishes an absent environment variable from one that is
+// explicitly present with an empty value. The SQLite reader override treats
+// the latter as an invalid value rather than falling back to YAML.
+func presentEnv(snapshot map[string]string, names ...string) (string, string, bool) {
+	for _, name := range names {
+		if value, ok := snapshot[name]; ok {
+			return value, name, true
+		}
+	}
+	return "", "", false
+}
+
 func applyStartupDefaultsAndEnvironment(
 	cfg *Config,
 	yamlKeys map[string]bool,
@@ -412,15 +424,17 @@ func applySQLiteReaderConns(cfg *Config, v *viper.Viper, yamlKeys map[string]boo
 	if !ok {
 		return nil
 	}
-	if _, found := nonEmptyEnv(env, entry.EnvVars...); found {
-		return applyStrictIntEnv(
-			sqliteReaderConnsKey,
-			&cfg.Database.SQLiteReaderConns,
-			sqliteReaderConnsMinimum,
-			sqliteReaderConnsMaximum,
-			env,
-			sources,
-		)
+	if raw, envName, found := presentEnv(env, entry.EnvVars...); found {
+		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("%s: invalid integer %q from %s", sqliteReaderConnsKey, raw, envName)
+		}
+		if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
+			return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+		}
+		cfg.Database.SQLiteReaderConns = parsed
+		sources[sqliteReaderConnsKey] = SourceEnvironment
+		return nil
 	}
 	if !yamlKeys[sqliteReaderConnsKey] {
 		return nil

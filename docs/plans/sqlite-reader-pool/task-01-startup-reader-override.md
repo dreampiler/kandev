@@ -72,7 +72,8 @@ value, and documented the setting. Strict parsing and range validation apply
 only when SQLite is selected. After driver selection, a present environment
 value is parsed first and a lower-priority YAML value is not parsed; an invalid
 environment value fails without falling back to YAML. When the environment
-value is absent, the raw YAML value is parsed strictly. An invalid or nonnumeric
+value is absent, the raw YAML value is parsed strictly. An explicitly present
+empty environment value is invalid, not absent. An invalid or nonnumeric
 SQLite-only value therefore cannot reject a PostgreSQL startup.
 
 New-behavior checks ran from a temporary Go overlay outside the permanent test

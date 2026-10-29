@@ -70,8 +70,9 @@ invalid SQLite-only value does not reject a PostgreSQL startup. The typed field
 skips direct unmarshalling. After driver selection, a present environment value
 is parsed first and the lower-priority YAML value is not parsed; an invalid
 environment value fails without falling back to YAML. When the environment
-value is absent, the raw YAML value is parsed strictly. This also keeps a
-nonnumeric YAML value from failing a PostgreSQL startup.
+value is absent, the raw YAML value is parsed strictly. An explicitly present
+empty environment value is invalid, not absent. This also keeps a nonnumeric
+YAML value from failing a PostgreSQL startup.
 
 Verification used one-off Go overlay tests outside the permanent test tree.
 They covered the default, YAML and environment overrides, environment-over-YAML
