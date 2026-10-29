@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-09
-updated: 2026-10-04
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -77,6 +77,26 @@ runtime ran out.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-002.3:** A dispatch failure that is not a
   wait expiry or another existing retryable case shall keep its current
   disposition, so a permanent error cannot block the head of the queue.
+
+### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A cancelled resume keeps queued work
+
+**Intent:** Stopping or restarting Kandev while a queued prompt waits for its
+session to resume does not drop the prompt or leave it for manual recovery.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** When dispatch of a reserved queued
+  entry fails because the resume attempt it waited on was cancelled, and no
+  part of the prompt reached the agent, Kandev shall return the entry to its
+  session queue with its identity, payload, and order unchanged and settle its
+  dispatch claim. A reservation for an exact session incarnation shall restore
+  onto that incarnation.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** The returned entry shall wait for the
+  next existing delivery trigger. Kandev shall not add a timer, retry loop, or
+  new resume attempt for it, and a cancelled resume after a delivery attempt
+  shall keep its current disposition.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** A dispatch failure that matches no
+  retained or retryable case shall be logged as dropped, not as lost.
 
 ## Compatibility and exclusions
 
