@@ -34,13 +34,13 @@ var holdStepNames = map[string]bool{
 // backfill, and the marker is committed with the data changes so a failed
 // startup retries rather than half-converts.
 //
-// Every hold-named step is converted whatever nature it carried, because a
-// task on it was counted as held by its name alone before this change;
-// restricting the backfill to "custom" would silently drop a hold-named step
-// that also carried work, review, or approval from the count. A step already
-// marked hold is left as it is, and a step whose name is not on the list is
-// never guessed at - a workflow that spells its hold step differently is marked
-// through the step settings instead.
+// Only a step whose stored nature is the default - empty or "custom" - is
+// converted. A step that already declares work, review, approval, or hold
+// carries a nature a consumer reads (a review or approval step keeps its
+// decision prompt, a work step keeps its rail variant), so converting it would
+// lose that nature. A step whose name is not on the list is never guessed at -
+// a workflow that spells its hold step differently is marked through the step
+// settings instead.
 func (r *Repository) backfillHoldStageType() error {
 	if _, err := r.db.Exec(`
 		CREATE TABLE IF NOT EXISTS kandev_meta (
@@ -72,10 +72,10 @@ func (r *Repository) backfillHoldStageType() error {
 	updateHoldRows := tx.Rebind(fmt.Sprintf(`
 		UPDATE workflow_steps
 		SET stage_type = ?
-		WHERE COALESCE(stage_type, '') <> ?
+		WHERE COALESCE(stage_type, '') IN ('', ?)
 		  AND LOWER(TRIM(name)) IN (%s)
 	`, holdStageTypeNameList()))
-	if _, err := tx.Exec(updateHoldRows, string(models.StageTypeHold), string(models.StageTypeHold)); err != nil {
+	if _, err := tx.Exec(updateHoldRows, string(models.StageTypeHold), string(models.StageTypeCustom)); err != nil {
 		return fmt.Errorf("backfill workflow step hold stage type: %w", err)
 	}
 	if err := backfillTemplateHoldStageType(tx); err != nil {
@@ -159,11 +159,10 @@ func scanTemplateSteps(rows *sqlx.Rows) ([]templateStepRow, error) {
 }
 
 // normalizeTemplateHoldStageType stamps "hold" on the template steps whose name
-// is a hold name, so a workflow seeded from that template is a hold from the
-// start. A step already stating "hold" is left alone; a step stating another
-// nature is still converted when its name is a hold name, because a task on it
-// was counted as held by name before this change. A step whose name is not on
-// the list keeps whatever it states.
+// is a hold name and whose stored nature is the default (empty or "custom"), so
+// a workflow seeded from that template marks the step as a hold from the start.
+// A step that already states work, review, approval, or hold keeps it, and a
+// step whose name is not on the list keeps whatever it states.
 func normalizeTemplateHoldStageType(data []byte) ([]byte, bool, error) {
 	var steps []map[string]json.RawMessage
 	if err := json.Unmarshal(data, &steps); err != nil {
@@ -171,7 +170,7 @@ func normalizeTemplateHoldStageType(data []byte) ([]byte, bool, error) {
 	}
 	changed := false
 	for _, step := range steps {
-		if templateStageType(step) == string(models.StageTypeHold) {
+		if !templateStageTypeIsDefault(step) {
 			continue
 		}
 		name, err := templateStepName(step)
@@ -198,16 +197,17 @@ func normalizeTemplateHoldStageType(data []byte) ([]byte, bool, error) {
 	return normalized, true, nil
 }
 
-// templateStageType reads a template step's stored nature, or "" when it states
-// none or states a value that is not a string.
-func templateStageType(step map[string]json.RawMessage) string {
+// templateStageTypeIsDefault reports whether a template step states no nature or
+// the default "custom". A value that is not a string states something, so it is
+// left alone rather than overwritten.
+func templateStageTypeIsDefault(step map[string]json.RawMessage) bool {
 	raw, ok := step["stage_type"]
 	if !ok {
-		return ""
+		return true
 	}
 	var stageType string
 	if err := json.Unmarshal(raw, &stageType); err != nil {
-		return ""
+		return false
 	}
-	return stageType
+	return stageType == "" || stageType == string(models.StageTypeCustom)
 }

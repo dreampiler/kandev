@@ -16,6 +16,7 @@ import {
   STEP_COLORS,
   hasOnEnterAction,
   hasOnExitAction,
+  stageTypeOnHoldToggle,
   type TransitionEventKey,
 } from "./workflow-pipeline-editor-helpers";
 import {
@@ -349,7 +350,7 @@ function StepHoldRow({ step, savedStep, onUpdate, readOnly }: StepHoldRowProps) 
       id={`${step.id}-hold-step`}
       checked={stageType === "hold"}
       onCheckedChange={(checked) =>
-        !readOnly && onUpdate({ stage_type: checked ? "hold" : "custom" })
+        !readOnly && onUpdate({ stage_type: stageTypeOnHoldToggle(checked, savedStep?.stage_type) })
       }
       disabled={readOnly}
       label={t("workflows:holdStep")}
