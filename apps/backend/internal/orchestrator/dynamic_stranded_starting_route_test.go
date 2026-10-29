@@ -433,4 +433,22 @@ func TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible(t *testing.T) {
 	snapshot, _, err := svc.messageQueue.SnapshotSession(ctx, sessionID)
 	require.NoError(t, err)
 	require.Len(t, snapshot, 1, "the released entry must remain a single row")
+
+	// Model the successor becoming ready after the route action returns. The
+	// normal readiness drain must deliver the restored entry to the provider.
+	agentMgr, ok := svc.agentManager.(*mockAgentManager)
+	require.True(t, ok)
+	seedExecutorRunning(t, baseRepo, sessionID, taskID, "execution-route-successor")
+	require.True(t, svc.drainQueuedMessageForPromptableSession(ctx, sessionID),
+		"the successor readiness event must admit the restored entry")
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the successor did not finish dispatching the restored entry")
+	}
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	agentMgr.mu.Unlock()
+	require.Equal(t, []string{"hello"}, prompts)
+	require.Equal(t, 0, svc.messageQueue.GetStatus(ctx, sessionID).Count)
 }
