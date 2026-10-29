@@ -36,9 +36,9 @@ template's assignment minimum under the server-owned namespaced metadata key
 `kandev.office_required_subtask_count` before auto-start; the legacy generic
 metadata key `required_subtask_count` remains inert and cannot forge or clear
 the minimum. Every task-state completion write and Done-step entry uses the task
-repository transaction and is blocked until enough same-workspace, durable,
-task-specific runner assignments exist. The workflow flag heal applies only to
-the Office Default template.
+repository transaction and is blocked until enough same-workspace,
+non-ephemeral, durable child tasks have a runner seat on that child. The
+workflow flag heal applies only to the Office Default template.
 
 ## In scope
 

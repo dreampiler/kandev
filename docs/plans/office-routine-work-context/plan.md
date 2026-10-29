@@ -20,8 +20,8 @@ routine's task template may declare `project_id`, `blocked_by`, and a trusted
 server-owned namespaced metadata key `kandev.office_required_subtask_count`;
 the legacy generic metadata key `required_subtask_count` remains inert.
 Every task-state completion write and Done-step entry uses the task repository
-transaction and is blocked until enough durable, task-specific runner
-assignments exist. A routine-source wake coalesces only with an in-flight run
+transaction and is blocked until enough same-workspace, non-ephemeral, durable
+child tasks have a runner seat on that child. A routine-source wake coalesces only with an in-flight run
 from the same routine.
 
 This plan records the delivery of the repair. A taskless routine wake resolves
