@@ -3730,7 +3730,7 @@ func (r *taskMessageReviewRollback) captureExpectedTaskState(ctx context.Context
 	if r == nil || !r.restoreTask {
 		return nil
 	}
-	task, err := taskSvc.GetTask(ctx, r.taskID)
+	task, err := taskSvc.GetTaskForPrompt(ctx, r.taskID)
 	if err != nil {
 		return err
 	}
@@ -4267,7 +4267,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if h.taskSvc == nil {
 		return taskMessageReviewRollback{}, errors.New("task service not available")
 	}
-	task, err := h.taskSvc.GetTask(ctx, taskID)
+	task, err := h.taskSvc.GetTaskForPrompt(ctx, taskID)
 	if err != nil {
 		return taskMessageReviewRollback{}, err
 	}
@@ -4678,7 +4678,7 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
-	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	primary, err := h.taskSvc.GetPrimarySessionForPrompt(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve primary session after on_turn_start: %w", err)
 	}
