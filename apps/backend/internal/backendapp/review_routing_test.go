@@ -495,4 +495,25 @@ func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
 			t.Fatalf("multi-repo scope keys = %+v", files)
 		}
 	})
+	t.Run("map key matches panel scope", func(t *testing.T) {
+		single := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "primary", WorktreePath: dir}}}, executorType: taskmodels.ExecutorTypeLocal}}
+		uncommitted, err := single.LocalReviewFiles(context.Background(), "s", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := uncommitted["main.go"]; !ok {
+			t.Fatalf("single-repo map key must be the bare path: %v", uncommitted)
+		}
+		multi := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "m", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+			{RepositoryID: "one", WorkspaceRelativePath: "one", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
+		}}, executorType: taskmodels.ExecutorTypeLocal}}
+		scoped, err := multi.LocalReviewFiles(context.Background(), "m", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := scoped["one\x00main.go"]; !ok {
+			t.Fatalf("multi-repo map key must be the panel scope key: %v", scoped)
+		}
+	})
 }

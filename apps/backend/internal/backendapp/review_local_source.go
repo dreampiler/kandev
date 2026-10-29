@@ -63,7 +63,7 @@ func (r reviewSessionReader) LocalReviewFiles(ctx context.Context, sessionID str
 			return nil, err
 		}
 		for _, file := range changes {
-			files[repo.RepositoryID+"\x00"+file.Path] = map[string]any{
+			files[file.Key()] = map[string]any{
 				"path": file.Path, "diff": file.Diff, "status": file.Status,
 				"additions": file.Additions, "deletions": file.Deletions,
 				"repository_id":   file.RepositoryID,
