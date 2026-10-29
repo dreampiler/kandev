@@ -221,3 +221,12 @@ enabled, a forwarded handler context reaching the Host, and the disabled path
 keeping native background behavior. The existing event-origin, concurrent
 caller, cancellation, expired-reference, and real-domain probe results remain
 valid because the restore and fail-closed paths are unchanged.
+
+The review rounds that followed hardened the reference channel: the SDK strips
+the call reference from handler-visible metadata and carries it in a private,
+non-formatted context value, so accidental metadata or log exposure does not
+hand it to plugin code. The reference remains a bearer capability for the live
+invocation. A handler that deliberately wraps its context can still recover it,
+and using it is the handler's existing authority. The approved scope forbids a
+new signature/hash scheme, so no cryptographic binding is added. Missing,
+expired, returned, canceled, and other-plugin references stay closed.

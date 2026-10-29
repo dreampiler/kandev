@@ -104,9 +104,16 @@ The original tool InvocationID remains correlation data. Its MCP request field
 can be repeated, so a fresh server call reference prevents a delayed callback
 from acquiring a later invocation with the same ID. No proto field, persistent
 ledger, global principal or task identity supplied by a plugin is introduced.
-The SDK forwards metadata only from the handler's incoming context. Authors must
-retain that context when calling Host; dropping it cannot confer background
-authority. Domain Host calls with missing, expired, canceled or other-plugin
+A live opaque reference is a bearer capability for its lifetime. The SDK
+removes it from handler-visible metadata and avoids printing it in context
+strings, but in-process plugin code that wraps the handler context can still
+observe and use a live reference; that is the same invocation authority the
+handler already holds, not new authority. No signature or hash binding is added
+because plugins are privileged in-process code and the approved scope does not
+introduce a new credential scheme. The SDK installs the reference from the
+handler's incoming context into a private value and removes it from
+handler-visible metadata. Authors must retain that context when calling Host;
+dropping it cannot confer background authority. Domain Host calls with missing, expired, canceled or other-plugin
 references fail closed while enabled. Plugin-owned capabilities retain their
 existing capability rules for startup and detached work: state, config,
 secrets, events, capability context, plugin-owned task trees, managed agent

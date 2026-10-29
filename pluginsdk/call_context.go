@@ -19,8 +19,9 @@ const pluginCallMetadata = "x-kandev-plugin-call"
 // private value is not part of the public context surface.
 type pluginHandlerReferenceKey struct{}
 
-// pluginHandlerReference is a function value so fmt.Sprint / %#v on a handler
-// context prints only an opaque pointer, never the bearer reference.
+// pluginHandlerReference is a function value so accidental fmt.Sprint / %#v on
+// a handler context prints an opaque pointer. It is not a secrecy boundary: a
+// handler that wraps the context can observe Value and recover the reference.
 type pluginHandlerReference func() string
 
 func withPluginCallReference(ctx context.Context) context.Context {
