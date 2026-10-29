@@ -45,7 +45,7 @@ existing orphan steps once on upgrade.
 
 ```bash
 # From apps/backend:
-go test -trimpath -tags fts5 -p=1 ./internal/task/repository/sqlite -run 'TestDeleteWorkflow_|TestDeleteWorkflowsByWorkspace_RemovesTheirSteps|TestMigration_PrunesOrphanWorkflowStepsOnce|TestPostgresDeleteWorkflowRemovesStepsAndPrunesOrphans' -count=1
+go test -trimpath -tags fts5 -p=1 ./internal/task/repository/sqlite -run '^(TestDeleteWorkflowRemovesOnlyItsStepsAndBindings|TestDeleteWorkflowMissingRollsBackStepAndBindingDeletes|TestDeleteWorkflowsByWorkspaceRemovesOnlySelectedSteps|TestRunMigrationsPrunesWorkflowStepOrphansOnce|TestPostgresWorkflowStepOrphanPruneStartsAndSerializes)$' -count=1
 # From the repository root:
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -182,4 +182,44 @@ the existing isolated multi-connection helper and DSN gate.
   golangci-lint lock from another run required the equivalent
   `--allow-parallel-runners` invocation.
 - Normal pre-commit hooks were used for the commit.
+
+## Review follow-up: step creation serializes with workflow deletion
+
+A later review identified a PostgreSQL race: step creation could insert a step
+after a delete removed existing steps but before the workflow row was deleted,
+leaving a persistent orphan after the one-time marker. The race predates this
+PR, but it violates the current delete/prune invariant and the PostgreSQL
+read-modify-write guideline.
+
+The fix uses the workflow row as the serialization point:
+
+- `DeleteWorkflow` locks the workflow row with `SELECT ... FOR UPDATE` on
+  PostgreSQL before deleting bindings and steps.
+- `DeleteWorkflowsByWorkspace` locks the affected workflow rows in id order with
+  the same predicate before deleting bindings and steps.
+- The step writer locks and validates the owning workflow row before demoting
+  start steps or inserting, and rejects a missing workflow
+  (`ErrWorkflowNotFound`) or a stale expected version
+  (`ErrTaskVersionConflict`).
+- SQLite keeps its immediate writer serialization and uses the same existence
+  and version checks. No foreign-key rebuild and no new lock framework are
+  added.
+
+Regression coverage:
+
+- `TestCreateStepForMissingWorkflowIsRejected` checks the SQLite rejection.
+- `TestPostgresWorkflowStepCreateSerializesWithDelete` holds the workflow row,
+  blocks `DeleteWorkflow` and `CreateStep` on the same row, releases it, and
+  asserts the delete succeeds, the create returns `ErrWorkflowNotFound`, and no
+  steps remain. It skips locally without `KANDEV_TEST_POSTGRES_DSN`; CI runs
+  it.
+- The service test mocks mirror workflow creation and deletion into the real
+  test database so they exercise the same invariant as production.
+
+`go run ./cmd/sqlguard ./internal` passed, `scripts/lint-go-changed` reported
+0 issues, and the focused SQLite tests passed with race detection. The workflow
+repository package passed with the pre-existing
+`TestResolveCurrentRunner_FallsBackToLatestTaskRunner` timing flake excluded;
+that test fails intermittently on the same `created_at` value and is unrelated
+to this change. The workflow service package passed in full.
 

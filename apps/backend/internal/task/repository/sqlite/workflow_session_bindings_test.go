@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/stretchr/testify/require"
 )
 
@@ -274,4 +277,15 @@ func countWorkflowDeleteTestSteps(t *testing.T, repo *Repository, workflowID str
 		SELECT COUNT(*) FROM workflow_steps WHERE workflow_id = ?
 	`), workflowID))
 	return count
+}
+
+func TestCreateStepForMissingWorkflowIsRejected(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	workflowRepo, err := workflowrepository.NewWithDB(repo.db, repo.db, nil)
+	require.NoError(t, err)
+
+	err = workflowRepo.CreateStep(context.Background(), &workflowmodels.WorkflowStep{
+		ID: "step-missing-workflow", WorkflowID: "wf-missing", Name: "Missing", Position: 0,
+	})
+	require.ErrorIs(t, err, repoerrors.ErrWorkflowNotFound)
 }
