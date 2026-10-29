@@ -1,4 +1,4 @@
-// Package process manages the agent subprocess lifecycle
+﻿// Package process manages the agent subprocess lifecycle
 package process
 
 import (
@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -114,6 +115,9 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	questionImageWorkDir     string
+	questionImageOnce        sync.Once
+	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
 	logger                   *logger.Logger
 	managedGitTools          installedManagedGitTools
@@ -123,6 +127,7 @@ type Manager struct {
 	// but unreadable journal is an admission error, never a legacy fallback.
 	deliveryJournal             *journal.Journal
 	deliveryJournalErr          error
+	deliveryLimit               int64
 	deliveryWriter              *deliveryEventWriter
 	shellDeliveryMu             sync.Mutex
 	shellDelivery               map[shellDeliveryKey]shellDeliveryBaseline
@@ -135,6 +140,9 @@ type Manager struct {
 	deliveryActiveMu            sync.RWMutex
 	deliveryActiveID            string
 	deliveryHealth              DeliveryHealth
+	deliveryFailureRevision     atomic.Uint64
+	deliveryFailedSubmissionID  string
+	deliveryFailureDrain        time.Duration
 	deliveryPausedWriters       int
 	deliveryBlocked             bool
 	deliveryPressureCancelledID string
@@ -183,9 +191,9 @@ type Manager struct {
 	//
 	// Mutated post-launch by RescanRepositories (multi-branch add) while other
 	// goroutines (gateway subscribe/unsubscribe, poll-mode updates) iterate
-	// the slice — every read and write must go through repoTrackersMu.
+	// the slice ??every read and write must go through repoTrackersMu.
 	// workspaceTracker is also guarded by the same lock because rescan can
-	// swap it when transitioning single→multi mode.
+	// swap it when transitioning single?뭢ulti mode.
 	repoTrackers   []*WorkspaceTracker
 	repoTrackersMu sync.RWMutex
 	// workspaceSourceRoots is the canonical durable-source allowlist used both
@@ -202,15 +210,14 @@ type Manager struct {
 	// readers while a rescan is in flight.
 	rescanMu sync.Mutex
 	// workspacePollMode is the most recent mode the gateway pushed for this
-	// workspace. Trackers created after that point — rescan, rebind or
-	// reconcile adding a repository to a workspace that is already focused —
-	// inherit it, because no further push arrives unless the session's own
+	// workspace. Trackers created after that point ??rescan, rebind or
+	// reconcile adding a repository to a workspace that is already focused ??	// inherit it, because no further push arrives unless the session's own
 	// mode changes.
 	//
 	// Guarded by repoTrackersMu rather than a mutex of its own: the mode and
 	// the tracker set have to move together. A separate lock let a tracker read
 	// the mode, then get registered after a concurrent push had already
-	// snapshotted the set — adopting a stale mode with its grace timer disarmed,
+	// snapshotted the set ??adopting a stale mode with its grace timer disarmed,
 	// with nothing left to correct it.
 	workspacePollMode    PollMode
 	workspacePollModeSet bool
@@ -220,17 +227,12 @@ type Manager struct {
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
 
-	// Question image support
-	questionImageWorkDir string
-	questionImageOnce    sync.Once
-	questionImageSlots   chan struct{}
-
 	// baseBranchesMu guards mutations to cfg.BaseBranches so the
 	// UpdateBaseBranches writer doesn't race with the rescan-path and
 	// lazy-subpath readers that look up per-repo overrides via
 	// lookupBaseBranch. Two existing mutexes already cover the trackers
 	// themselves (repoTrackersMu, workspaceTrackersMu) but each guards a
-	// different field — without this dedicated lock the writer could
+	// different field ??without this dedicated lock the writer could
 	// publish a new map under repoTrackersMu while a reader walked the
 	// same map under workspaceTrackersMu.
 	baseBranchesMu sync.RWMutex
@@ -340,7 +342,7 @@ type Manager struct {
 	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
-	// created so the flag always describes the current channel — a Start that
+	// created so the flag always describes the current channel ??a Start that
 	// fails before reaching that point must not leave the flag describing a
 	// channel that no longer exists.
 	stopChClosed     atomic.Bool
@@ -450,6 +452,7 @@ func (m *Manager) BeginStop() {
 
 // NewManager creates a new process manager
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
+	imageWorkDir, _ := filepath.EvalSymlinks(cfg.WorkDir)
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
 	updatesChannelCapacity := cfg.DetachedEventLimit
 	if updatesChannelCapacity <= 0 {
@@ -457,6 +460,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
+		questionImageWorkDir:       imageWorkDir,
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
 		managedGitTools:            installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
@@ -472,6 +476,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
+			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
 		}
@@ -566,7 +571,8 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if err != nil {
 		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
-	return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
+	capability := journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
+	return capability.WithLimits(m.deliveryJournal)
 }
 
 // DeliveryRecoveryDescriptor returns the authenticated instance's durable
@@ -982,14 +988,13 @@ func (m *Manager) WorkspaceSourceRoots() []string {
 // lookupBaseBranch reads the task's recorded base branch for a given
 // repository name from the per-instance map. The empty key "" addresses the
 // single-repo / root tracker. Falls back to the empty-key entry when the
-// per-repo entry is missing — preserves single-repo behavior for tasks
+// per-repo entry is missing ??preserves single-repo behavior for tasks
 // that record only one base branch under the legacy unkeyed slot.
 //
 // Each value is re-sanitised through SanitizeGitRef before it leaves the
 // function. The map was sanitised at the HTTP boundary and again on
 // SetBaseBranch, but static analysis (CodeQL `go/command-injection`)
-// loses the sanitised state across map writes and field stores —
-// transforming the value at every read point keeps the source→sink path
+// loses the sanitised state across map writes and field stores ??// transforming the value at every read point keeps the source?뭩ink path
 // covered no matter which entry point the analyser walks.
 func lookupBaseBranch(branches map[string]string, repoName string) string {
 	if len(branches) == 0 {
@@ -1209,7 +1214,7 @@ func (m *Manager) stopWorkspaceTrackers() {
 // UnsubscribeWorkspaceStream to detach and close.
 //
 // For single-repo workspaces this is equivalent to
-// GetWorkspaceTracker().SubscribeWorkspaceStream() — the per-repo list is
+// GetWorkspaceTracker().SubscribeWorkspaceStream() ??the per-repo list is
 // empty and only the root tracker fires events.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
@@ -1246,7 +1251,7 @@ func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber
 // at {WorkDir}/{subpath}. Empty subpath returns the root tracker.
 //
 // Per-subpath trackers are created lazily on first request and cached. They
-// are NOT started (no polling goroutines) — the multi-repo path uses them
+// are NOT started (no polling goroutines) ??the multi-repo path uses them
 // only for synchronous git-status queries via GetCurrentGitStatus, which
 // falls through to getGitStatus when no cache is present. This keeps the
 // per-repo cost cheap while preserving the long-running polling behavior of
@@ -1282,11 +1287,11 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 // active tracker with the new value for its repositoryName, then triggers a
 // non-blocking RefreshGitStatus on each so the UI sees the new
 // BaseCommit/Ahead/Behind without waiting for the next poll tick. Idempotent
-// for unchanged values (RefreshGitStatus is cheap — it's the same call the
+// for unchanged values (RefreshGitStatus is cheap ??it's the same call the
 // frontend already makes after stage/unstage).
 //
 // Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
-// map via lookupBaseBranch — no second push needed for them.
+// map via lookupBaseBranch ??no second push needed for them.
 func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
 	m.setBaseBranches(branches)
 
@@ -1305,7 +1310,7 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 
 	// Stamp the new baseBranch on each tracker synchronously so the field is
 	// visible to the next poll, but kick the RefreshGitStatus probes
-	// (which can each spawn 3–5 git subprocesses) onto a background
+	// (which can each spawn 3?? git subprocesses) onto a background
 	// goroutine. The HTTP handler that called us doesn't need to block on
 	// per-tracker git work; the picker UI re-fetches via the existing WS
 	// stream once Refresh emits a new GitStatusUpdate. Detach from the
@@ -1448,8 +1453,8 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 }
 
 // newTrackerForRepo builds a per-repo tracker that inherits the workspace's
-// current poll mode. Used for every tracker created after launch — rescan and
-// lazy subpath creation — because the gateway only pushes on a session mode
+// current poll mode. Used for every tracker created after launch ??rescan and
+// lazy subpath creation ??because the gateway only pushes on a session mode
 // transition: a repository added to a workspace that is already focused would
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
@@ -1469,7 +1474,7 @@ func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTrack
 // critical section that publishes the trackers. Reading the mode and
 // registering the tracker have to be one step: otherwise a SetWorkspacePollMode
 // running in between stores a new mode and fans it out to a tracker set that
-// does not include this one yet, so the tracker adopts the stale mode — and
+// does not include this one yet, so the tracker adopts the stale mode ??and
 // because SetPollMode marks it as pushed and disarms the grace timer, nothing
 // ever corrects it. It would poll at the wrong cadence for the life of the
 // process, which is the exact failure the grace timer exists to prevent.
@@ -1487,14 +1492,14 @@ func (m *Manager) applyWorkspacePollModeLocked(trackers ...*WorkspaceTracker) {
 // SetWorkspacePollMode propagates a poll-mode change to the root tracker and
 // every per-repo tracker, then forces a RefreshGitStatus on each non-paused
 // tracker so a fresh snapshot reaches every subscriber. Without the refresh,
-// monitorTick only pushes on detected change — multi-repo workspaces would
+// monitorTick only pushes on detected change ??multi-repo workspaces would
 // leave the per-repo state map sparse (one repo present, the other missing)
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// Reject before storing, not just before applying. Every tracker already
 	// ignores an invalid mode, so an invalid push is harmless to the trackers
-	// that exist — but recording it would overwrite the last valid one, and
+	// that exist ??but recording it would overwrite the last valid one, and
 	// trackers created afterwards inherit what is stored. A single malformed
 	// push would leave every later tracker on its construction default, and
 	// applyWorkspacePollModeLocked could not tell that apart from a workspace
@@ -1509,7 +1514,7 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// is what makes the two safe against each other: a tracker is either already
 	// registered and gets this push, or it is registered afterwards and reads
 	// this mode when it does. Anything in between would leave it on a stale mode
-	// with its grace timer disarmed — see applyWorkspacePollModeLocked.
+	// with its grace timer disarmed ??see applyWorkspacePollModeLocked.
 	//
 	// SetPollMode is a mutex update plus a non-blocking wake-up, so holding the
 	// lock across the fan-out costs nothing. RefreshGitStatus is the slow part
@@ -1530,7 +1535,7 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	if mode == PollModePaused {
 		return
 	}
-	// Refresh in background — RefreshGitStatus blocks on git commands which
+	// Refresh in background ??RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
 		if root != nil {
@@ -1817,7 +1822,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	}
 
 	// One-shot adapters manage their own subprocess per prompt.
-	// Skip process creation — the adapter spawns processes in Prompt().
+	// Skip process creation ??the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
 		if err := m.startOneShot(); err != nil {
 			return 0, err
@@ -1958,17 +1963,18 @@ func (m *Manager) buildAdapterConfig() error {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
-		Extra:                     map[string]string{"allow_archived_thread_restore": lookupEnvValue(m.cfg.AgentEnv, "KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY")},
-		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.adapterAutoApprove(),
-		McpServers:                mcpServers,
-		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:              m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
-		RequiresProcessKill:       m.cfg.RequiresProcessKill,
-		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
-		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
+		WorkDir:                    m.cfg.WorkDir,
+		AutoApprove:                m.adapterAutoApprove(),
+		McpServers:                 mcpServers,
+		AgentID:                    m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:               m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:              m.cfg.AssumeMcpHttp,
+		RequiresProcessKill:        m.cfg.RequiresProcessKill,
+		NotificationQueueCapacity:  m.cfg.NotificationQueueCapacity,
+		AgentBackgroundWorkEnabled: m.cfg.AgentBackgroundWorkEnabled,
+		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
+		PromptSuggestions:          m.cfg.PromptSuggestions,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2011,7 +2017,7 @@ func (m *Manager) buildAdapterConfig() error {
 	// Strip agent-declared environment variables from the final child process
 	// environment entirely (not just set to empty). Applied after adapter env
 	// merge so that adapter-injected values are also stripped. Some programs
-	// distinguish unset from empty string — see RuntimeConfig.StripEnv docs.
+	// distinguish unset from empty string ??see RuntimeConfig.StripEnv docs.
 	for _, key := range m.cfg.StripEnv {
 		m.cfg.AgentEnv = utility.RemoveEnvEntry(m.cfg.AgentEnv, key)
 	}
@@ -2278,7 +2284,7 @@ func lookupEnvValue(env []string, key string) string {
 
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
-// continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
+// continueCommand is optional ??when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
 	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
 }
@@ -2485,43 +2491,75 @@ func (m *Manager) createAdapter() error {
 	return nil
 }
 
-// forwardUpdates forwards updates from the adapter to the manager's channel
+// forwardUpdates forwards updates from the adapter to the manager's channel.
 func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-chan struct{}) {
 	defer m.wg.Done()
 	defer m.closeDeliveryEventWriter()
 
 	updatesCh := agentAdapter.Updates()
+	var suppressedSubmissionID string
+	suppressOrdinaryOutput := false
+	var pending *adapter.AgentEvent
 	for {
-		select {
-		case update, ok := <-updatesCh:
-			if !ok {
-				return
-			}
-			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
-			persisted, err := m.persistDeliveryEvent(update)
-			if err != nil {
-				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
-				// A configured journal is the commit-before-publish boundary. Stop
-				// forwarding when it cannot commit so the backend never observes an
-				// event that cannot be replayed after a disconnect.
-				return
-			}
-			update = persisted
-			if update.Type == "" {
-				continue
-			}
-			m.recordTerminalOutcome(&update)
-			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
-				m.signalDeliveryWakeup()
-				continue
-			}
+		var update adapter.AgentEvent
+		var ok bool
+		if pending != nil {
+			update, ok = *pending, true
+			pending = nil
+		} else {
 			select {
-			case m.updatesCh <- update:
+			case update, ok = <-updatesCh:
 			case <-stopCh:
+				m.drainDeliveryUpdates(updatesCh)
 				return
 			}
+		}
+		if !ok {
+			return
+		}
+		update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+		if suppressOrdinaryOutput && !isTerminalDeliveryEvent(update) {
+			if update.DeliverySubmissionID == "" || update.DeliverySubmissionID == suppressedSubmissionID {
+				continue
+			}
+		}
+		persisted, err := m.persistDeliveryEvent(update)
+		if err != nil {
+			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
+			// Capture the failure before cancellation, then keep the sole
+			// adapter consumer alive through a bounded drain so an actual
+			// terminal can still settle the retained submission.
+			suppressedSubmissionID = update.DeliverySubmissionID
+			suppressOrdinaryOutput = true
+			m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
+			cont, terminalCommitted, carried := m.drainAfterDeliveryFailure(updatesCh, stopCh, suppressedSubmissionID)
+			if !cont {
+				return
+			}
+			if terminalCommitted {
+				suppressedSubmissionID = ""
+				suppressOrdinaryOutput = false
+			}
+			pending = carried
+			continue
+		}
+		if suppressOrdinaryOutput && (isTerminalDeliveryEvent(persisted) ||
+			(persisted.DeliverySubmissionID != "" && persisted.DeliverySubmissionID != suppressedSubmissionID)) {
+			suppressedSubmissionID = ""
+			suppressOrdinaryOutput = false
+		}
+		update = persisted
+		if update.Type == "" {
+			continue
+		}
+		m.recordTerminalOutcome(&update)
+		if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
+			m.signalDeliveryWakeup()
+			continue
+		}
+		select {
+		case m.updatesCh <- update:
 		case <-stopCh:
-			m.drainDeliveryUpdates(updatesCh)
 			return
 		}
 	}
@@ -2556,25 +2594,50 @@ func (m *Manager) closeDeliveryEventWriter() {
 	}
 }
 
+// persistDeliveryEvent establishes the journal commit-before-publish barrier.
+// The normalized event is kept as an opaque payload here; backend projection
+// remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
-	update = streams.BoundGenericToolEvent(update)
-	m.deliveryJournalMu.Lock()
+	m.deliveryJournalMu.RLock()
 	deliveryJournal := m.deliveryJournal
-	if deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
+	eventLimit := m.deliveryLimit
+	if eventLimit <= 0 && deliveryJournal != nil && m.deliveryJournalErr == nil {
+		eventLimit = deliveryJournal.MaxEventBytes()
+	}
+	m.deliveryJournalMu.RUnlock()
+	if eventLimit <= 0 {
+		eventLimit = deliverylimits.MaxEventBytes
+	}
+	limit := deliverylimits.DisplayBudgetFor(eventLimit)
+	update = streams.PrepareToolEventWithLimit(update, limit)
+	m.deliveryJournalMu.Lock()
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
+	if configured && deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
 		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
 		m.deliveryWriter = newDeliveryEventWriter(m)
 	}
 	writer := m.deliveryWriter
 	m.deliveryJournalMu.Unlock()
+	if !configured {
+		return update, nil
+	}
 	if deliveryJournal == nil {
 		_, err := m.DeliveryJournal()
+		if err != nil {
+			m.recordDeliveryWriteFailure(err, update, eventLimit)
+		}
 		return update, err
 	}
 	if writer != nil {
-		return writer.persist(context.Background(), update)
+		persisted, err := writer.persist(context.Background(), update)
+		if err != nil {
+			m.recordDeliveryWriteFailure(err, update, eventLimit)
+		}
+		return persisted, err
 	}
 	committed, err := m.persistDeliveryBatch(context.Background(), []adapter.AgentEvent{update})
 	if err != nil {
+		m.recordDeliveryWriteFailure(err, update, eventLimit)
 		return update, err
 	}
 	return committed[0], nil
@@ -2841,7 +2904,7 @@ func (m *Manager) stop(ctx context.Context) error {
 			// The agent process reaches StatusStopped on its own whenever the
 			// child exits without an explicit Stop (waitForExit stores it). The
 			// adapter and stopCh were never torn down in that case, so do it
-			// here — otherwise the adapter's update worker and forwardUpdates
+			// here ??otherwise the adapter's update worker and forwardUpdates
 			// stay alive for the lifetime of the manager. The call is a no-op
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
@@ -2954,8 +3017,7 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
-// Adapter.Close and stdin.Close are idempotent, so they run unconditionally —
-// that matters after a Start that failed once an adapter had already been
+// Adapter.Close and stdin.Close are idempotent, so they run unconditionally ??// that matters after a Start that failed once an adapter had already been
 // created. close(stopCh) is not idempotent and is guarded instead.
 //
 // It reports whether this call closed stopCh, i.e. whether goroutines were just
@@ -3056,7 +3118,7 @@ func (m *Manager) killProcessGroupIfRequired() {
 // waitForProcessExit waits for all goroutines to finish, force-killing on context timeout.
 //
 // On timeout the entire process group is killed (not just the leader) so that
-// child processes — most importantly MCP servers spawned by the agent — don't
+// child processes ??most importantly MCP servers spawned by the agent ??don't
 // re-parent to init and leak. setAgentProcGroup at command-build time puts the
 // agent in its own pgid; here we deliver SIGKILL to that pgid. If the command
 // leader exits before its descendants do, we still terminate the remaining
@@ -3922,9 +3984,9 @@ func (m *Manager) ListPendingPermissions() []streams.PendingAgentPermission {
 }
 
 // consumePermission is the single terminal-transition chokepoint for a live
-// permission request. Every path that can end a request generation — explicit
+// permission request. Every path that can end a request generation ??explicit
 // resolve, explicit cancel, the internal respond endpoint, or the request
-// context finishing — must go through this so exactly one caller observes a
+// context finishing ??must go through this so exactly one caller observes a
 // pending->resolving transition and delivers the response; every later caller
 // gets a stable error instead of silently "succeeding" against an entry
 // nobody is listening on anymore. optionalRequestID empty skips the identity
@@ -4192,7 +4254,7 @@ func mergeAgentEnvIntoShellConfigWithError(agentEnv []string, overrides map[stri
 
 // StartVscode starts the code-server process on a random OS-assigned port.
 // The VS Code server runs independently of the agent process.
-// Start is non-blocking — the caller should poll VscodeInfo() for status updates.
+// Start is non-blocking ??the caller should poll VscodeInfo() for status updates.
 func (m *Manager) StartVscode(_ context.Context, theme string) error {
 	release, err := m.admitStart()
 	if err != nil {
@@ -4280,8 +4342,7 @@ func (m *Manager) VscodeInfo() VscodeInfo {
 // VscodeOpenFile opens a file in the running VS Code instance via the Remote CLI.
 // If code-server is not running, it auto-starts it and waits for readiness.
 //
-// Note: there is a benign race between the needsStart check and WaitForRunning —
-// another goroutine could stop vscode in between. WaitForRunning handles this
+// Note: there is a benign race between the needsStart check and WaitForRunning ??// another goroutine could stop vscode in between. WaitForRunning handles this
 // correctly by returning an error for stopped/error states.
 func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
 	release, err := m.admitStart()
