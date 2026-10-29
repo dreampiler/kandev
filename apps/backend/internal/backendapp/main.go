@@ -2169,6 +2169,10 @@ func startSchedulingRuntime(
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
+	// Let the run processor settle an Office run whose deferred launch the
+	// session ceiling replayed or terminally dropped. The ceiling remains the
+	// only launcher; this only records the outcome on the run it queued.
+	orchestratorSvc.SetCeilingDeferredLaunchSettler(runProcessorSvc)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
