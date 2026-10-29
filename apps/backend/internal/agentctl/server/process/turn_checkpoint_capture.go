@@ -99,6 +99,7 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if existing, found, err := g.existingTurnCheckpoint(ctx, request, ref, hashAlgorithm); err != nil {
 		return turnchanges.CheckpointResult{}, err
 	} else if found {
+		existing.CommonGitDir, _ = g.turnCheckpointCommonDir(ctx)
 		return existing, nil
 	}
 	// Capture history before preparing the snapshot so a concurrent rebase
@@ -131,10 +132,14 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if _, err := g.turnCheckpointOutput(ctx, indexPath, "update-ref", ref, commitOID, zeroOID); err != nil {
 		return g.resolveTurnCheckpointRefRace(ctx, request, ref, hashAlgorithm, err)
 	}
+	commonDir, err := g.turnCheckpointCommonDir(ctx)
+	if err != nil {
+		return turnchanges.CheckpointResult{}, err
+	}
 	return turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,
-		ReachabilityRef: ref, CapturedAt: capturedAt, Provenance: provenance,
+		ReachabilityRef: ref, CommonGitDir: commonDir, CapturedAt: capturedAt, Provenance: provenance,
 	}, nil
 }
 
@@ -264,7 +269,7 @@ func (g *GitOperator) existingTurnCheckpoint(
 	if !validCheckpointOID(commitOID, hashAlgorithm) {
 		return turnchanges.CheckpointResult{}, false, turnCheckpointFailure(turnchanges.ReasonUnsafeGitState, errors.New("existing checkpoint ref points to an invalid object"))
 	}
-	treeOutput, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%T", commitOID)
+	treeOutput, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--verify", commitOID+"^{tree}")
 	if err != nil {
 		return turnchanges.CheckpointResult{}, false, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
 	}
@@ -701,4 +706,16 @@ func isTurnCheckpointGitBinding(key string) bool {
 		}
 	}
 	return false
+}
+
+func (g *GitOperator) turnCheckpointCommonDir(ctx context.Context) (string, error) {
+	output, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	commonDir, err := filepath.Abs(strings.TrimSpace(string(output)))
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(commonDir)
 }

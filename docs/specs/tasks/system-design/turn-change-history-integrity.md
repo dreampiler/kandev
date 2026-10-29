@@ -524,4 +524,3 @@ lost acknowledgements, stale claims, mixed active/completed turns, and cleanup r
 - [Decision](../../../decisions/2026-10-27-turn-change-history-integrity.md)
 - [Original delivery plan](../../../plans/turn-changed-files/plan.md)
 - [Fix plan](../../../plans/turn-change-history-integrity/plan.md)
-

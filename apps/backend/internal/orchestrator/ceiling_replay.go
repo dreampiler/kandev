@@ -220,6 +220,7 @@ func (s *Service) settleCeilingReplay(
 	switch result.outcome {
 	case ceilingReplaySucceeded:
 		claim.settle(ctx)
+		s.notifyCeilingDeferredLaunchReplayed(ctx, task.ID, deferral, result)
 		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplaySuperseded:
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
@@ -345,11 +346,9 @@ func (s *Service) evaluateCeilingStartDropReasons(
 }
 
 // dropCeilingDeferral terminally disposes of a deferred launch that will never
-// be retried. It fails the automation run the launch serves, if that run still
-// waits, and keeps the record when the run cannot be failed, so a later sweep
-// drops it again instead of leaving the run open with nothing to settle it. It
-// then writes a one-shot drop note where a session exists to carry it and
-// clears the record through the same settlement path an explicit discard uses.
+// be retried. It settles the served automation run and reports the drop to the
+// caller before it clears the record. A failed settlement retains the record
+// for a later sweep. It writes the one-shot status note only after the clear.
 func (s *Service) dropCeilingDeferral(
 	ctx context.Context, task *models.Task, sessionID string, deferral models.CeilingDeferral, reasonCode, detail string,
 ) {
@@ -359,25 +358,73 @@ func (s *Service) dropCeilingDeferral(
 		zap.String(ceilingFieldReasonCode, reasonCode),
 		zap.String("detail", detail))
 
-	s.discardCeilingDeferral(
+	outcome, _ := s.discardCeilingDeferral(
 		ctx, task, deferral, fmt.Sprintf("the queued launch was dropped: %s", detail),
-		func() {
-			if sessionID == "" || s.messageCreator == nil {
-				return
-			}
-			if err := s.messageCreator.CreateSessionMessage(
-				ctx, task.ID,
-				fmt.Sprintf("The queued launch for this session was dropped: %s.", detail),
-				sessionID, string(v1.MessageTypeStatus), "",
-				map[string]interface{}{metaKeyVariant: metaVariantCeiling, ceilingFieldReasonCode: reasonCode},
-				false,
-			); err != nil {
-				s.logger.Zap().Warn("could not write the ceiling drop card note",
-					zap.String("task_id", task.ID), zap.String("session_id", sessionID), zap.Error(err))
-			}
+		func() error {
+			return s.notifyCeilingDeferredLaunchDropped(ctx, task.ID, deferral, reasonCode, detail)
 		},
 		false,
 	)
+	if outcome != models.DeferredLaunchDiscardDiscarded || sessionID == "" || s.messageCreator == nil {
+		return
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, task.ID,
+		fmt.Sprintf("The queued launch for this session was dropped: %s.", detail),
+		sessionID, string(v1.MessageTypeStatus), "",
+		map[string]interface{}{metaKeyVariant: metaVariantCeiling, ceilingFieldReasonCode: reasonCode},
+		false,
+	); err != nil {
+		s.logger.Zap().Warn("could not write the ceiling drop card note",
+			zap.String("task_id", task.ID), zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+// notifyCeilingDeferredLaunchReplayed reports an admitted replay to the caller
+// that queued the launch. The notifier handles its own durable settlement.
+func (s *Service) notifyCeilingDeferredLaunchReplayed(
+	ctx context.Context, taskID string, deferral models.CeilingDeferral, result ceilingReplayResult,
+) {
+	if s.ceilingDeferredLaunchSettler == nil {
+		return
+	}
+	causingRunID := stringField(deferral.Payload, ceilingPayloadCausingRunIDKey)
+	if causingRunID == "" {
+		return
+	}
+	if err := s.ceilingDeferredLaunchSettler.CeilingDeferredLaunchReplayed(
+		ctx, taskID, causingRunID, result.sessionID, result.turnID,
+	); err != nil {
+		s.logger.Zap().Warn("ceiling replay: caller could not settle its deferred launch",
+			zap.String("task_id", taskID),
+			zap.String("causing_run_id", causingRunID),
+			zap.Error(err))
+	}
+}
+
+// notifyCeilingDeferredLaunchDropped reports a terminal drop to the caller that
+// queued the launch. The caller's settlement must succeed before the deferred
+// record is cleared.
+func (s *Service) notifyCeilingDeferredLaunchDropped(
+	ctx context.Context, taskID string, deferral models.CeilingDeferral, reasonCode, detail string,
+) error {
+	if s.ceilingDeferredLaunchSettler == nil {
+		return nil
+	}
+	causingRunID := stringField(deferral.Payload, ceilingPayloadCausingRunIDKey)
+	if causingRunID == "" {
+		return nil
+	}
+	if err := s.ceilingDeferredLaunchSettler.CeilingDeferredLaunchDropped(
+		ctx, taskID, causingRunID, reasonCode, detail,
+	); err != nil {
+		s.logger.Zap().Warn("ceiling drop: caller could not settle its deferred launch",
+			zap.String("task_id", taskID),
+			zap.String("causing_run_id", causingRunID),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // ceilingClearResult reports why a ceiling-record clear did or did not land.
@@ -697,6 +744,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		// auto_start alone would replay it as a manual override that bypasses
 		// the ceiling.
 		Origin:              launchOrigin(stringField(payload, "origin")),
+		CausingRunID:        stringField(payload, ceilingPayloadCausingRunIDKey),
 		AutomationRun:       automationRun,
 		ceilingEntryBinding: entryBinding,
 	}

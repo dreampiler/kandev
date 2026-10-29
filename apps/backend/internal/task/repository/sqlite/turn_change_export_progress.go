@@ -317,6 +317,7 @@ func (r *Repository) ListTurnChangeExportCandidates(ctx context.Context, now tim
 		SELECT `+turnRepositoryChangeColumns+`
 		FROM turn_repository_changes rc
 		WHERE rc.availability = ? AND rc.content_complete = ?
+		  AND rc.preservation_state = ''
 		  AND EXISTS (
 		    SELECT 1 FROM turn_change_sets cs
 		    WHERE cs.id = rc.change_set_id AND cs.availability = ?

@@ -200,10 +200,11 @@ func (s *Service) classifyUnclaimedDiscard(
 // automation start marker is removed inside the same task transaction as the
 // record clear. If that final write fails, the retained record can be cleared by
 // a retry or the next sweep; the already-settled run is not made launchable
-// again. onSettled runs after settlement and before the durable write.
+// again. onSettled runs after settlement and before the durable write. Its
+// error keeps the record when a caller-owned settlement is incomplete.
 func (s *Service) discardCeilingDeferral(
 	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
-	settlementReason string, onSettled func(), atomicOwnership bool,
+	settlementReason string, onSettled func() error, atomicOwnership bool,
 ) (models.DeferredLaunchDiscardOutcome, models.DeferredLaunchDiscardReason) {
 	if task == nil || task.ID == "" {
 		return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonClear
@@ -228,7 +229,9 @@ func (s *Service) discardCeilingDeferral(
 		releaseOwner = plan.owner
 	}
 	if onSettled != nil {
-		onSettled()
+		if err := onSettled(); err != nil {
+			return models.DeferredLaunchDiscardRetained, models.DeferredLaunchDiscardReasonSettlement
+		}
 	}
 	result, _ := s.clearCeilingDeferredRecordOutcome(ctx, task.ID, &deferral, true, releaseOwner)
 	switch result {
