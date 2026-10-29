@@ -36,14 +36,17 @@ failure detection.
   Kandev shall open the SQLite read-only pool with that value as both the
   maximum open and maximum idle connection count. An environment value shall
   win over a configured file value.
-- **AC-PLATFORM-SQLITE-READER-POOL-001.3:** When the override is unparseable,
-  below 1, or above 64, startup shall fail with an error naming
-  `database.sqliteReaderConns` before the reader pool is opened. The value
-  shall not be silently replaced, clamped, or ignored.
+- **AC-PLATFORM-SQLITE-READER-POOL-001.3:** When the SQLite driver is
+  selected and the override is unparseable, below 1, or above 64, startup
+  shall fail with an error naming `database.sqliteReaderConns` before the
+  reader pool is opened. The value shall not be silently replaced, clamped, or
+  ignored. A PostgreSQL selection shall not fail startup because of this
+  setting.
 - **AC-PLATFORM-SQLITE-READER-POOL-001.4:** The override shall be resolved once
-  at startup and shall not apply to PostgreSQL. It shall not change the
-  single-connection SQLite writer pool, transaction admission, DSNs, or
-  pragmas.
+  at startup and shall not apply to PostgreSQL. A PostgreSQL startup shall
+  remain unaffected by an invalid or out-of-range value for this setting. The
+  override shall not change the single-connection SQLite writer pool,
+  transaction admission, DSNs, or pragmas.
 - **AC-PLATFORM-SQLITE-READER-POOL-001.5:** Reader pool sizing shall not change
   required-store probe interval, probe timeout, probe failure hysteresis,
   destructive unavailability marking, or the immediate fail-closed response to

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -410,26 +409,4 @@ func readFileForTest(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return contents
-}
-
-func TestProvideAppliesSQLiteReaderPoolSize(t *testing.T) {
-	for _, test := range []struct {
-		configured int
-		want       int
-	}{{configured: 0, want: 4}, {configured: 7, want: 7}} {
-		t.Run(strconv.Itoa(test.configured), func(t *testing.T) {
-			cfg := &config.Config{
-				HomeDir:  t.TempDir(),
-				Database: config.DatabaseConfig{SQLiteReaderConns: test.configured},
-			}
-			pool, cleanup, err := Provide(cfg, nil, "")
-			if err != nil {
-				t.Fatalf("Provide: %v", err)
-			}
-			t.Cleanup(func() { _ = cleanup() })
-			if got := pool.Reader().Stats().MaxOpenConnections; got != test.want {
-				t.Fatalf("reader MaxOpenConnections = %d, want %d", got, test.want)
-			}
-		})
-	}
 }

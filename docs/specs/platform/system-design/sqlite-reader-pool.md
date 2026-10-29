@@ -36,9 +36,13 @@ catalog and validation conventions:
 - The built-in default is four.
 - Accepted configured values are integers from one through 64.
 - A configured-file value outside that range fails startup validation and names
-  the selected file and key.
-- An environment value is parsed strictly; an unparseable or out-of-range value
-  fails startup instead of falling back to the default.
+  the selected file and key when the SQLite driver is selected.
+- An environment value is parsed strictly when the SQLite driver is selected;
+  an unparseable or out-of-range value fails startup instead of falling back to
+  the default.
+- Validation is driver-scoped. A PostgreSQL selection keeps its existing
+  startup behavior even if the SQLite-only key or environment variable is
+  invalid; the value is not used by the PostgreSQL provider.
 - The value is resolved once during `config.Load`. It is not watched, polled, or
   exposed as a live runtime setting.
 
@@ -70,7 +74,9 @@ a busy-classification bypass.
 
 The PostgreSQL provider continues to use one pool for writer and reader roles.
 `database.sqliteReaderConns` has no effect there, and no PostgreSQL behavior
-changes with this design.
+changes with this design. The strict environment parse and configured-file
+range check apply only when the selected driver is SQLite, so an unused
+SQLite-only value cannot reject a PostgreSQL startup.
 
 ## Verification
 

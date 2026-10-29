@@ -400,8 +400,12 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 
 // applySQLiteReaderConnsEnv validates the startup-only SQLite reader pool
 // override strictly: an invalid or out-of-range value fails startup instead
-// of silently falling back to the default.
+// of silently falling back to the default. The setting only applies to
+// SQLite, so a PostgreSQL selection must keep its existing startup behavior.
 func applySQLiteReaderConnsEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	if !sqliteReaderConnsApplies(cfg) {
+		return nil
+	}
 	return applyStrictIntEnv(
 		sqliteReaderConnsKey,
 		&cfg.Database.SQLiteReaderConns,
@@ -410,6 +414,15 @@ func applySQLiteReaderConnsEnv(cfg *Config, env map[string]string, sources map[s
 		env,
 		sources,
 	)
+}
+
+// sqliteReaderConnsApplies reports whether the selected database driver uses
+// the SQLite reader pool. The driver is normalized later by validate, so treat
+// an empty value as the SQLite default and compare case-insensitively. An
+// invalid driver is left to the existing driver validation.
+func sqliteReaderConnsApplies(cfg *Config) bool {
+	driver := strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+	return driver == "" || driver == "sqlite"
 }
 
 func applyDeliveryRetentionEnvironment(cfg *Config, env map[string]string, sources map[string]SettingSource) error {

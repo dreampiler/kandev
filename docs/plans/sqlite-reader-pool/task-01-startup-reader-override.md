@@ -68,7 +68,14 @@ See [plan](plan.md#risks).
 Implemented `database.sqliteReaderConns` (`KANDEV_SQLITE_READER_CONNS`) with a
 default of four, strict range one through 64, and environment-over-YAML
 precedence. Added `OpenSQLiteReaderWithConns`, wired persistence to the typed
-value, and documented the setting. Focused backend tests cover the default,
-override, boundaries, rejection, actual open and idle counts, and persistence
-wiring; existing required-store tests continue to cover immediate fail-closed
-behavior.
+value, and documented the setting. Strict parsing and range validation apply
+only when SQLite is selected, so an invalid SQLite-only value cannot reject a
+PostgreSQL startup.
+
+New-behavior checks ran from a temporary Go overlay outside the permanent test
+tree and were removed after execution. They covered the default, override,
+boundaries, rejection, actual open and idle counts, persistence wiring, and
+PostgreSQL startup with invalid values. Existing package tests continue to
+cover immediate fail-closed behavior. The catalog audited-inventory line is the
+minimum consistency update for the existing catalog contract; a permanent
+feature test would be a separate proposal.
