@@ -635,11 +635,17 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
 		return err
 	}
+	return s.deleteStep(ctx, step.WorkflowID, stepID)
+}
+
+// deleteStep removes a step for an already-authorized internal operation.
+// User-facing mutations must use DeleteStep so they pass executor and access checks.
+func (s *Service) deleteStep(ctx context.Context, workflowID, stepID string) error {
 	// Clear any move_to_step references to this step
-	if err := s.repo.ClearStepReferences(ctx, step.WorkflowID, stepID); err != nil {
+	if err := s.repo.ClearStepReferences(ctx, workflowID, stepID); err != nil {
 		s.logger.Error("failed to clear step references",
 			zap.String("step_id", stepID),
-			zap.String("workflow_id", step.WorkflowID),
+			zap.String("workflow_id", workflowID),
 			zap.Error(err))
 		return err
 	}
@@ -652,7 +658,7 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 	s.logger.Info("deleted workflow step and cleared references",
 		zap.String("step_id", stepID),
-		zap.String("workflow_id", step.WorkflowID))
+		zap.String("workflow_id", workflowID))
 	return nil
 }
 

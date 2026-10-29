@@ -138,7 +138,7 @@ func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.Prompt = "Old shared instructions."
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
 
 	// Update prompt from portable definition.
 	updated := portableWorkflow("Dev Flow", "Todo")
@@ -172,8 +172,8 @@ func TestApplySyncedWorkflows_UpdatesMatchedWorkflowPreservingStepIDs(t *testing
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
-	createStep(t, svc, &models.WorkflowStep{ID: "step-done", WorkflowID: wf.ID, Name: "Done", Position: 1})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-done", WorkflowID: wf.ID, Name: "Done", Position: 1})
 
 	// New definition: Todo keeps its identity but moves color/position,
 	// "Review" is inserted, "Done" survives at position 2.
@@ -204,8 +204,8 @@ func TestApplySyncedWorkflows_RemovedStepWithTasksBlocksUpdate(t *testing.T) {
 	svc, provider, ops := setupSyncService(t)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
-	createStep(t, svc, &models.WorkflowStep{ID: "step-legacy", WorkflowID: wf.ID, Name: "Legacy", Position: 1})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-legacy", WorkflowID: wf.ID, Name: "Legacy", Position: 1})
 	ops.tasksPerStep["step-legacy"] = 2
 
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
@@ -226,8 +226,8 @@ func TestApplySyncedWorkflows_RemovedStepWithoutTasksIsDeleted(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
-	createStep(t, svc, &models.WorkflowStep{ID: "step-legacy", WorkflowID: wf.ID, Name: "Legacy", Position: 1})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-legacy", WorkflowID: wf.ID, Name: "Legacy", Position: 1})
 
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
 		{Path: "flows/dev.yml", Export: exportOf(portableWorkflow("Dev Flow", "Todo"))},
@@ -303,7 +303,7 @@ func TestApplySyncedWorkflows_DuplicateStepNamesInDefinitionWarn(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
 
 	pw := models.WorkflowPortable{
 		Name: "Dev Flow",
@@ -468,7 +468,8 @@ func TestApplySyncedWorkflows_RecreatesLocallyDeletedStep(t *testing.T) {
 	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Dev Flow")
 	require.NoError(t, err)
 	require.Len(t, steps, 2)
-	require.NoError(t, svc.DeleteStep(ctx, steps[1].ID))
+	// Simulate local data drift without using the guarded user mutation path.
+	require.NoError(t, svc.repo.DeleteStep(ctx, steps[1].ID))
 
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
 	require.NoError(t, err)
@@ -553,7 +554,7 @@ func TestApplySyncedWorkflows_RebindingStepAgentProfileLogsWarning(t *testing.T)
 	svc, provider, _ := setupSyncServiceWithLogger(t, log)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true,
 		AgentProfileID: "profile-old",
 	})
@@ -602,7 +603,7 @@ func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.
 
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true,
 		AgentProfileID: "profile-old",
 	})
@@ -638,7 +639,7 @@ func TestApplySyncedWorkflows_RebindingWorkflowAgentProfileLogsWarning(t *testin
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.AgentProfileID = "profile-old"
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
 
 	pw := portableWorkflow("Dev Flow", "Todo")
 	pw.AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
@@ -683,7 +684,7 @@ func TestApplySyncedWorkflows_WorkflowRebindWarningDoesNotFireOnFailedUpdate(t *
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.AgentProfileID = "profile-old"
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
 
 	pw := portableWorkflow("Dev Flow", "Todo")
 	pw.AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
@@ -717,7 +718,7 @@ func TestApplySyncedWorkflows_StepMatcherReceivesCurrentBinding(t *testing.T) {
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.Description = "synced Dev Flow" // must already match pw's description below, or the workflow itself counts as changed
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", IsStartStep: true,
 		AgentProfileID: "profile-disabled",
 	})
@@ -753,7 +754,7 @@ func TestApplySyncedWorkflows_StepProfileUnbindWarnsWithEmptyNewID(t *testing.T)
 	svc, provider, _ := setupSyncServiceWithLogger(t, log)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true,
 		AgentProfileID: "profile-old",
 	})
