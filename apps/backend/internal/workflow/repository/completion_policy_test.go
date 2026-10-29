@@ -338,7 +338,8 @@ func TestHoldStageTypeBackfillScopesToDefaultNature(t *testing.T) {
 			{"id":"t-review","name":"Paused","position":2,"stage_type":"review"},
 			{"id":"t-approval","name":"Hold","position":3,"stage_type":"approval"},
 			{"id":"t-none","name":"보류","position":4},
-			{"id":"t-number","name":"Paused","position":5,"stage_type":123}
+			{"id":"t-number","name":"Paused","position":5,"stage_type":123},
+			{"id":"t-null","name":"Paused","position":6,"stage_type":null}
 		]', datetime('now'), datetime('now'));
 		CREATE TABLE workflow_steps (
 			id TEXT PRIMARY KEY,
@@ -432,6 +433,7 @@ func TestHoldStageTypeBackfillScopesToDefaultNature(t *testing.T) {
 		"t-review":   "review",
 		"t-approval": "approval",
 		"t-number":   "",
+		"t-null":     "",
 	} {
 		got, _ := templateStage(id)
 		if got != want {
@@ -440,6 +442,9 @@ func TestHoldStageTypeBackfillScopesToDefaultNature(t *testing.T) {
 	}
 	if _, rawType := templateStage("t-number"); string(rawType) != "123" {
 		t.Fatalf("template non-string stage_type = %s, want 123", rawType)
+	}
+	if _, rawType := templateStage("t-null"); string(rawType) != "null" {
+		t.Fatalf("template null stage_type = %s, want null", rawType)
 	}
 
 	var marker string

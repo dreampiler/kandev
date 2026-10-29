@@ -198,16 +198,16 @@ func normalizeTemplateHoldStageType(data []byte) ([]byte, bool, error) {
 }
 
 // templateStageTypeIsDefault reports whether a template step states no nature or
-// the default "custom". A value that is not a string states something, so it is
-// left alone rather than overwritten.
+// the default "custom". A JSON null or a value that is not a string states
+// something, so it is left alone rather than overwritten.
 func templateStageTypeIsDefault(step map[string]json.RawMessage) bool {
 	raw, ok := step["stage_type"]
 	if !ok {
 		return true
 	}
-	var stageType string
-	if err := json.Unmarshal(raw, &stageType); err != nil {
+	var stageType *string
+	if err := json.Unmarshal(raw, &stageType); err != nil || stageType == nil {
 		return false
 	}
-	return stageType == "" || stageType == string(models.StageTypeCustom)
+	return *stageType == "" || *stageType == string(models.StageTypeCustom)
 }
