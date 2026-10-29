@@ -69,7 +69,8 @@ Implemented `database.sqliteReaderConns` (`KANDEV_SQLITE_READER_CONNS`) with a
 default of four, strict range one through 64, and environment-over-YAML
 precedence. Added `OpenSQLiteReaderWithConns`, wired persistence to the typed
 value, and documented the setting. Strict parsing and range validation apply
-only when SQLite is selected, so an invalid SQLite-only value cannot reject a
+only when SQLite is selected, and the raw YAML value is parsed after driver
+selection, so an invalid or nonnumeric SQLite-only value cannot reject a
 PostgreSQL startup.
 
 New-behavior checks ran from a temporary Go overlay outside the permanent test

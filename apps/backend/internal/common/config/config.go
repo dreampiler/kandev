@@ -399,8 +399,9 @@ type DatabaseConfig struct {
 	MaxConns int    `mapstructure:"maxConns"`
 	MinConns int    `mapstructure:"minConns"`
 	// SQLiteReaderConns is the SQLite read-only pool size. It is resolved
-	// once at startup and ignored for PostgreSQL.
-	SQLiteReaderConns int `mapstructure:"sqliteReaderConns"`
+	// once at startup and ignored for PostgreSQL. The raw YAML value is parsed
+	// after driver selection so a PostgreSQL selection cannot fail decoding.
+	SQLiteReaderConns int `mapstructure:"-"`
 }
 
 // NATSConfig holds NATS messaging configuration.
@@ -915,6 +916,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applySQLiteReaderConnsYAML(&cfg, v, yamlKeys, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applySQLiteReaderConnsEnv(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

@@ -66,14 +66,16 @@ default of four and an accepted range of one through 64. The value is applied to
 both reader maximum open and idle connections through
 `OpenSQLiteReaderWithConns`; the writer pool and required-store health behavior
 are unchanged. Strict parsing and range validation are driver-scoped, so an
-invalid SQLite-only value does not reject a PostgreSQL startup.
+invalid SQLite-only value does not reject a PostgreSQL startup. The typed field
+skips direct unmarshalling; the raw YAML value is parsed after driver selection,
+so a nonnumeric YAML value also cannot fail a PostgreSQL startup.
 
 Verification used one-off Go overlay tests outside the permanent test tree.
 They covered the default, YAML and environment overrides, environment-over-YAML
 precedence, boundaries, invalid values, actual open and idle counts,
-persistence wiring, and PostgreSQL startup with invalid YAML and environment
-values. The temporary files and overlay were removed after the run. No new
-permanent behavior test was added.
+persistence wiring, and PostgreSQL startup with invalid and nonnumeric YAML and
+environment values. The temporary files and overlay were removed after the run.
+No new permanent behavior test was added.
 
 The catalog's audited environment inventory line for
 `KANDEV_SQLITE_READER_CONNS` remains in `catalog_test.go`. It is the minimum

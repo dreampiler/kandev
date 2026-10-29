@@ -326,7 +326,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
 	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
-	setDefaultInt(sqliteReaderConnsKey, &cfg.Database.SQLiteReaderConns, sqliteReaderConnsDefault)
+	cfg.Database.SQLiteReaderConns = sqliteReaderConnsDefault
 	setDefaultInt("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10)
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
@@ -396,6 +396,26 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
 	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
+}
+
+// applySQLiteReaderConnsYAML parses the raw configured value after the driver
+// is known. The typed field deliberately skips direct unmarshalling so a
+// nonnumeric SQLite-only YAML value cannot fail a PostgreSQL startup.
+func applySQLiteReaderConnsYAML(cfg *Config, v *viper.Viper, yamlKeys map[string]bool, sources map[string]SettingSource) error {
+	if !yamlKeys[sqliteReaderConnsKey] || !sqliteReaderConnsApplies(cfg) {
+		return nil
+	}
+	raw := v.Get(sqliteReaderConnsKey)
+	parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
+	if err != nil {
+		return fmt.Errorf("%s: invalid integer %v", sqliteReaderConnsKey, raw)
+	}
+	if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
+		return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+	}
+	cfg.Database.SQLiteReaderConns = parsed
+	sources[sqliteReaderConnsKey] = SourceConfiguration
+	return nil
 }
 
 // applySQLiteReaderConnsEnv validates the startup-only SQLite reader pool
