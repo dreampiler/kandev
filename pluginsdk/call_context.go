@@ -61,21 +61,9 @@ func (o *pluginCallOrigins) bind(ctx context.Context, agentTool bool) (context.C
 	}, nil
 }
 
-// Plugin-owned startup storage/configuration keeps its existing capability
-// checks. Every other (including future) Host operation requires an origin.
-func hostOperationNeedsCaller(method string) bool {
-	switch method {
-	case pluginv1.Host_GetState_FullMethodName, pluginv1.Host_SetState_FullMethodName,
-		pluginv1.Host_DeleteState_FullMethodName, pluginv1.Host_ListState_FullMethodName,
-		pluginv1.Host_GetConfig_FullMethodName, pluginv1.Host_RevealSecret_FullMethodName,
-		pluginv1.Host_GetSecret_FullMethodName, pluginv1.Host_SetSecret_FullMethodName,
-		pluginv1.Host_DeleteSecret_FullMethodName, pluginv1.Host_EmitEvent_FullMethodName:
-		return false
-	default:
-		return true
-	}
-}
-
+// Plugin-owned startup storage/configuration and capability-scoped Host
+// operations keep their existing checks; conversation domain operations are
+// classified in host_call_classification.go.
 func (o *pluginCallOrigins) intercept(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	if !o.enabled() {
 		return handler(ctx, req)
