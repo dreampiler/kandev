@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-NATIVE-CODE-REVIEW-001
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001
 ---
 
 # Abandoned native review admission
@@ -41,6 +42,19 @@ that entry identity can start fresh work.
 AC-AGENTS-NATIVE-CODE-REVIEW-001.14 is satisfied by the task claim, classified
 native settlement, terminal readback and retained entry-ID deduplication. No
 schema, timer, provider retry policy or public command is added.
+
+AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001.1 through .3 are satisfied by the
+task-bound local source fallback. `ReviewChangeSource` keeps its agentctl read
+and, only when that read errors, reads the session's own persisted worktree
+through `CollectLocalChanges` (`internal/review/local_source.go`). The backend
+reader (`internal/backendapp/review_local_source.go`) admits only `local`,
+`worktree`, and `local_pc` executors; a remote executor still requires agentctl.
+Reads keep the existing per-file, per-output, and total byte limits and reject a
+worktree path that is not an absolute local path or that carries a `..` segment,
+so no caller-supplied filesystem path is accepted. Reads include the working
+tree, staging-area (index) changes the working tree no longer shows, and
+untracked files, distinct from the committed base-to-head range, and keep
+multi-repository files scoped to their own repository.
 
 
 ## Permanent verification
