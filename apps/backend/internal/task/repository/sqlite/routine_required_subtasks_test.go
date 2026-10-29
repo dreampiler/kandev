@@ -122,6 +122,10 @@ func TestLegacyRequiredSubtaskMetadataDoesNotChangeCompletion(t *testing.T) {
 	}{
 		{name: "legacy number", metadata: `{"required_subtask_count":3}`},
 		{name: "legacy string", metadata: `{"required_subtask_count":"three"}`},
+		{name: "empty metadata", metadata: ""},
+		{name: "whitespace metadata", metadata: " \n\t "},
+		{name: "malformed legacy metadata", metadata: "not-json"},
+		{name: "json null metadata", metadata: "null"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := "legacy-" + strings.ReplaceAll(tc.name, " ", "-")
@@ -137,6 +141,18 @@ func TestLegacyRequiredSubtaskMetadataDoesNotChangeCompletion(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, batch.ByTaskID[id])
 			require.NoError(t, repo.UpdateTaskState(ctx, id, v1.TaskStateCompleted))
+		})
+	}
+}
+
+func TestRequiredSubtaskCountFailsClosedForMalformedTrustedMetadata(t *testing.T) {
+	for _, raw := range []string{
+		`{"kandev.office_required_subtask_count":"three"}`,
+		`{"kandev.office_required_subtask_count":`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := requiredSubtaskCount(raw)
+			require.ErrorContains(t, err, "read required subtask assignments")
 		})
 	}
 }
