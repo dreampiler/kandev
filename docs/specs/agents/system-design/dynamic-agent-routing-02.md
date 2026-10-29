@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-29
 owners:
   - cfl
 ---
@@ -183,6 +183,18 @@ require the current exclusive probe lease.
   cannot release the route while no runtime backs it, and no other pass
   recovers it. A live executor row, an unreadable row, a stale generation, and
   any other parked state keep the existing exclusion.
+- Queue delivery treats a route that awaits a user action as a delivery
+  block, not a launch in progress (`REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`,
+  AC 001.15 and 001.16). The automatic drain cores skip a session whose route
+  is `action_required` and which has no `executors_running` row, next to the
+  existing session-recovery-block skip. A queued dispatch that still reaches
+  `ensureSessionRunning` and fails because a WAITING_FOR_INPUT session's
+  `starting` route has no executor row applies the orphan-sweep release at
+  that moment, then restores the entry for manual recovery instead of
+  requeueing it. The route recovery banner is the visible block, and the
+  successor launch from Retry or Try next drains the retained entry. A session
+  without a dynamic route keeps the runtime-unavailable requeue, because its
+  missing executor row can belong to a launch that has not run yet.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.
