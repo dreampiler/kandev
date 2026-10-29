@@ -2855,6 +2855,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if req.Prompt == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
+	if req.DeliveryMode == "report" {
+		if req.ReplyToQuestionID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
+		}
+		return h.handleWorkspaceCollaborationReport(ctx, msg, req.TaskID, req.SessionID, req.Prompt)
+	}
 	if req.SenderTaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sender_task_id is required (the calling agent's MCP server must supply this)", nil)
 	}
