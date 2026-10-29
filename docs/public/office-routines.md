@@ -82,6 +82,8 @@ dispatch. The endpoint returns `409` in that state, or if a scheduler claim or
 another schedule edit wins the update race. Reload after that dispatch's normal
 re-arm and apply the edit again. Do not replace the trigger or replay a routine
 to work around this response. Invalid cron expressions or timezones return `400`.
+Sending values that already match the saved schedule writes nothing, so it does
+not move or skip the pending next fire.
 
 
 Set the routine status to **Paused** when you want to suspend that routine. Use **Archived** when it should leave active use. To stop all Office work in a workspace, including event-driven wakes and manual routine launches, use the [workspace pause](office-operations.md#pause-and-resume-a-workspace).

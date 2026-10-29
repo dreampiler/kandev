@@ -40,11 +40,18 @@ part of the update.
 The service reads the current trigger from the writer connection, applies the
 requested fields, prepares the next fire with the existing trigger helper, and
 writes the next row with a compare-and-set on the trigger identity plus
-`cron_expression`, `timezone`, `enabled`, and `next_run_at`. When the observed
-`next_run_at` is null, the predicate requires the stored value to still be null
-(`next_run_at IS NULL`); otherwise it requires the stored value to equal the
-observed value. A re-armed non-null value therefore cannot match a null
-observation, and a changed non-null value cannot match the old value.
+`cron_expression`, `timezone`, `enabled`, `next_run_at`, and `updated_at`. When
+the observed `next_run_at` is null, the predicate requires the stored value to
+still be null (`next_run_at IS NULL`); otherwise it requires the stored value to
+equal the observed value. A re-armed non-null value therefore cannot match a null
+observation, and a changed non-null value cannot match the old value. The
+`updated_at` comparison also rejects a competing edit that has since restored the
+same schedule values.
+
+When the requested fields already equal the stored fields, the service writes
+nothing and returns the stored row, leaving `next_run_at` and `updated_at`
+untouched. A fire that is due but not yet claimed is therefore never skipped by a
+repeated enable or an otherwise unchanged update.
 
 A scheduler claim clears `next_run_at`; a stored value that no longer equals the
 observed value does not match and the update returns 409 rather than overwriting
@@ -62,6 +69,8 @@ already claimed.
 
 ## Testing
 
-The endpoint is covered by the existing Office route scope inventory and by the
-PR's manual/preview checks. A dedicated compare-and-set unit test is a follow-up
-outside the documentation-coverage change.
+The endpoint is covered by the existing Office route scope inventory. Regression
+tests live with the existing routine handler and repository test files: a no-op
+update preserves a pending fire, a schedule edit preserves identity and history,
+an invalid schedule returns 400, a webhook toggle disables the trigger, and a
+claimed or stale revision returns 409.
