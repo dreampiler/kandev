@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	agenttypes "github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
 )
 
@@ -15,10 +16,11 @@ var errDeliveryPressure = errors.New("durable delivery requires recovery before 
 // DeliveryHealth is independent of the native process status. A live process
 // with blocked output must remain reachable for status, replay, ACK, and Stop.
 type DeliveryHealth struct {
-	State               string           `json:"state"`
-	ProducerPaused      bool             `json:"producer_paused"`
-	Capacity            journal.Capacity `json:"capacity"`
-	CancellationPending bool             `json:"cancellation_pending"`
+	State               string                              `json:"state"`
+	ProducerPaused      bool                                `json:"producer_paused"`
+	Capacity            journal.Capacity                    `json:"capacity"`
+	CancellationPending bool                                `json:"cancellation_pending"`
+	Failure             *agenttypes.DeliveryFailureSnapshot `json:"failure,omitempty"`
 }
 
 const deliveryStorageError = "storage_error"
