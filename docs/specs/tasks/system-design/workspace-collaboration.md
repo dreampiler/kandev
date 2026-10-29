@@ -107,10 +107,16 @@ ledger, global principal or task identity supplied by a plugin is introduced.
 The SDK forwards metadata only from the handler's incoming context. Authors must
 retain that context when calling Host; dropping it cannot confer background
 authority. Domain Host calls with missing, expired, canceled or other-plugin
-references fail closed while enabled. Plugin-owned state/config/secrets/events
-retain existing capability rules for startup work. An unidentified startup job
-cannot use domain data authority while enabled; an actual native RPC callback
-can. Off keeps the original native path and stored grants.
+references fail closed while enabled. Plugin-owned capabilities retain their
+existing capability rules for startup and detached work: state, config,
+secrets, events, capability context, plugin-owned task trees, managed agent
+conversations and schedules, managed inputs, executor progress and artifacts,
+declared source-issue writeback, utility agents, and profile catalogs. An
+unidentified job cannot use conversation domain authority while enabled; an
+actual native RPC callback can. The SDK classifies every Host service method
+explicitly, an unclassified method defaults to requiring a caller, and a test
+fails when the generated service and the classification diverge. Off keeps the
+original native path and stored grants.
 
 While enabled, plugin-authored `plugin.<id>.*` events carry a host-installed
 envelope containing the emitting plugin and its opaque live call reference.

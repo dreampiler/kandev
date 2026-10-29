@@ -202,3 +202,22 @@ The existing `pr-docs.cjs.validateCoverage` accepted the final 20 changed paths
 and four document bodies with `status: covered`, `errors: []`. Diff whitespace
 checks passed. The integration owner retains the probe sources and raw red/green
 outputs until readback and owns cleanup and normal commit hooks.
+
+## Integration correction (2026-10-29)
+
+The fixed method list that excluded only state/config/secrets/events made every
+newer plugin-owned Host operation require a caller. Detached and background
+plugin work therefore failed with `PermissionDenied` when collaboration was
+enabled even though those capabilities had kept native authority before the
+feature. The SDK now classifies every Host service method explicitly:
+conversation-domain task, workspace, session, message, interaction, and
+execution operations require the originating server context; plugin-owned
+capability operations keep their existing rules.
+
+The committed broker tests cover the generated-service classification, a
+background plugin-owned call succeeding while enabled, a background
+conversation-domain call and a dropped handler context staying closed while
+enabled, a forwarded handler context reaching the Host, and the disabled path
+keeping native background behavior. The existing event-origin, concurrent
+caller, cancellation, expired-reference, and real-domain probe results remain
+valid because the restore and fail-closed paths are unchanged.
