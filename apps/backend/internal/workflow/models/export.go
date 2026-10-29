@@ -390,6 +390,9 @@ func (e *WorkflowExport) Validate() error {
 		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
+			if step.StageType != "" && !step.StageType.IsValid() {
+				return fmt.Errorf("workflow %d step %d: unsupported stage type %q", i, j, step.StageType)
+			}
 			if err := validatePortableProfile(step.AgentProfile, e.Version); err != nil {
 				return fmt.Errorf("workflow %d step %d agent profile: %w", i, j, err)
 			}
