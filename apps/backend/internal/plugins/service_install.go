@@ -445,15 +445,15 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
 	}
 	if rec.InstallationID != "" {
-		if err := s.deletePluginChangeRequests(ctx, rec.InstallationID); err != nil {
-			s.reconcileAbortedUninstall(id, wasRunning)
-			return fmt.Errorf("plugins: uninstall aborted, could not purge plugin task change requests: %w", err)
-		}
 		if managed := s.managedAgentConversationDeps(); managed != nil {
 			if err := managed.DetachManagedForInstallation(ctx, rec.InstallationID); err != nil {
 				s.reconcileAbortedUninstall(id, wasRunning)
 				return fmt.Errorf("plugins: uninstall aborted, could not detach managed conversation transcripts: %w", err)
 			}
+		}
+		if err := s.deletePluginChangeRequests(ctx, rec.InstallationID); err != nil {
+			s.reconcileAbortedUninstall(id, wasRunning)
+			return fmt.Errorf("plugins: uninstall aborted, could not purge plugin task change requests: %w", err)
 		}
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
