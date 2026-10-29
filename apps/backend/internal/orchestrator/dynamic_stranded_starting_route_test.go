@@ -208,14 +208,14 @@ func TestQueuedDispatchToStrandedStartingRouteMarksActionRequired(t *testing.T) 
 func newStrandedQueueFixture(
 	t *testing.T,
 	taskID, sessionID, executionID string,
-) (*sqliterepo.Repository, *Service, chan struct{}) {
+) (*sqliterepo.Repository, *Service, chan struct{}, *dynamicruntime.Engine) {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
-	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	seedEngine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
 	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, seedEngine, true))
@@ -227,7 +227,7 @@ func newStrandedQueueFixture(
 	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, recoveryEngine, true))
 	workerDone := make(chan struct{}, 4)
 	svc.onQueuedMessageExecutionComplete = func() { workerDone <- struct{}{} }
-	return repo, svc, workerDone
+	return repo, svc, workerDone, recoveryEngine
 }
 
 func TestStrandedQueuedDispatchDoesNotChangeReplacementRoute(t *testing.T) {
@@ -238,7 +238,7 @@ func TestStrandedQueuedDispatchDoesNotChangeReplacementRoute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			const taskID, sessionID = "task-replaced-route", "session-replaced-route"
-			repo, svc, _ := newStrandedQueueFixture(t, taskID, sessionID, "execution-replaced-route")
+			repo, svc, _, _ := newStrandedQueueFixture(t, taskID, sessionID, "execution-replaced-route")
 			identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 			require.NoError(t, err)
 			_, err = svc.messageQueue.QueueMessageWithMetadata(
@@ -297,7 +297,7 @@ func TestQueuedDispatchToStrandedStartingRouteReleasesDurableReservation(t *test
 		sessionID   = "session-stranded-durable-queue"
 		executionID = "execution-stranded-durable-queue"
 	)
-	repo, svc, workerDone := newStrandedQueueFixture(t, taskID, sessionID, executionID)
+	repo, svc, workerDone, _ := newStrandedQueueFixture(t, taskID, sessionID, executionID)
 
 	_, err := svc.messageQueue.QueueMessageWithMetadata(
 		ctx, sessionID, taskID, "hello", "", "user", false, nil,
@@ -362,7 +362,7 @@ func TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible(t *testing.T) {
 		sessionID   = "session-stranded-route-barrier"
 		executionID = "execution-stranded-route-barrier"
 	)
-	baseRepo, svc, workerDone := newStrandedQueueFixture(t, taskID, sessionID, executionID)
+	baseRepo, svc, workerDone, routeEngine := newStrandedQueueFixture(t, taskID, sessionID, executionID)
 	paused := &pausedActionRequiredRouteRepo{
 		Repository: baseRepo,
 		sessionID:  sessionID,
@@ -438,7 +438,12 @@ func TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible(t *testing.T) {
 	// normal readiness drain must deliver the restored entry to the provider.
 	agentMgr, ok := svc.agentManager.(*mockAgentManager)
 	require.True(t, ok)
+	retried, err := routeEngine.ResumePendingNow(ctx, sessionID, 1)
+	require.NoError(t, err, "Retry must claim the route before its successor starts")
+	require.Equal(t, dynamicRouteStatusRetrying, retried.Status)
 	seedExecutorRunning(t, baseRepo, sessionID, taskID, "execution-route-successor")
+	require.NoError(t, svc.markDynamicRouteActive(ctx, sessionID, 1),
+		"the ready successor must activate the claimed route")
 	require.True(t, svc.drainQueuedMessageForPromptableSession(ctx, sessionID),
 		"the successor readiness event must admit the restored entry")
 	select {
