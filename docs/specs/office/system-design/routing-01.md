@@ -233,17 +233,20 @@ runs (routing additions)
   When the ceiling replay admits the launch, the run is bound to the replayed
   session and its routing block is cleared, so the ordinary lifecycle events
   finish it. If that settlement write fails, the replayed launch's ready event
-  carries the same `causing_run_id` and retries the settlement, so the run is
-  not stranded after the deferral is cleared. If the launch's completion
-  arrives before that ready recovery, the completion path finishes the exact
-  parked row atomically instead of claiming it after its execution has
-  stopped; a ready claim that wins concurrently is finished through the normal
-  claimed-run completion path. When the ceiling terminally drops the deferral,
-  the run is failed with the drop reason. If both settlement triggers fail, the
-  run stays parked and visible; an operator must not clear its routing block by
-  hand, because a manual clear re-queues the run and can launch it a second
-  time. An explicit discard action for the pending task deferral is a separate
-  operator contract.
+  carries the same `causing_run_id` and retries the settlement. Lifecycle keeps
+  a separate `terminal_causing_run_id` after it consumes `causing_run_id` on
+  the first ready event. A new prompt clears that terminal identity. This lets
+  delayed terminal events identify only the launch that created them. If the
+  launch's completion arrives before ready recovery, the completion path
+  finishes that exact parked row atomically. If a failure arrives first, the
+  service settles that exact parked row and applies the normal Office failure
+  policy. Error cleanup cannot mark the run successful. A terminal drop fails
+  the parked run with the drop reason. The orchestrator keeps the durable
+  deferral until the caller accepts a drop settlement; a failed write can be
+  retried by the ceiling sweep. If settlement still fails after replay, the run
+  stays parked and visible. An operator must not clear its routing block by
+  hand because a manual clear can start a second launch. An explicit discard
+  action for the pending task deferral is a separate operator contract.
 
   ### `office_run_route_attempts` (per run, per attempt)
 

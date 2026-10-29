@@ -50,6 +50,7 @@ type ExportReceipt struct {
 	FileCount   int64
 	ExportBytes int64
 	Complete    bool
+	Pending     bool
 	Reason      turnchanges.ReasonCode
 }
 
@@ -95,6 +96,7 @@ func (s *ContentService) ExportAndStore(ctx context.Context, exporter Exporter, 
 	}
 	receipt.ExportBytes = stored.StoredBytes
 	receipt.Complete = receipt.Complete && stored.Complete
+	receipt.Pending = stored.Pending
 	if receipt.Reason == "" {
 		receipt.Reason = stored.Reason
 	}
@@ -185,8 +187,7 @@ func checkpointFileSummary(repositoryChangeID, checkoutID string, file turnchang
 		Kind:      file.Kind, OldBlobOID: file.OldOID, NewBlobOID: file.NewOID,
 		OldMode: file.OldMode, NewMode: file.NewMode, Submodule: file.Submodule, Binary: file.Binary,
 		AddedLines: file.Added, DeletedLines: file.Deleted,
-		ContentAvailability: models.TurnChangeAvailabilityUnavailable,
-		ContentReason:       models.TurnChangeReasonContentUnavailable,
+		ContentAvailability: models.TurnChangeAvailabilityPending,
 	}
 	if utf8.Valid(modelFile.PathBytes) {
 		modelFile.Path = string(modelFile.PathBytes)

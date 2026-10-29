@@ -24,6 +24,7 @@ type recordingCeilingSettler struct {
 	mu       sync.Mutex
 	replayed []recordedCeilingReplay
 	dropped  []recordedCeilingDrop
+	dropErr  error
 }
 
 func (r *recordingCeilingSettler) CeilingDeferredLaunchReplayed(
@@ -41,7 +42,7 @@ func (r *recordingCeilingSettler) CeilingDeferredLaunchDropped(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.dropped = append(r.dropped, recordedCeilingDrop{taskID, causingRunID, reasonCode, detail})
-	return nil
+	return r.dropErr
 }
 
 func TestSeam1StartPayloadCarriesCausingRunID(t *testing.T) {
@@ -103,14 +104,14 @@ func TestCeilingDeferredNotificationsRequireCausingRunID(t *testing.T) {
 	deferral := models.CeilingDeferral{Payload: map[string]interface{}{}}
 
 	svc.notifyCeilingDeferredLaunchReplayed(context.Background(), "task", deferral, ceilingReplayResult{})
-	svc.notifyCeilingDeferredLaunchDropped(context.Background(), "task", deferral, "superseded", "detail")
+	require.NoError(t, svc.notifyCeilingDeferredLaunchDropped(context.Background(), "task", deferral, "superseded", "detail"))
 	require.Empty(t, settler.replayed)
 	require.Empty(t, settler.dropped)
 
 	deferral.Payload[ceilingPayloadCausingRunIDKey] = "office-run-1"
 	svc.notifyCeilingDeferredLaunchReplayed(context.Background(), "task", deferral,
 		ceilingReplayResult{sessionID: "session-1", turnID: "turn-1"})
-	svc.notifyCeilingDeferredLaunchDropped(context.Background(), "task", deferral, "superseded", "detail")
+	require.NoError(t, svc.notifyCeilingDeferredLaunchDropped(context.Background(), "task", deferral, "superseded", "detail"))
 
 	require.Len(t, settler.replayed, 1)
 	require.Equal(t, "office-run-1", settler.replayed[0].causingRunID)
@@ -119,4 +120,25 @@ func TestCeilingDeferredNotificationsRequireCausingRunID(t *testing.T) {
 	require.Len(t, settler.dropped, 1)
 	require.Equal(t, "office-run-1", settler.dropped[0].causingRunID)
 	require.Equal(t, "superseded", settler.dropped[0].reasonCode)
+}
+
+func TestCeilingDropRetainsRecordWhenCallerSettlementFails(t *testing.T) {
+	f := newLaunchFailureReplayFixture(t, "drop-settlement-task", errors.New("unused"))
+	ctx := context.Background()
+	deferral, err := models.ReadCeilingDeferral(deferredLaunchOf(t, f.svc, f.taskID))
+	require.NoError(t, err)
+	deferral.Payload[ceilingPayloadCausingRunIDKey] = "office-run-1"
+	_, prior, err := f.repo.GetTaskDeferredLaunch(ctx, f.taskID)
+	require.NoError(t, err)
+	_, _, err = f.repo.SetTaskDeferredLaunchIfUnchanged(ctx, f.taskID, prior, models.CeilingRecordKeys(deferral))
+	require.NoError(t, err)
+
+	settler := &recordingCeilingSettler{dropErr: errors.New("settlement write failed")}
+	f.svc.SetCeilingDeferredLaunchSettler(settler)
+	task, err := f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
+	f.svc.dropCeilingDeferral(ctx, task, "", deferral, "superseded", "destination changed")
+
+	require.True(t, f.ceilingDeferred(t), "a failed settlement must leave the deferral available for retry")
+	require.Len(t, settler.dropped, 1)
 }

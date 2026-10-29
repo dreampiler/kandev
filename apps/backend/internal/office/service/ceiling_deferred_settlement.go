@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 	"go.uber.org/zap"
 )
 
@@ -51,6 +54,63 @@ func (s *Service) settleCeilingDeferredRun(
 	return nil
 }
 
+func lifecycleCausingRunID(data AgentLifecycleData) string {
+	if data.TerminalCausingRunID != "" {
+		return data.TerminalCausingRunID
+	}
+	return data.CausingRunID
+}
+
+func lifecycleEventRunID(data AgentLifecycleData) string {
+	if data.RunID != "" {
+		return data.RunID
+	}
+	return lifecycleCausingRunID(data)
+}
+
+// resolveTerminalLifecycleRun uses the launch's retained identity before the
+// legacy task-and-agent lookup. A delayed terminal event must not settle a
+// successor run on the same task and agent.
+func (s *Service) resolveTerminalLifecycleRun(
+	ctx context.Context, data AgentLifecycleData,
+) (*runsmodels.Run, error) {
+	if data.RunID != "" {
+		return s.resolveLifecycleRun(ctx, data)
+	}
+	causingRunID := lifecycleCausingRunID(data)
+	if causingRunID == "" {
+		return s.resolveLifecycleRun(ctx, data)
+	}
+	data.RunID = causingRunID
+	return s.resolveLifecycleRun(ctx, data)
+}
+
+// recoverCeilingDeferredRunOnFailure restores a replayed run to the normal
+// claimed-run failure path when the launch fails before its ready event can
+// settle the ceiling deferral.
+func (s *Service) recoverCeilingDeferredRunOnFailure(
+	ctx context.Context, data AgentLifecycleData,
+) (*runsmodels.Run, error) {
+	runID := lifecycleCausingRunID(data)
+	if runID == "" || data.TaskID == "" || data.AgentProfileID == "" {
+		return nil, sql.ErrNoRows
+	}
+	deferred, err := s.isCeilingDeferredRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if !deferred {
+		return nil, sql.ErrNoRows
+	}
+	if err := s.settleCeilingDeferredRun(
+		ctx, data.TaskID, runID, data.SessionID, data.TurnID, data.AgentProfileID,
+	); err != nil {
+		return nil, err
+	}
+	data.RunID = runID
+	return s.resolveLifecycleRun(ctx, data)
+}
+
 // settleCeilingDeferredLaunchOnReady is the event-driven recovery path for a
 // ceiling replay whose synchronous settlement write failed. The replayed
 // launch's ready event carries the same Office causing run id, so the parked
@@ -82,20 +142,21 @@ func (s *Service) settleCeilingDeferredLaunchOnReady(
 func (s *Service) finishCeilingDeferredRunOnCompletion(
 	ctx context.Context, data *AgentLifecycleData,
 ) (bool, error) {
-	if data == nil || data.TaskID == "" || data.AgentProfileID == "" || data.SessionID == "" {
+	if data == nil || data.TaskID == "" || data.AgentProfileID == "" || data.SessionID == "" || data.ErrorMessage != "" {
 		return false, nil
 	}
-	runs, err := s.repo.ListCeilingDeferredRunsForTaskAndAgent(ctx, data.TaskID, data.AgentProfileID)
+	runID := lifecycleCausingRunID(*data)
+	if runID == "" {
+		return false, nil
+	}
+	run, err := s.repo.GetRunByID(ctx, runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	// No parked run, or more than one: do not guess which launch this
-	// completion belongs to.
-	if len(runs) != 1 {
-		return false, nil
-	}
-	run := runs[0]
-	if data.CausingRunID != "" && data.CausingRunID != run.ID {
+	if run.AgentProfileID != data.AgentProfileID || taskIDFromRunPayload(run.Payload) != data.TaskID {
 		return false, nil
 	}
 	deferred, err := s.isCeilingDeferredRun(ctx, run.ID)
@@ -137,6 +198,17 @@ func (s *Service) finishCeilingDeferredRunOnCompletion(
 // ceiling-deferral marker. The ready recovery accepts only this marker, so a
 // normal launch's ready event cannot release a run parked for another reason.
 func (s *Service) isCeilingDeferredRun(ctx context.Context, runID string) (bool, error) {
+	run, err := s.repo.GetRunByID(ctx, runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if string(run.Status) != RunStatusQueued || run.RoutingBlockedStatus == nil ||
+		*run.RoutingBlockedStatus != runsmodels.RoutingBlockedActionRequired {
+		return false, nil
+	}
 	events, err := s.repo.ListRunEvents(ctx, runID, -1, 0)
 	if err != nil {
 		return false, err

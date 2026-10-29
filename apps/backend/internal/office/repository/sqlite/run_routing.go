@@ -214,40 +214,6 @@ func (r *Repository) FailCeilingDeferredRun(
 	return &run, nil
 }
 
-// ListCeilingDeferredRunsForTaskAndAgent returns the queued runs a ceiling
-// deferral parked for one task and Office agent. The caller verifies the
-// durable deferral marker and refuses to guess when more than one row matches.
-func (r *Repository) ListCeilingDeferredRunsForTaskAndAgent(
-	ctx context.Context, taskID, agentProfileID string,
-) ([]runsmodels.Run, error) {
-	if taskID == "" || agentProfileID == "" {
-		return nil, nil
-	}
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
-		SELECT * FROM runs
-		WHERE status = 'queued'
-		  AND routing_blocked_status = ?
-		  AND agent_profile_id = ?
-		  AND %s = ?
-		ORDER BY requested_at DESC
-		LIMIT 2
-	`, dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id"))),
-		runsmodels.RoutingBlockedActionRequired, agentProfileID, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("run_routing: list ceiling deferrals: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := make([]runsmodels.Run, 0, 2)
-	for rows.Next() {
-		var run runsmodels.Run
-		if err := rows.StructScan(&run); err != nil {
-			return nil, fmt.Errorf("run_routing: scan ceiling deferral: %w", err)
-		}
-		out = append(out, run)
-	}
-	return out, rows.Err()
-}
-
 // FinishCeilingDeferredRunOnCompletion atomically finishes the exact parked run
 // whose completion event arrived before the ready-recovery claim. The row must
 // still be the queued ceiling-deferred run for this task and Office agent.
@@ -272,6 +238,7 @@ func (r *Repository) FinishCeilingDeferredRunOnCompletion(
 		WHERE id = ?
 		  AND status = 'queued'
 		  AND routing_blocked_status = ?
+		  AND (error_message IS NULL OR error_message = '')
 		  AND agent_profile_id = ?
 		  AND %s = ?
 		RETURNING *

@@ -101,6 +101,13 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	} else if found {
 		return existing, nil
 	}
+	// Capture history before preparing the snapshot so a concurrent rebase
+	// cannot pair old working-tree content with the new base. Verification
+	// after the snapshot rejects any movement in between.
+	provenance, err := g.captureTurnCheckpointProvenance(ctx, request, gitDir, hashAlgorithm)
+	if err != nil {
+		return turnchanges.CheckpointResult{}, err
+	}
 	indexPath, err := createTurnCheckpointIndex(gitDir)
 	if err != nil {
 		return turnchanges.CheckpointResult{}, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
@@ -113,8 +120,11 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if err := g.prepareTurnCheckpointIndex(ctx, indexPath, indexPresent); err != nil {
 		return turnchanges.CheckpointResult{}, err
 	}
-	treeOID, commitOID, capturedAt, err := g.writeTurnCheckpointCommit(ctx, indexPath, hashAlgorithm)
+	treeOID, commitOID, capturedAt, err := g.writeTurnCheckpointCommit(ctx, indexPath, hashAlgorithm, provenance)
 	if err != nil {
+		return turnchanges.CheckpointResult{}, err
+	}
+	if err := g.verifyTurnCheckpointProvenance(ctx, provenance, gitDir); err != nil {
 		return turnchanges.CheckpointResult{}, err
 	}
 	zeroOID := strings.Repeat("0", len(commitOID))
@@ -124,13 +134,14 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	return turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,
-		ReachabilityRef: ref, CapturedAt: capturedAt,
+		ReachabilityRef: ref, CapturedAt: capturedAt, Provenance: provenance,
 	}, nil
 }
 
 func (g *GitOperator) writeTurnCheckpointCommit(
 	ctx context.Context,
 	indexPath, hashAlgorithm string,
+	provenance *turnchanges.Provenance,
 ) (string, string, time.Time, error) {
 	treeOutput, err := g.turnCheckpointOutput(ctx, indexPath, "write-tree")
 	if err != nil {
@@ -140,8 +151,17 @@ func (g *GitOperator) writeTurnCheckpointCommit(
 	if !validCheckpointOID(treeOID, hashAlgorithm) {
 		return "", "", time.Time{}, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, errors.New("git write-tree returned an invalid object ID"))
 	}
+	message, err := encodeTurnCheckpointProvenance(provenance)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
 	capturedAt := time.Now().UTC().Truncate(time.Second)
-	commitOutput, err := g.turnCheckpointOutputWithEnvironment(ctx, indexPath, turnCheckpointCommitEnvironment(capturedAt), "commit-tree", treeOID, "-m", "Kandev turn change checkpoint")
+	args := []string{"commit-tree", treeOID}
+	for _, parent := range turnCheckpointParents(provenance) {
+		args = append(args, "-p", parent)
+	}
+	args = append(args, "-m", message)
+	commitOutput, err := g.turnCheckpointOutputWithEnvironment(ctx, indexPath, turnCheckpointCommitEnvironment(capturedAt), args...)
 	if err != nil {
 		return "", "", time.Time{}, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
 	}
@@ -260,11 +280,23 @@ func (g *GitOperator) existingTurnCheckpoint(
 	if err != nil {
 		return turnchanges.CheckpointResult{}, false, turnCheckpointFailure(turnchanges.ReasonUnsafeGitState, errors.New("existing checkpoint commit has invalid capture time"))
 	}
+	provenance, err := g.readTurnCheckpointProvenance(ctx, commitOID)
+	if err != nil {
+		return turnchanges.CheckpointResult{}, false, err
+	}
 	return turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,
-		ReachabilityRef: ref, CapturedAt: capturedAt.UTC(), Reused: true,
+		ReachabilityRef: ref, CapturedAt: capturedAt.UTC(), Reused: true, Provenance: provenance,
 	}, true, nil
+}
+
+func (g *GitOperator) readTurnCheckpointProvenance(ctx context.Context, commitOID string) (*turnchanges.Provenance, error) {
+	bodyOutput, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%B", commitOID)
+	if err != nil {
+		return nil, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
+	}
+	return parseTurnCheckpointProvenance(string(bodyOutput))
 }
 
 func (g *GitOperator) prepareTurnCheckpointIndex(ctx context.Context, indexPath string, indexPresent bool) error {
@@ -661,6 +693,8 @@ func isTurnCheckpointGitBinding(key string) bool {
 		"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
 		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_IMPLICIT_WORK_TREE", "GIT_PREFIX",
 		"GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+		"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_CONFIG_PARAMETERS",
+		"GIT_ATTR_SOURCE", "GIT_CONFIG_SYSTEM",
 	} {
 		if strings.HasPrefix(key, prefix) {
 			return true

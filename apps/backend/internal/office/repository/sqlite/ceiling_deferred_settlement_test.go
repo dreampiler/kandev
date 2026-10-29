@@ -109,6 +109,34 @@ func TestFailCeilingDeferredRun(t *testing.T) {
 	require.Equal(t, "the queued launch was dropped: superseded", got.ErrorMessage)
 }
 
+func TestFinishCeilingDeferredRunOnCompletionDoesNotClearAnError(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	seedAgentProfile(t, db, "agent-cap", "ws-cap")
+	ctx := context.Background()
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-cap",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"t-cap"}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	require.NoError(t, repo.CreateRun(ctx, run))
+	require.NoError(t, repo.ParkRunForProviderCapacity(
+		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{},
+	))
+	_, err := db.ExecContext(ctx, `UPDATE runs SET error_message = ? WHERE id = ?`, "agent failed", run.ID)
+	require.NoError(t, err)
+
+	finished, err := repo.FinishCeilingDeferredRunOnCompletion(ctx, run.ID, "session-1", "t-cap", "agent-cap", "processed")
+	require.NoError(t, err)
+	require.Nil(t, finished)
+	got, err := repo.GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "queued", string(got.Status))
+	require.Equal(t, "agent failed", got.ErrorMessage)
+	require.NotNil(t, got.RoutingBlockedStatus)
+}
+
 func TestSettleCeilingDeferredRunRejectsMismatchedTaskOrAgent(t *testing.T) {
 	repo, db := newTestRepoWithDB(t)
 	seedAgentProfile(t, db, "agent-cap", "ws-cap")

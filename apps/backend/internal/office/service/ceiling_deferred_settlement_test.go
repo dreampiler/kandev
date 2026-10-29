@@ -168,9 +168,10 @@ func TestAgentStoppedBeforeReadyRecoveryFinishesCeilingDeferredRun(t *testing.T)
 
 	// Completion arrives before the ready recovery: the run is still parked.
 	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
-		TaskID:         "t-cap",
-		SessionID:      "session-1",
-		AgentProfileID: "missing-agent",
+		TaskID:               "t-cap",
+		SessionID:            "session-1",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: run.ID,
 	})))
 
 	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
@@ -192,6 +193,54 @@ func TestAgentStoppedBeforeReadyRecoveryFinishesCeilingDeferredRun(t *testing.T)
 	require.Equal(t, service.RunStatusFinished, string(got.Status))
 }
 
+func TestAgentStoppedWithoutCausingRunDoesNotFinishCeilingDeferredRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
+		TaskID:         "t-cap",
+		SessionID:      "old-session",
+		AgentProfileID: "missing-agent",
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
+}
+
+func TestAgentFailedBeforeReadyFailsCeilingDeferredRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentFailed, bus.NewEvent(events.AgentFailed, "test", lifecycle.AgentEventPayload{
+		TaskID:               "t-cap",
+		SessionID:            "session-1",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: run.ID,
+		ErrorMessage:         "agent failed before ready",
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusFailed, string(got.Status))
+	require.Equal(t, "agent failed before ready", got.ErrorMessage)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
+		TaskID:               "t-cap",
+		SessionID:            "session-1",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: run.ID,
+		ErrorMessage:         "agent failed before ready",
+	})))
+	got, err = svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusFailed, string(got.Status), "failure cleanup must not convert the run to success")
+}
+
 func TestAgentReadyThenCompletionFinishesCeilingDeferredRun(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
@@ -204,9 +253,10 @@ func TestAgentReadyThenCompletionFinishesCeilingDeferredRun(t *testing.T) {
 		CausingRunID:   run.ID,
 	})))
 	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
-		TaskID:         "t-cap",
-		SessionID:      "session-1",
-		AgentProfileID: "missing-agent",
+		TaskID:               "t-cap",
+		SessionID:            "session-1",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: run.ID,
 	})))
 
 	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
@@ -215,6 +265,45 @@ func TestAgentReadyThenCompletionFinishesCeilingDeferredRun(t *testing.T) {
 	require.Equal(t, "session-1", got.SessionID)
 	require.Nil(t, got.RoutingBlockedStatus)
 	require.NotNil(t, got.FinishedAt)
+}
+
+func TestAgentStoppedStaleCauseDoesNotFinishSuccessorCeilingRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	successor := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
+		TaskID:               "t-cap",
+		SessionID:            "old-session",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: "already-finished-run",
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, successor.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
+}
+
+func TestAgentStoppedWithErrorDoesNotFinishCeilingDeferredRun(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	run := parkCeilingDeferredRun(t, svc)
+
+	require.NoError(t, eb.Publish(ctx, events.AgentStopped, bus.NewEvent(events.AgentStopped, "test", lifecycle.AgentEventPayload{
+		TaskID:               "t-cap",
+		SessionID:            "session-1",
+		AgentProfileID:       "missing-agent",
+		TerminalCausingRunID: run.ID,
+		ErrorMessage:         "agent failed before ready",
+	})))
+
+	got, err := svc.RepoForTest().GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.RunStatusQueued, string(got.Status))
+	require.NotNil(t, got.RoutingBlockedStatus)
+	require.Empty(t, got.SessionID)
 }
 
 func TestAgentStoppedWithAmbiguousCeilingRunsDoesNotGuess(t *testing.T) {

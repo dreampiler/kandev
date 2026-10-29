@@ -349,8 +349,10 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	}
 	if req.CausingRunID != "" {
 		metadata[MetadataKeyCausingRunID] = req.CausingRunID
+		metadata[MetadataKeyTerminalCausingRunID] = req.CausingRunID
 	} else {
 		delete(metadata, MetadataKeyCausingRunID)
+		delete(metadata, MetadataKeyTerminalCausingRunID)
 	}
 	delete(metadata, mcpprofile.ManagedToolPolicyMetadataKey)
 	if req.McpProfile != nil && req.McpProfile.ManagedToolPolicy != nil {

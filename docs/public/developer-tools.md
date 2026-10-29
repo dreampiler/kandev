@@ -101,7 +101,7 @@ Configuration Chat does not use repository selections. Its existing workspace pe
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
-Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. When you switch conversations or terminals, the selected tab is brought into view; you can scroll the tab row to browse others. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
 
 Your chats and their names are shared by every browser and device signed in to the same Kandev instance. Starting, renaming, or closing a chat on one device updates the others, and a device that was offline catches up when it reconnects.
 
@@ -194,7 +194,7 @@ If the session is broken, choose **Restart session** in the Settings panel heade
 <details>
 <summary>Saved prompt details</summary>
 
-Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
+Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content. Use search to find prompts by name or saved content.
 
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
@@ -310,7 +310,7 @@ availability is unknown. The repository picker is also unavailable in that case.
 
 For an idle, non-archived task with a prepared workspace, **Files → + → Add repositories or folders** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Local sources stay linked to the established workspace root; remote executors clone repository sources in their executor workspace and require a cloneable origin for local Git rows. Host folders are unavailable remotely, while **Upload folder** remains a separate copy flow when supported. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
-The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+The task **Files** panel browses, searches, opens, and edits task-worktree files. Directories appear before files, with numbered names in natural order (for example, `step2` before `step10`). In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
 On desktop and tablet, renaming or moving a file or its containing folder in **Files** keeps an open editor's unsaved text attached to the new path. Save writes that text to the renamed file. The editor's undo history may reset after a rename. If the destination is already open in a different editor, close that editor and retry. Renames made outside **Files** are not tracked by this behavior. The phone file viewer is read-only.
 

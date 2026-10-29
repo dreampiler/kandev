@@ -33,7 +33,9 @@ retry, park status, timed lift, or backfill.
   recovery and the launch's `AgentStopped`/completion event run in separate
   goroutines; completion can arrive first, find no claimed run, and be
   discarded. A later ready recovery then claims a run whose execution has
-  already stopped, with no later event to finish it.
+  already stopped, with no later event to finish it. The old completion
+  fallback could also guess from task and agent when the event had no launch
+  identity, and a pre-ready launch failure could be lost before recovery.
 
 ## Scope
 
@@ -46,12 +48,19 @@ retry, park status, timed lift, or backfill.
   `blocked_provider_action_required`, payload task, and Office agent.
 - Recover a failed replay-success settlement from the replayed launch's
   `AgentReady` event, gated by the durable ceiling-deferral marker.
+- Preserve the exact run identity for terminal lifecycle events after
+  `causing_run_id` is consumed by the first ready event. A new prompt clears
+  the terminal identity.
 - Finish the parked run directly when the launch's completion event arrives
   before the ready recovery. Completion and ready settlement are mutually
   exclusive exact-row transitions; completion retries the claimed-run lookup
   once if ready won the race.
-- Refuse to guess when more than one parked ceiling run matches the same task
-  and agent.
+- Route a pre-ready failure through the normal Office failure policy. A stop
+  event with an error cannot finish the run successfully.
+- Keep the ceiling deferral until the caller accepts a terminal-drop
+  settlement, then clear it before writing the one-shot drop note.
+- Check the exact run's queued/action-required state before reading its event
+  history for the ceiling marker.
 - Document the ceiling as the recovery owner and warn against manually
   clearing the routing block.
 
@@ -62,8 +71,7 @@ retry, park status, timed lift, or backfill.
   policy/contract proposal.
 - The taskless/execution-grade capacity work in `#4715` and the explicit
   discard contract in `#4508`.
-- The unrelated Vim/formatting and event-read efficiency suggestions on the
-  same PR.
+- Unrelated style suggestions on the same PR.
 
 ## Technical approach
 
@@ -73,7 +81,10 @@ and the Office routing design's deferred-launch section
 service observes the ceiling's replay outcome and performs an exact-row run
 transition; it never dispatches a new launch. The completion-before-ready
 ordering is a single parked-to-finished transition, so no run is left claimed
-after its execution has stopped.
+after its execution has stopped. Terminal events carry a retained launch
+identity so a delayed stop cannot finish a successor run. A pre-ready failure
+claims the exact parked run before normal Office failure handling. Drop
+settlement must succeed before the ceiling record is cleared.
 
 ## Work orders
 
@@ -81,9 +92,12 @@ after its execution has stopped.
 
 ## Validation
 
-- Focused Office service and repository tests cover replay attribution,
-  exact-row settlement, duplicate/stale no-ops, drop failure, ready recovery,
-  completion-before-ready, ready-then-completion, ambiguity refusal, and the
-  task/agent/marker guards.
-- `go build ./...`, `go vet` on the touched packages, changed-package lint,
-  documentation coverage, and normal commit hooks pass on the review head.
+- Focused tests passed for lifecycle identity, Office ready/stop/failure
+  settlement, repository error guards, watcher event decoding, and retained
+  ceiling records after failed drop settlement.
+- Documentation validation passed: `python3 scripts/list-docs.py validate`
+  and `python3 scripts/lint-spec-files.py --all`.
+- The broader five-package test run reached its 10-minute timeout in the
+  unrelated `TestStartupReconciliationPreservesOnlyExactPendingRemoteOwner`
+  test while it waited in SQLite. No assertion failure was reported for the
+  focused tests above.

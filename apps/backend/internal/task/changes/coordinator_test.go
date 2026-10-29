@@ -139,8 +139,12 @@ func TestLoadUnfinishedRepositoryRowsUsesOneBatchQuery(t *testing.T) {
 func TestTerminalOverlapClosureFailureIsLogged(t *testing.T) {
 	store := newCoordinatorStore()
 	changeSet := &models.TurnChangeSet{ID: "set-overlap-log", TaskID: "task", TaskSessionID: "session"}
+	startedAt := time.Now().Add(-time.Minute)
 	store.changeSets[changeSet.ID] = changeSet
-	store.unfinishedListErr = errors.New("overlap query failed")
+	store.repositoryRows[changeSet.ID] = []*models.TurnRepositoryChangeSet{{
+		ID: "row-overlap-log", TurnChangeSetID: changeSet.ID, CheckoutID: "checkout-1", StartCapturedAt: &startedAt,
+	}}
+	store.writerIntervalErr = errors.New("writer interval query failed")
 	core, logs := observer.New(zap.WarnLevel)
 	coordinator := NewCoordinator(store, nil, nil, nil, nil)
 	coordinator.SetLogger(zap.New(core))
@@ -149,7 +153,7 @@ func TestTerminalOverlapClosureFailureIsLogged(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 1, logs.Len())
-	require.Equal(t, "failed to close admitted turn-change overlap intervals", logs.All()[0].Message)
+	require.Equal(t, "failed to reconcile turn-change overlap intervals", logs.All()[0].Message)
 	require.Equal(t, changeSet.ID, logs.All()[0].ContextMap()["change_set_id"])
 }
 
@@ -292,7 +296,11 @@ func TestCoordinatorRestartReconciliationDoesNotCaptureAnEndEndpoint(t *testing.
 		SettingsUserID: "user-initiator", Enabled: true, ResolutionKind: turnchanges.PolicyAuthenticatedUser,
 	}}
 	client := &coordinatorCheckpointClient{}
-	coordinator := NewCoordinator(store, coordinatorTurnReader{}, policy, NewContentService(store, nil), nil)
+	completedAt := time.Now().UTC().Add(-time.Minute)
+	turns := coordinatorTurnReaderMap{"turn-1": {
+		ID: "turn-1", TaskID: "task-1", TaskSessionID: "session-1", CompletedAt: &completedAt,
+	}}
+	coordinator := NewCoordinator(store, turns, policy, NewContentService(store, nil), nil)
 	admission := coordinatorAdmission()
 	require.NoError(t, coordinator.Admit(context.Background(), admission, client))
 	require.NoError(t, coordinator.ReconcileUnfinished(context.Background()))
@@ -557,12 +565,19 @@ type coordinatorCheckpointClient struct {
 	exportCalls         int
 	checkpointRequests  []turnchanges.CheckpointRequest
 	comparisonFiles     []turnchanges.CheckpointFile
+	comparisonRequests  []turnchanges.CompareRequest
+	provenance          bool
 	exportErr           error
 	deleteRequests      []turnchanges.CheckpointDeleteRequest
 	deleteErr           error
 	waitCaptureBoundary turnchanges.CheckpointBoundary
 	waitCompare         bool
 	waitExport          bool
+	capturedAt          *time.Time
+	exportPages         []turnchanges.CheckpointExport
+	exportErrors        []error
+	exportPageIndex     int
+	exportPageBuilder   func(turnchanges.ExportRequest) *turnchanges.CheckpointExport
 }
 
 func (c *coordinatorCheckpointClient) TurnCheckpointRepositoryScopes(context.Context) ([]string, error) {
@@ -584,11 +599,23 @@ func (c *coordinatorCheckpointClient) CaptureTurnCheckpoint(ctx context.Context,
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	return &turnchanges.CheckpointResult{
+	capturedAt := time.Now().UTC()
+	if c.capturedAt != nil {
+		capturedAt = c.capturedAt.UTC()
+	}
+	result := &turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: "commit-" + string(request.Boundary), TreeOID: "tree-" + string(request.Boundary),
-		HashAlgorithm: "sha1", ReachabilityRef: "refs/kandev/turn-changes/test", CapturedAt: time.Now().UTC(),
-	}, nil
+		HashAlgorithm: "sha1", ReachabilityRef: "refs/kandev/turn-changes/test", CapturedAt: capturedAt,
+	}
+	if c.provenance {
+		result.Provenance = &turnchanges.Provenance{
+			Version: turnchanges.ProvenanceVersion2, ChangeSetID: request.ChangeSetID,
+			CheckoutID: request.CheckoutID, Boundary: request.Boundary, HashAlgorithm: "sha1",
+			HeadCommitOID: "commit-" + string(request.Boundary), HeadRef: "refs/heads/main",
+		}
+	}
+	return result, nil
 }
 
 func (c *coordinatorCheckpointClient) DeleteTurnCheckpoint(_ context.Context, request turnchanges.CheckpointDeleteRequest) error {
@@ -598,24 +625,47 @@ func (c *coordinatorCheckpointClient) DeleteTurnCheckpoint(_ context.Context, re
 
 func (c *coordinatorCheckpointClient) CompareTurnCheckpoints(ctx context.Context, request turnchanges.CompareRequest) (*turnchanges.CheckpointComparison, error) {
 	c.compareCalls++
+	c.comparisonRequests = append(c.comparisonRequests, request)
 	if c.waitCompare {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
 	added, deleted := int64(2), int64(1)
-	return &turnchanges.CheckpointComparison{
+	comparison := &turnchanges.CheckpointComparison{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID,
 		HashAlgorithm: request.HashAlgorithm, StartCommitOID: request.StartCommitOID, StartTreeOID: request.StartTreeOID,
 		EndCommitOID: request.EndCommitOID, EndTreeOID: request.EndTreeOID, FileCount: 1,
 		Files: c.comparisonFiles, AddedLines: &added, DeletedLines: &deleted, Complete: true,
-	}, nil
+	}
+	if request.ComparisonVersion == turnchanges.ComparisonVersion2 {
+		comparison.ComparisonVersion = turnchanges.ComparisonVersion2
+		comparison.ComparisonBasis = turnchanges.ComparisonDirect
+		comparison.EffectiveStartCommitOID = request.StartCommitOID
+		comparison.EffectiveStartTreeOID = request.StartTreeOID
+		comparison.EffectiveEndCommitOID = request.EndCommitOID
+		comparison.EffectiveEndTreeOID = request.EndTreeOID
+		comparison.ComparisonRef = "refs/kandev/turn-comparisons/test"
+	}
+	return comparison, nil
 }
 
 func (c *coordinatorCheckpointClient) ExportTurnCheckpoint(ctx context.Context, request turnchanges.ExportRequest) (*turnchanges.CheckpointExport, error) {
+	index := c.exportPageIndex
 	c.exportCalls++
+	c.exportPageIndex++
 	if c.waitExport {
 		<-ctx.Done()
 		return nil, ctx.Err()
+	}
+	if index < len(c.exportErrors) && c.exportErrors[index] != nil {
+		return nil, fmt.Errorf("export checkpoint: %w", c.exportErrors[index])
+	}
+	if c.exportPageBuilder != nil {
+		return c.exportPageBuilder(request), nil
+	}
+	if index < len(c.exportPages) {
+		page := c.exportPages[index]
+		return &page, nil
 	}
 	if c.exportErr != nil {
 		return nil, fmt.Errorf("export checkpoint: %w", c.exportErr)
@@ -635,6 +685,13 @@ type coordinatorStore struct {
 	contentStatuses           map[string]bool
 	finalizeFailuresRemaining int
 	unfinishedListErr         error
+	writerIntervalErr         error
+	completedAtByTurn         map[string]*time.Time
+	forceExportClaimLost      bool
+	exportStoreDelay          time.Duration
+	leaseReleaseDelay         time.Duration
+	leaseReleaseDeadline      time.Time
+	overlapCASConflicts       int
 	singleListCalls           int
 	batchListCalls            int
 }
@@ -790,6 +847,7 @@ func (s *coordinatorStore) AcceptTurnRepositoryEnd(_ context.Context, changeSetI
 			return false, nil
 		}
 		row.EndCommitOID, row.EndTreeOID, row.EndCapturedAt, row.EndReachabilityRef = end.EndCommitOID, end.EndTreeOID, end.EndCapturedAt, end.EndReachabilityRef
+		row.EndProvenanceJSON = end.EndProvenanceJSON
 		return true, nil
 	}
 	return false, nil
@@ -798,6 +856,7 @@ func (s *coordinatorStore) AcceptTurnRepositoryEnd(_ context.Context, changeSetI
 func (s *coordinatorStore) UpdateTurnChangeSetOverlaps(_ context.Context, changeSetID string, overlaps []models.TurnChangeOverlap) error {
 	if changeSet := s.changeSets[changeSetID]; changeSet != nil {
 		changeSet.OverlapIntervals = append([]models.TurnChangeOverlap(nil), overlaps...)
+		changeSet.Revision++
 	}
 	return nil
 }
@@ -838,6 +897,15 @@ func (s *coordinatorStore) FinalizeTurnChangeSet(_ context.Context, id string, r
 	changeSet.UnknownCountFileCount = finalization.UnknownCountFileCount
 	changeSet.RepositoryCount = finalization.RepositoryCount
 	changeSet.ContentBytes = finalization.ContentBytes
+	for index := range finalization.Repositories {
+		repositoryChange := finalization.Repositories[index]
+		for rowIndex, row := range s.repositoryRows[id] {
+			if row.ID != repositoryChange.ID {
+				continue
+			}
+			s.repositoryRows[id][rowIndex] = &repositoryChange
+		}
+	}
 	return true, nil
 }
 
@@ -866,7 +934,22 @@ func (s *coordinatorStore) AcquireTurnChangeContentLease(_ context.Context, id s
 	return &models.TurnChangeContentLease{ID: "lease", ChangeSetID: id}, nil
 }
 
-func (s *coordinatorStore) ReleaseTurnChangeContentLease(context.Context, string) error { return nil }
+func (s *coordinatorStore) ReleaseTurnChangeContentLease(ctx context.Context, _ string) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		s.leaseReleaseDeadline = deadline
+	}
+	if s.leaseReleaseDelay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(s.leaseReleaseDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 func (s *coordinatorStore) ApplyTurnChangeRetention(context.Context, models.TurnChangeRetentionPolicy, time.Time) (models.TurnChangeRetentionResult, error) {
 	return models.TurnChangeRetentionResult{}, nil
