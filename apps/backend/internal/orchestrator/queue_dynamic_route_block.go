@@ -28,10 +28,11 @@ func (s *Service) dynamicRouteAwaitsUserAction(ctx context.Context, session *mod
 	return errors.Is(err, models.ErrExecutorRunningNotFound)
 }
 
-// queueDrainBlockedByDynamicRoute keeps automatic queue drains from taking an
-// entry that the session cannot run until its route action is applied.
-// Without it every drain trigger reserves the head, fails in
-// ensureSessionRunning, and returns the entry, which repeats indefinitely.
+// queueDrainBlockedByDynamicRoute reports whether an automatic queue drain
+// must leave the head entry in place. A session whose route is action_required
+// and which has no executors_running row cannot run queued work until a route
+// action applies; a successful route action launches the session and drains the
+// queue.
 func (s *Service) queueDrainBlockedByDynamicRoute(ctx context.Context, sessionID string) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || !s.dynamicRouteAwaitsUserAction(ctx, session) {
@@ -45,13 +46,12 @@ func (s *Service) queueDrainBlockedByDynamicRoute(ctx context.Context, sessionID
 }
 
 // retainQueuedMessageForDynamicRouteAction settles a queued dispatch that
-// failed because the session has no executor record while its dynamic route
-// has no launch owner. A "starting" route stranded this way is marked
-// action_required at once, the same release the restart sweep performs, so
-// the session shows its route recovery actions instead of an endless
-// requeue. The entry is restored for that recovery rather than requeued. It
-// returns false for every other failure, including a session whose launch is
-// still pending, so the existing retry path keeps handling those.
+// cannot run because the session has no executor record while its dynamic
+// route awaits a user action. A WAITING_FOR_INPUT session whose starting route
+// is stranded is released to action_required with the orphaned-starting reason,
+// and the entry is made visible for that recovery: a retained durable delivery
+// is released in place, while an entry removed on reserve is restored. Every
+// other failure returns false so the existing retry path keeps handling it.
 func (s *Service) retainQueuedMessageForDynamicRouteAction(
 	ctx context.Context,
 	callerSessionID string,
@@ -63,16 +63,14 @@ func (s *Service) retainQueuedMessageForDynamicRouteAction(
 	if queuedMsg == nil || !errors.Is(err, errSessionAwaitingRuntimeLaunch) {
 		return false
 	}
-	session, loadErr := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
-	if loadErr != nil || session == nil {
+	releaseRouteAction := s.acquireRouteActionOperationLock(queuedMsg.SessionID)
+	defer releaseRouteAction()
+
+	session, ok := s.reloadDynamicRouteSession(ctx, queuedMsg.SessionID)
+	if !ok {
 		return false
 	}
-	if isStartingRouteClaim(session) && s.dynamicStartingRouteIsStranded(ctx, session) {
-		s.markDynamicRouteActionRequired(ctx, session.ID, session.RouteGeneration, dynamicRouteOrphanedStartingReason)
-		if reloaded, reloadErr := s.repo.GetTaskSession(ctx, session.ID); reloadErr == nil && reloaded != nil {
-			session = reloaded
-		}
-	}
+	session = s.releaseStrandedStartingRoute(ctx, session)
 	if !s.dynamicRouteAwaitsUserAction(ctx, session) {
 		return false
 	}
@@ -85,10 +83,67 @@ func (s *Service) retainQueuedMessageForDynamicRouteAction(
 		zap.String("queue_id", queuedMsg.ID),
 		zap.String("route_state", session.RouteState),
 		zap.String("route_reason", session.RouteReason))
+	if queuedMsg.IsReservedDelivery() {
+		return s.releaseRetainedDynamicRouteDelivery(ctx, callerSessionID, queuedMsg, reservation)
+	}
 	if reservation != nil && reservation.identity.SessionIncarnationID != "" {
 		s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
 	} else {
 		s.restoreQueuedMessage(ctx, queuedMsg)
 	}
+	return true
+}
+
+func (s *Service) reloadDynamicRouteSession(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil, false
+	}
+	return session, true
+}
+
+func (s *Service) releaseStrandedStartingRoute(
+	ctx context.Context,
+	session *models.TaskSession,
+) *models.TaskSession {
+	if !isStartingRouteClaim(session) || !s.dynamicStartingRouteIsStranded(ctx, session) {
+		return session
+	}
+	s.markDynamicRouteActionRequired(ctx, session.ID, session.RouteGeneration, dynamicRouteOrphanedStartingReason)
+	reloaded, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil || reloaded == nil {
+		return session
+	}
+	return reloaded
+}
+
+func (s *Service) releaseRetainedDynamicRouteDelivery(
+	ctx context.Context,
+	callerSessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	reservation *queuedDispatchReservation,
+) bool {
+	if queuedMsg.IsDeliveryAttempted() || s.messageQueue == nil ||
+		reservation == nil || reservation.identity.SessionIncarnationID == "" {
+		return false
+	}
+	if releaseErr := s.messageQueue.ReleaseQueuedDeliveryForSession(
+		ctx, reservation.identity, queuedMsg,
+	); releaseErr != nil {
+		if errors.Is(releaseErr, messagequeue.ErrSessionIdentityMismatch) {
+			s.discardLifecycleReservationForReplacedSession(ctx, queuedMsg, reservation.identity)
+			return true
+		}
+		s.logger.Warn("failed to release queued delivery for dynamic route recovery",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(releaseErr))
+		return false
+	}
+	s.publishQueueStatusEventForIdentity(ctx, reservation.identity)
 	return true
 }

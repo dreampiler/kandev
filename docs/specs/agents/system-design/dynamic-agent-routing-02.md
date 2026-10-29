@@ -190,9 +190,9 @@ require the current exclusive probe lease.
   existing session-recovery-block skip. A queued dispatch that still reaches
   `ensureSessionRunning` and fails because a WAITING_FOR_INPUT session's
   `starting` route has no executor row applies the orphan-sweep release at
-  that moment, then restores the entry for manual recovery instead of
-  requeueing it. The route recovery banner is the visible block, and the
-  successor launch from Retry or Try next drains the retained entry. A session
+  that moment, then restores or releases the entry for manual recovery instead
+  of requeueing it. The route recovery banner is the visible block, and the
+  successor launch from Retry or Try next drains the visible entry. A session
   without a dynamic route keeps the runtime-unavailable requeue, because its
   missing executor row can belong to a launch that has not run yet.
 - If the backend restarts during `switching`, it reconciles the persisted route

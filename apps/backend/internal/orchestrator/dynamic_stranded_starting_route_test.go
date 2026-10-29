@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -200,4 +202,175 @@ func TestQueuedDispatchToStrandedStartingRouteMarksActionRequired(t *testing.T) 
 	require.Equal(t, []string{"hello"}, queueSnapshotContents(t, svc, sessionID))
 	require.False(t, svc.drainQueuedMessageForPromptableSession(ctx, sessionID),
 		"later drains must wait for the route recovery action")
+}
+
+func newStrandedQueueFixture(
+	t *testing.T,
+	taskID, sessionID, executionID string,
+) (*sqliterepo.Repository, *Service, chan struct{}) {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	seedEngine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, seedEngine, true))
+	seedClaimedDynamicRoute(t, ctx, repo, seedEngine, sessionID, executionID)
+	recoveryEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repo),
+		dynamicruntime.WithStateLoader(repo),
+	)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, recoveryEngine, true))
+	workerDone := make(chan struct{}, 4)
+	svc.onQueuedMessageExecutionComplete = func() { workerDone <- struct{}{} }
+	return repo, svc, workerDone
+}
+
+// A retained durable delivery keeps its queued_messages row while it is
+// reserved. When the stranded starting route is released for user recovery,
+// the row must be released for the same session incarnation, not inserted a
+// second time under the same id.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.16
+func TestQueuedDispatchToStrandedStartingRouteReleasesDurableReservation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-stranded-durable-queue"
+		sessionID   = "session-stranded-durable-queue"
+		executionID = "execution-stranded-durable-queue"
+	)
+	repo, svc, workerDone := newStrandedQueueFixture(t, taskID, sessionID, executionID)
+
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, "hello", "", "user", false, nil,
+		map[string]interface{}{messagequeue.MetadataLifecycleDurable: true},
+	)
+	require.NoError(t, err)
+	require.True(t, svc.drainQueuedMessageForPromptableSession(ctx, sessionID))
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the queued dispatch to settle")
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	require.Equal(t, 1, status.Count,
+		"the retained durable entry must become visible for the route recovery action")
+	require.Equal(t, "hello", status.Entries[0].Content)
+	require.False(t, status.Entries[0].IsReservedInFlight(),
+		"the entry must be released from the retained delivery reservation")
+
+	snapshot, _, err := svc.messageQueue.SnapshotSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, snapshot, 1, "release must not duplicate the queued row")
+	require.Equal(t, status.Entries[0].ID, snapshot[0].ID)
+
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, dynamicRouteStatusActionRequired, session.RouteState)
+}
+
+type pausedActionRequiredRouteRepo struct {
+	*sqliterepo.Repository
+	sessionID string
+	entered   chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func (r *pausedActionRequiredRouteRepo) GetTaskSession(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, error) {
+	session, err := r.Repository.GetTaskSession(ctx, sessionID)
+	if err == nil && session != nil && session.ID == r.sessionID &&
+		session.RouteState == dynamicRouteStatusActionRequired {
+		r.once.Do(func() {
+			close(r.entered)
+			<-r.release
+		})
+	}
+	return session, err
+}
+
+// A route action may start a successor as soon as action_required is exposed.
+// The release that makes the retained entry visible must therefore complete
+// before the successor can drain it. The route action waits on the existing
+// per-session operation lock until that release is done.
+func TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-stranded-route-barrier"
+		sessionID   = "session-stranded-route-barrier"
+		executionID = "execution-stranded-route-barrier"
+	)
+	baseRepo, svc, workerDone := newStrandedQueueFixture(t, taskID, sessionID, executionID)
+	paused := &pausedActionRequiredRouteRepo{
+		Repository: baseRepo,
+		sessionID:  sessionID,
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	svc.repo = paused
+
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, "hello", "", "user", false, nil,
+		map[string]interface{}{messagequeue.MetadataLifecycleDurable: true},
+	)
+	require.NoError(t, err)
+
+	handlerEntered := make(chan struct{})
+	handlerStatus := make(chan int, 1)
+	svc.SetRouteActionHandler(func(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
+		close(handlerEntered)
+		handlerStatus <- svc.messageQueue.GetStatus(ctx, request.SessionID).Count
+		return &RouteActionResult{SessionID: request.SessionID}, nil
+	})
+
+	go svc.drainQueuedMessageForPromptableSession(ctx, sessionID)
+	select {
+	case <-paused.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the queued failure did not reach the post-mark session reload")
+	}
+
+	routeDone := make(chan error, 1)
+	go func() {
+		_, actionErr := svc.ApplyRouteAction(ctx, RouteActionRequest{
+			SessionID: sessionID,
+			Action:    RouteActionRetry,
+		})
+		routeDone <- actionErr
+	}()
+
+	select {
+	case <-handlerEntered:
+		t.Fatal("a route action ran before the retained entry was released")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(paused.release)
+	select {
+	case <-handlerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the route action did not run after the entry was released")
+	}
+	require.Equal(t, 1, <-handlerStatus,
+		"the route action must observe the released entry")
+
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the queued dispatch did not settle after the release")
+	}
+	require.NoError(t, <-routeDone)
+
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	require.Equal(t, 1, status.Count)
+	snapshot, _, err := svc.messageQueue.SnapshotSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, snapshot, 1, "the released entry must remain a single row")
 }

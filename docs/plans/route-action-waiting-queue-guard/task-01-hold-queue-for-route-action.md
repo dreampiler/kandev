@@ -49,7 +49,7 @@ runtime-unavailable classification for sessions without a dynamic route.
 ## Verification
 
 ```bash
-cd apps/backend && go test -trimpath ./internal/orchestrator/ -run 'TestQueueDrainSkipsSessionWhoseDynamicRouteAwaitsAction|TestQueuedDispatchToStrandedStartingRouteMarksActionRequired' -count=1
+cd apps/backend && go test -trimpath ./internal/orchestrator/ -run 'TestQueueDrainSkipsSessionWhoseDynamicRouteAwaitsAction|TestQueuedDispatchToStrandedStartingRouteMarksActionRequired|TestQueuedDispatchToStrandedStartingRouteReleasesDurableReservation|TestStrandedRouteReleaseHoldsRouteActionUntilEntryVisible' -count=1
 ```
 
 ## Results
