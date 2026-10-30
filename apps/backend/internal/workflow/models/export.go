@@ -135,7 +135,6 @@ type StepPortable struct {
 	Name                         string                                       `json:"name" yaml:"name"`
 	Position                     int                                          `json:"position" yaml:"position"`
 	Color                        string                                       `json:"color" yaml:"color"`
-	StageType                    StageType                                    `json:"stage_type,omitempty" yaml:"stage_type,omitempty"`
 	Prompt                       string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	Events                       StepEvents                                   `json:"events" yaml:"events"`
 	IsStartStep                  bool                                         `json:"is_start_step" yaml:"is_start_step"`
@@ -151,6 +150,7 @@ type StepPortable struct {
 	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
 	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	StageType                    StageType                                    `json:"stage_type,omitempty" yaml:"stage_type,omitempty"`
 	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
 	completionTaskOnEnterPresent bool                                         `json:"-" yaml:"-"`
 	SessionTarget                *WorkflowSessionTargetPortable               `json:"session_target,omitempty" yaml:"session_target,omitempty"`
@@ -312,7 +312,6 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			Name:                        s.Name,
 			Position:                    s.Position,
 			Color:                       s.Color,
-			StageType:                   s.StageType,
 			Prompt:                      s.Prompt,
 			Events:                      ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
 			IsStartStep:                 s.IsStartStep,
@@ -327,6 +326,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			CancelTriggersTurnComplete:  s.CancelTriggersTurnComplete,
 			CompleteTaskOnEnter:         s.CompleteTaskOnEnter,
 			WIPLimit:                    s.WIPLimit,
+			StageType:                   s.StageType,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos
@@ -390,12 +390,8 @@ func (e *WorkflowExport) Validate() error {
 		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
-			if step.StageType != "" {
-				switch step.StageType {
-				case StageTypeWork, StageTypeReview, StageTypeApproval, StageTypeCustom:
-				default:
-					return fmt.Errorf("workflow %d step %d: invalid stage_type %q", i, j, step.StageType)
-				}
+			if step.StageType != "" && !step.StageType.IsValid() {
+				return fmt.Errorf("workflow %d step %d: unsupported stage type %q", i, j, step.StageType)
 			}
 			if err := validatePortableProfile(step.AgentProfile, e.Version); err != nil {
 				return fmt.Errorf("workflow %d step %d agent profile: %w", i, j, err)

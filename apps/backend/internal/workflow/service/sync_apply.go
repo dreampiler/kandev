@@ -192,7 +192,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		changed = changed || stepChanged
 	}
 	for _, st := range toDelete {
-		if err := s.DeleteStep(ctx, st.ID); err != nil {
+		if err := s.deleteStep(ctx, wf.ID, st.ID); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to remove step %q: %v", wf.Name, st.Name, err))
 			return
 		}
@@ -209,6 +209,8 @@ func (s *Service) applySyncedStep(ctx context.Context, wf *taskmodels.Workflow, 
 	}
 	step.CreatedAt = existing.CreatedAt
 	if sp.StageType == "" {
+		// A document written before stage types were portable states none, so
+		// the step keeps the nature it already has.
 		step.StageType = existing.StageType
 	}
 	if stepMatchesDefinition(existing, step) {
@@ -368,13 +370,12 @@ func reviewProfileIDs(events models.StepEvents) []string {
 }
 
 // stepMatchesDefinition reports whether an existing step already equals its
-// desired definition. Events are compared via their JSON encoding to normalize
-// YAML/JSON numeric type differences in action configs.
+// desired definition (timestamps aside). Events are compared via their JSON
+// encoding to normalize YAML/JSON numeric type differences in action configs.
 func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 	return existing.Name == desired.Name &&
 		existing.Position == desired.Position &&
 		existing.Color == desired.Color &&
-		existing.StageType == desired.StageType &&
 		existing.Prompt == desired.Prompt &&
 		existing.AllowManualMove == desired.AllowManualMove &&
 		existing.IsStartStep == desired.IsStartStep &&
@@ -387,6 +388,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		models.EqualWorkflowSessionTarget(existing.SessionTarget, desired.SessionTarget) &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
+		existing.StageType == desired.StageType &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&
 		existing.CancelTriggersTurnComplete == desired.CancelTriggersTurnComplete &&
 		existing.CompleteTaskOnEnter == desired.CompleteTaskOnEnter &&

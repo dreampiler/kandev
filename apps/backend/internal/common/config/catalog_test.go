@@ -101,6 +101,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_DATABASE_SSLMODE", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MAXCONNS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MINCONNS", class: "catalog"},
+		{envVar: "KANDEV_SQLITE_READER_CONNS", class: "catalog"},
 		{envVar: "KANDEV_NATS_URL", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLUSTERID", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLIENTID", class: "catalog"},

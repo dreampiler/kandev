@@ -79,10 +79,12 @@ func (s *Service) planPromptSource(ctx context.Context, template models.PromptSo
 	if err != nil {
 		return plan, err
 	}
-	// Import and its write-authorized preview share this planning path. Diff
-	// passes validateApply=false and retains ordinary read visibility.
-	if workflow != nil && validateApply {
-		if err := s.authorizeExecutorMutation(ctx, workflow.ID); err != nil {
+	// Import and its write-authorized preview own the source definition lock.
+	// Workspace write authorization ran above; preserve executor authority
+	// without applying the ordinary-edit lock to reconciliation itself.
+	// Diff passes validateApply=false and retains ordinary read visibility.
+	if workflow != nil && validateApply && s.executorMutationChecker != nil {
+		if err := s.executorMutationChecker(ctx, workflow.ID); err != nil {
 			return plan, err
 		}
 	}
@@ -191,7 +193,7 @@ func (s *Service) DiffPromptSources(ctx context.Context) (*models.PromptSourceRe
 	var plans []models.PromptSourcePlan
 	for _, record := range records {
 		if err := s.AuthorizeWorkspace(ctx, record.WorkspaceID); err != nil {
-			if callerIsScoped(ctx) {
+			if s.authorizationApplies(ctx) {
 				continue
 			}
 			return nil, err
@@ -216,7 +218,7 @@ type sourceWorkspaceLister interface {
 }
 
 func (s *Service) visibleSourceRecords(ctx context.Context) ([]models.PromptSourceRecord, error) {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return s.repo.ListPromptSourceInstances(ctx)
 	}
 	provider, ok := s.workspaceProvider.(sourceWorkspaceLister)
@@ -348,7 +350,7 @@ type sourceWorkspaceWriter interface {
 
 // Direct reconciliation must retain the task domain's definition-write policy.
 func (s *Service) authorizePromptSourceWrite(ctx context.Context, workspaceID string) error {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return nil
 	}
 	writer, ok := s.workspaceProvider.(sourceWorkspaceWriter)

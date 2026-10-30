@@ -89,3 +89,22 @@ Missing-field compatibility and export-version selection were preserved.
 No permanent test or installed workflow activation was added. Normal commit
 hooks and updated-head hosted CI are separate publication results; historical
 verification above is not substituted for the new checks.
+
+## Current main reconciliation (2026-10-31)
+
+The normal merge preserves public844 and current main8e69 history. Main already
+carries the portable stage field, validation and drift comparison; duplicated
+automatic merge declarations are removed while explicit/omitted stage semantics
+remain. Main's collaboration authorization checkers and source read-only policy
+are composed with the existing prompt-source lock. The task-owned policy
+projection now returns the existing locked-source error after authorization;
+its handler preserves the existing message. Source listing/write checks use the
+same production authorization predicate as the surrounding workflow service.
+Authorized source reconciliation retains the executor authority checker without
+applying its own ordinary-definition lock; ordinary editing stays locked.
+This requires one compatibility path, task/service/service_access.go, beyond
+the earlier PR path set; it adds no new policy, API, flag or schema. Required-store
+catalog entries retain both prompt-source tables and workspace collaboration.
+Historical checks above stay tied to their snapshots. Current merge checks,
+normal hooks and exact delta review are recorded separately at handoff; hosted
+CI, PostgreSQL and whole-application success are not implied.
