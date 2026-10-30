@@ -5846,6 +5846,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
+	if s.queueDrainBlockedByDynamicRoute(ctx, sessionID) {
+		return queueDrainSkipped
+	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
 	if !ok {
 		return queueDrainSkipped

@@ -1417,7 +1417,7 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	metadata, err = r.preserveProtectedLiveMetadata(ctx, tx, task.ID, metadata)
 	if err != nil {
 		return "", 0, err
 	}
@@ -2371,6 +2371,17 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 	if strings.TrimSpace(expectedValue) == "" {
 		return false, nil
 	}
+	return r.removeTaskMetadataKeyIfValueWithExecutor(ctx, r.db, taskID, key, expectedValue)
+}
+
+// removeTaskMetadataKeyIfValueWithExecutor is the transaction-capable form of
+// RemoveTaskMetadataKeyIfValue, so a conditional removal can share one task
+// transaction with another metadata write.
+func (r *Repository) removeTaskMetadataKeyIfValueWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key, expectedValue string,
+) (bool, error) {
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -2389,7 +2400,7 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 		`
 		args = []interface{}{path, time.Now().UTC(), taskID, path, expectedValue}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -2984,14 +2995,14 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // writers did to the key in between.
 //
 // It must operate on the metadata bytes updateTaskTx passes in — already
-// merged by preserveLiveHandoffProvenance with the row's live handoffs/
+// merged by preserveProtectedLiveMetadata with the row's live handoffs/
 // handoff_source — rather than re-deriving from task.Metadata: re-deriving
 // would rebuild the payload from the caller's pre-transaction snapshot and
 // silently discard that merge, reverting a concurrently committed handoff
 // provenance write. Decoding into map[string]json.RawMessage rather than
 // map[string]interface{} avoids a float64 round-trip that would corrupt an
 // unrelated large or high-precision numeric field elsewhere in the document
-// (AC-27), matching preserveLiveHandoffProvenance's own approach.
+// (AC-27), matching preserveProtectedLiveMetadata's own approach.
 //
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same

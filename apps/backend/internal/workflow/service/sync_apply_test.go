@@ -270,14 +270,24 @@ func TestApplySyncedWorkflows_KeepsVanishedWorkflowWithTasks(t *testing.T) {
 func TestApplySyncedWorkflows_BrokenFileFreezesItsWorkflows(t *testing.T) {
 	svc, provider, ops := setupSyncService(t)
 	ctx := context.Background()
-	addSyncedWorkflow(provider, "wf-frozen", "ws-1", "Frozen Flow", "flows/broken.yml")
+	wf := addSyncedWorkflow(provider, "wf-frozen", "ws-1", "Frozen Flow", "flows/broken.yml")
+	createStep(t, svc, &models.WorkflowStep{
+		ID: "step-review", WorkflowID: wf.ID, Name: "Review", Position: 0,
+		StageType: models.StageTypeReview,
+	})
 
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
 		{Path: "flows/broken.yml", Export: nil},
 	})
 	require.NoError(t, err)
+	assert.Empty(t, result.Updated)
 	assert.Empty(t, result.Deleted)
 	assert.Empty(t, ops.deleted, "workflows from unparseable files must not be deleted")
+
+	steps, err := svc.ListStepsByWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.Equal(t, models.StageTypeReview, steps[0].StageType, "invalid files must preserve stored step classification")
 }
 
 func TestApplySyncedWorkflows_LeavesManualWorkflowsAlone(t *testing.T) {

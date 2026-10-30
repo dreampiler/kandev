@@ -117,8 +117,11 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 | `database.sslMode`  | `KANDEV_DATABASE_SSLMODE`  | `disable`               | `disable`, `require`, `verify-ca`, or `verify-full`.                      |
 | `database.maxConns` | `KANDEV_DATABASE_MAXCONNS` | `25`                    | PostgreSQL maximum pool size.                                             |
 | `database.minConns` | `KANDEV_DATABASE_MINCONNS` | `5`                     | PostgreSQL minimum pool size.                                             |
+| `database.sqliteReaderConns` | `KANDEV_SQLITE_READER_CONNS` | `4` | SQLite read-only pool size. Startup-only; accepts `1`-`64` and sets both maximum open and idle readers. Invalid values fail startup when SQLite is selected. Ignored for PostgreSQL and does not reject PostgreSQL startup. |
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
+
+`database.sqliteReaderConns` is an opt-in startup override for installations where concurrent interactive reads exhaust the default four-connection SQLite read pool. It changes only the read-only pool size and requires a restart. It does not change the single-writer connection, database health probing, or PostgreSQL pool sizing. Invalid values reject a SQLite startup; a PostgreSQL selection is not rejected by this SQLite-only setting.
 
 Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
 Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
