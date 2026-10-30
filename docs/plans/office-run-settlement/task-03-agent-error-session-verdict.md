@@ -59,4 +59,5 @@ go test -count=1 ./internal/runtimeflags/ ./internal/profiles/
 
 `TestAgentErrorSessionVerdict_SuccessorKeepsRunClaimed` failed before the guard
 (`run status after AgentFailed = "failed", want claimed`) and passes after it,
-with the failure-verdict, recorded-verdict, disabled, and re-check tests.
+with the failure-verdict, recorded-verdict, disabled, re-check, and read-error
+re-check retention tests.

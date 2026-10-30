@@ -89,10 +89,7 @@ func (s *Service) deferAgentFailureUntilSessionVerdict(
 	if !s.agentErrorVerdict.enabled || data.SessionID == "" || run == nil {
 		return false
 	}
-	timeout := s.agentErrorVerdict.timeout
-	if timeout <= 0 {
-		timeout = defaultAgentErrorVerdictTimeout
-	}
+	timeout := s.agentErrorVerdictTimeout()
 	pending := &pendingAgentFailure{runID: run.ID, data: data}
 	// The timer is armed before the entry is published so no taker ever
 	// observes a partially initialized entry.
@@ -151,18 +148,48 @@ func (s *Service) resolvePendingAgentFailure(ctx context.Context, data TaskSessi
 	s.takePendingAgentFailure(ctx, data.SessionID, pending, verdict)
 }
 
+// agentErrorVerdictTimeout is the effective re-check delay.
+func (s *Service) agentErrorVerdictTimeout() time.Duration {
+	if s.agentErrorVerdict.timeout > 0 {
+		return s.agentErrorVerdict.timeout
+	}
+	return defaultAgentErrorVerdictTimeout
+}
+
 // recheckPendingAgentFailure reads the session again when no state event
 // arrived in time. A still-live or already-superseded session keeps the run
 // claimed for its current execution; a recorded failure applies the deferred
-// failure. An unreadable session fails closed: a read error is not evidence of
-// a successor, so the failure is applied rather than silently discarded.
+// failure. A read error is not a verdict: the parked failure and its run
+// identity stay in place and the same bounded re-check is re-armed, so an
+// unreadable session is neither applied as a failure nor discarded as a
+// successor.
 func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID string, pending *pendingAgentFailure) {
+	if !s.isCurrentPendingAgentFailure(sessionID, pending) {
+		return
+	}
 	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, sessionID)
+	if err != nil {
+		if s.isCurrentPendingAgentFailure(sessionID, pending) {
+			pending.timer.Reset(s.agentErrorVerdictTimeout())
+			s.logger.Warn("deferred Office run failure: session verdict read failed; re-check rescheduled",
+				zap.String("run_id", pending.runID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
 	verdict := sessionVerdictFailed
-	if err == nil && classifySessionVerdict(state, errorMessage) != sessionVerdictFailed {
+	if classifySessionVerdict(state, errorMessage) != sessionVerdictFailed {
 		verdict = sessionVerdictSuperseded
 	}
 	s.takePendingAgentFailure(ctx, sessionID, pending, verdict)
+}
+
+// isCurrentPendingAgentFailure reports whether the session still parks this
+// exact failure. A stale timer callback must not touch a replacement entry.
+func (s *Service) isCurrentPendingAgentFailure(sessionID string, pending *pendingAgentFailure) bool {
+	value, ok := s.agentErrorVerdict.pending.Load(sessionID)
+	return ok && value == pending
 }
 
 // hasPendingAgentFailure reports whether a failure is parked for the session.

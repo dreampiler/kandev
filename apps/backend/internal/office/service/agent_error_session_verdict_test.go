@@ -164,3 +164,27 @@ func TestAgentErrorSessionVerdict_RecheckAppliesMissedFailureVerdict(t *testing.
 		t.Fatalf("run status = %q, want failed after the verdict re-check", got)
 	}
 }
+
+// A re-check that cannot read the session is not a verdict. The parked failure
+// must stay with its run and be re-checked, not applied to a session that may
+// already belong to a successor.
+func TestAgentErrorSessionVerdict_RecheckReadErrorKeepsPendingFailure(t *testing.T) {
+	f := newVerdictFixture(t, true, "RUNNING")
+	f.svc.SetAgentErrorVerdictTimeout(300 * time.Millisecond)
+
+	f.failExecution(t)
+	f.svc.ExecSQL(t, `ALTER TABLE task_sessions RENAME TO task_sessions_unreadable`)
+
+	time.Sleep(800 * time.Millisecond)
+	if got := f.runStatus(t); got != service.RunStatusClaimed {
+		t.Fatalf("run status after re-check read errors = %q, want claimed", got)
+	}
+
+	f.svc.ExecSQL(t, `UPDATE task_sessions_unreadable SET state = 'FAILED', error_message = 'quota' WHERE id = ?`, verdictSessionID)
+	f.svc.ExecSQL(t, `ALTER TABLE task_sessions_unreadable RENAME TO task_sessions`)
+
+	time.Sleep(800 * time.Millisecond)
+	if got := f.runStatus(t); got != service.RunStatusFailed {
+		t.Fatalf("run status after the recorded verdict = %q, want failed", got)
+	}
+}
