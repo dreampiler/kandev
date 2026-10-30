@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
+updated: 2026-10-28
 owners:
   - kandev
 ---
@@ -69,8 +70,8 @@ errors does not take its own healthy account out of rotation.
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** At prompt-send, a line that
-  opens with an optional error label and reports `maximum context length is
-  <n> tokens` shall classify at high confidence under
+  opens with an optional error label and reports
+  `maximum context length is <n> tokens` shall classify at high confidence under
   `provider.context_length_exceeded.v1`, retaining `agent_runtime_error`,
   `FallbackAllowed: false` and `AutoRetryable: false`. The existing exact
   terminal-provider consumer shall preserve its repeated-unclassified-failure
@@ -95,11 +96,25 @@ errors does not take its own healthy account out of rotation.
   `Rate limit exceeded. Please try again later` line, optionally wrapped by
   its provider error label, shall classify as rate limited without inferring a
   daily reset period.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11:** For `opencode-acp`, an opening
+  `Upstream request failed: [ttft_admission_refused] the cell is at capacity`
+  diagnostic shall classify as high-confidence, retryable `model_capacity`.
+  Established error labels can precede the diagnostic.
+  Bare capacity prose, quoted examples, other refusal tokens, and unrelated
+  providers shall not match this signature.
+  Existing structured classification and earlier account-limit rules retain precedence.
+  A valid `(after N s)` suffix shall provide a reset hint from the diagnostic's observation time.
+  Only integer delays from 1 through 60 seconds qualify.
+  Missing, malformed, zero, negative, and larger delays shall provide no hint.
+  Classification shall not establish runtime health or authorize another prompt.
+
+Criterion 001.11 was added by the October 28
+[OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.7, 001.8, 001.9 and 001.10.
+  narrow additions in criteria 001.6, 001.7, 001.8, 001.9, 001.10, and 001.11.
 - Changing other or unrelated provider-neutral rules or any runtime-environment
   rules. The named prompt-send context-length signature in criterion 001.7 is in
   scope.

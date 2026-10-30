@@ -136,9 +136,9 @@ func taskScanColumnSQL(alias string, useExpressions bool) string {
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
 // when the task is owned by office: either it has a non-empty project_id
-// (explicit office task) or its workflow matches the workspace's
-// office_workflow_id (the canonical "office workflow"). Kanban tasks live
-// in any other workflow and have no project.
+// (explicit office task), its workflow matches the canonical office_workflow_id,
+// or it belongs to that Office workspace's system-owned builtin Routine workflow.
+// Ordinary Kanban and user-owned routine-template workflows remain distinct.
 func isFromOfficeProjection(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
@@ -150,6 +150,15 @@ func isFromOfficeProjection(alias string) string {
 			WHERE w.id = ` + alias + `.workspace_id
 			  AND COALESCE(w.office_workflow_id, '') != ''
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
+		)
+		OR EXISTS (
+			SELECT 1 FROM workspaces w
+			JOIN workflows wf ON wf.workspace_id = w.id
+			WHERE w.id = ` + alias + `.workspace_id
+			  AND COALESCE(w.office_workflow_id, '') != ''
+			  AND wf.id = ` + alias + `.workflow_id
+			  AND wf.is_system = 1
+			  AND wf.workflow_template_id = 'routine'
 		)
 	)`
 }
@@ -1408,7 +1417,7 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	metadata, err = r.preserveProtectedLiveMetadata(ctx, tx, task.ID, metadata)
 	if err != nil {
 		return "", 0, err
 	}
@@ -2362,6 +2371,17 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 	if strings.TrimSpace(expectedValue) == "" {
 		return false, nil
 	}
+	return r.removeTaskMetadataKeyIfValueWithExecutor(ctx, r.db, taskID, key, expectedValue)
+}
+
+// removeTaskMetadataKeyIfValueWithExecutor is the transaction-capable form of
+// RemoveTaskMetadataKeyIfValue, so a conditional removal can share one task
+// transaction with another metadata write.
+func (r *Repository) removeTaskMetadataKeyIfValueWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key, expectedValue string,
+) (bool, error) {
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -2380,7 +2400,7 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 		`
 		args = []interface{}{path, time.Now().UTC(), taskID, path, expectedValue}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -2975,14 +2995,14 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // writers did to the key in between.
 //
 // It must operate on the metadata bytes updateTaskTx passes in — already
-// merged by preserveLiveHandoffProvenance with the row's live handoffs/
+// merged by preserveProtectedLiveMetadata with the row's live handoffs/
 // handoff_source — rather than re-deriving from task.Metadata: re-deriving
 // would rebuild the payload from the caller's pre-transaction snapshot and
 // silently discard that merge, reverting a concurrently committed handoff
 // provenance write. Decoding into map[string]json.RawMessage rather than
 // map[string]interface{} avoids a float64 round-trip that would corrupt an
 // unrelated large or high-precision numeric field elsewhere in the document
-// (AC-27), matching preserveLiveHandoffProvenance's own approach.
+// (AC-27), matching preserveProtectedLiveMetadata's own approach.
 //
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
@@ -3777,6 +3797,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 		return "", err
 	}
 	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
+		return "", err
+	}
+	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
 		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -5756,6 +5779,56 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 		return err
 	}
 	return tx.Commit()
+}
+
+// UpdateTaskStateIfWorkflowStep atomically checks the current workflow step,
+// applies completion guards, and writes the new state.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var currentState v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&currentState, &workflowID, &stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	if stepID != expectedStepID {
+		return false, nil
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
+		workflowID, stepID, workflowID, stepID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`), state, r.nowUTC(), taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskStateIfSessionState atomically ties a task-state write to the

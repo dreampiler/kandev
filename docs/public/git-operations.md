@@ -470,6 +470,13 @@ branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch 
 before the title call is preserved as well. Multi-repository tasks apply these rules independently to
 each repository, and a Git or snapshot persistence failure does not undo the accepted title.
 
+Kandev verifies the recorded generated branch at the Git boundary before it renames anything. The
+change comparison for the turn that accepted the title keeps its original interval across that
+verified rename. A rename-only turn therefore stays a zero-file result, and local edits keep their
+captured files and historical content. A manual or external branch switch is not a verified rename,
+so its history remains unavailable. If the `agentctl` process is replaced after the start receipt
+and before the end receipt, history is also unavailable for that turn.
+
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
 ### Deleting a task with local worktree changes
@@ -544,9 +551,9 @@ polling is paused. These actions do not wait for the background interval.
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
 
-Turn changed-files cards show the repository interval for one agent turn. Kandev captures the start and end in the executor and stores the historical diff data with the task.
+Turn changed-files cards show the repository interval for one agent turn. Kandev captures the start and end in the executor. Local turns read the exact accepted objects from the surviving common Git directory; disposable and remote turns transfer missing objects into Kandev-owned storage before cleanup. A removed worktree or disposable executor does not change the historical view.
 
-Kandev does not rebuild an earlier diff from the current `HEAD` or working tree. Later edits, commits, and branch changes do not alter that turn's summary. See [Tasks and Workflows](tasks-and-workflows.md#show-changed-files-after-a-turn) for the user preference and navigation steps.
+Kandev does not rebuild an earlier diff from the current `HEAD` or working tree. Later edits, commits, and branch changes do not alter that turn's summary. History compaction keeps the turn summary and shows that the historical diff expired when it removes owned checkpoint refs. Backend-owned archive objects are reclaimed only after every retained reference releases them; user branches are never force-cleaned. See [Tasks and Workflows](tasks-and-workflows.md#show-changed-files-after-a-turn) for the user preference and navigation steps.
 
 The Changes toolbar shows a spinner while Git status or inline commit details load.
 If a read fails, it shows a warning and retries automatically with increasing
