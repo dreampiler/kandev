@@ -84,18 +84,103 @@ function readTurnFile(db: DatabaseSync, changeSetID: string, path: string) {
 
 type TurnFileContentObservation = { settled: boolean; description: string };
 
+type RepositorySettleRow = {
+  contentComplete: number;
+  preservationState: string;
+  exportState: string;
+};
+
+type ChangeSetSettleRow = {
+  contentComplete: number;
+  complete: number;
+  summaryComplete: number;
+};
+
+function readRepositorySettleRow(
+  db: DatabaseSync,
+  repositoryChangeID: string,
+): RepositorySettleRow | undefined {
+  return db
+    .prepare(
+      `SELECT content_complete AS contentComplete,
+              preservation_state AS preservationState, export_state AS exportState
+       FROM turn_repository_changes WHERE id = ?`,
+    )
+    .get(repositoryChangeID) as RepositorySettleRow | undefined;
+}
+
+function readChangeSetSettleRow(
+  db: DatabaseSync,
+  changeSetID: string,
+): ChangeSetSettleRow | undefined {
+  return db
+    .prepare(
+      `SELECT content_complete AS contentComplete, complete,
+              summary_complete AS summaryComplete
+       FROM turn_change_sets WHERE id = ?`,
+    )
+    .get(changeSetID) as ChangeSetSettleRow | undefined;
+}
+
+function countPendingRepositories(db: DatabaseSync, changeSetID: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM turn_repository_changes
+       WHERE change_set_id = ? AND preservation_state = 'pending'`,
+    )
+    .get(changeSetID) as { count: number };
+  return row.count;
+}
+
+function countActiveLeases(db: DatabaseSync, changeSetID: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM turn_change_content_leases
+       WHERE change_set_id = ? AND julianday(expires_at) > julianday('now')`,
+    )
+    .get(changeSetID) as { count: number };
+  return row.count;
+}
+
 function isContentSettled(
-  contentComplete: number | undefined,
-  preservationState: string,
-  exportState: string | undefined,
+  repository: RepositorySettleRow | undefined,
+  changeSet: ChangeSetSettleRow | undefined,
   pendingRepositories: number,
   activeLeases: number,
 ): boolean {
-  if (!contentComplete) return false;
-  const preservationKnown = preservationState === "" || preservationState === "ready";
+  if (!repository || !changeSet) return false;
+  if (!repository.contentComplete) return false;
+  if (changeSet.contentComplete !== 1) return false;
+  if (changeSet.complete !== changeSet.summaryComplete) return false;
+  const preservationKnown =
+    repository.preservationState === "" || repository.preservationState === "ready";
   const readable =
-    preservationState === "ready" || exportState === "complete" || exportState === "unavailable";
+    repository.preservationState === "ready" ||
+    repository.exportState === "complete" ||
+    repository.exportState === "unavailable";
   return preservationKnown && readable && pendingRepositories === 0 && activeLeases === 0;
+}
+
+function describeSettleState(
+  repository: RepositorySettleRow | undefined,
+  changeSet: ChangeSetSettleRow | undefined,
+  pendingRepositories: number,
+  activeLeases: number,
+): string {
+  const repositoryText = repository
+    ? `content_complete=${repository.contentComplete} ` +
+      `preservation_state=${repository.preservationState || "''"} ` +
+      `export_state=${repository.exportState || "''"}`
+    : "repository=missing";
+  const changeSetText = changeSet
+    ? `change_set_content_complete=${changeSet.contentComplete} ` +
+      `change_set_complete=${changeSet.complete} ` +
+      `change_set_summary_complete=${changeSet.summaryComplete}`
+    : "change_set=missing";
+  return (
+    `${repositoryText} pending_repositories=${pendingRepositories} ` +
+    `active_leases=${activeLeases} ${changeSetText}`
+  );
 }
 
 function observeTurnFileContent(
@@ -105,41 +190,13 @@ function observeTurnFileContent(
 ): TurnFileContentObservation {
   const file = readTurnFile(db, changeSetID, path);
   if (!file) return { settled: false, description: `turn file not found: ${path}` };
-  const repository = db
-    .prepare(
-      `SELECT content_complete AS contentComplete,
-              preservation_state AS preservationState, export_state AS exportState
-       FROM turn_repository_changes WHERE id = ?`,
-    )
-    .get(file.repositoryChangeID) as
-    | { contentComplete: number; preservationState: string; exportState: string }
-    | undefined;
-  const pending = db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM turn_repository_changes
-       WHERE change_set_id = ? AND preservation_state = 'pending'`,
-    )
-    .get(changeSetID) as { count: number };
-  const leases = db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM turn_change_content_leases
-       WHERE change_set_id = ? AND julianday(expires_at) > julianday('now')`,
-    )
-    .get(changeSetID) as { count: number };
-  const preservationState = repository?.preservationState ?? "";
+  const repository = readRepositorySettleRow(db, file.repositoryChangeID);
+  const changeSet = readChangeSetSettleRow(db, changeSetID);
+  const pendingRepositories = countPendingRepositories(db, changeSetID);
+  const activeLeases = countActiveLeases(db, changeSetID);
   return {
-    settled: isContentSettled(
-      repository?.contentComplete,
-      preservationState,
-      repository?.exportState,
-      pending.count,
-      leases.count,
-    ),
-    description:
-      `content_complete=${repository?.contentComplete ?? "missing"} ` +
-      `preservation_state=${preservationState || "''"} ` +
-      `export_state=${repository?.exportState || "''"} ` +
-      `pending_repositories=${pending.count} active_leases=${leases.count}`,
+    settled: isContentSettled(repository, changeSet, pendingRepositories, activeLeases),
+    description: describeSettleState(repository, changeSet, pendingRepositories, activeLeases),
   };
 }
 
