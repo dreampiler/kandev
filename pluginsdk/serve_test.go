@@ -486,13 +486,10 @@ func newHostCallProbeHarness(t *testing.T, enabled bool) (*RemotePlugin, *hostCa
 	host := &classifiedHost{recordingHost: &recordingHost{taskTrees: recordingTaskTreeManager{}}, enabled: enabled}
 	plugin := &hostCallProbe{}
 	gp := &GRPCPlugin{Impl: plugin, Host: host, HostDialTimeout: 5 * time.Second}
-	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+	client, _ := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
 		PluginMapKey: gp,
 	})
-	t.Cleanup(func() {
-		_ = client.Close()
-		server.Stop()
-	})
+	t.Cleanup(func() { _ = client.Close() })
 	raw, err := client.Dispense(PluginMapKey)
 	require.NoError(t, err)
 	remote, ok := raw.(*RemotePlugin)

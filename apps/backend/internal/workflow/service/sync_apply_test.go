@@ -271,7 +271,7 @@ func TestApplySyncedWorkflows_BrokenFileFreezesItsWorkflows(t *testing.T) {
 	svc, provider, ops := setupSyncService(t)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-frozen", "ws-1", "Frozen Flow", "flows/broken.yml")
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-review", WorkflowID: wf.ID, Name: "Review", Position: 0,
 		StageType: models.StageTypeReview,
 	})
