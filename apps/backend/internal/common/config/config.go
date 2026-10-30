@@ -398,6 +398,10 @@ type DatabaseConfig struct {
 	SSLMode  string `mapstructure:"sslMode"`
 	MaxConns int    `mapstructure:"maxConns"`
 	MinConns int    `mapstructure:"minConns"`
+	// SQLiteReaderConns is the SQLite read-only pool size. It is resolved
+	// once at startup and ignored for PostgreSQL. The raw YAML value is parsed
+	// after driver selection so a PostgreSQL selection cannot fail decoding.
+	SQLiteReaderConns int `mapstructure:"-"`
 }
 
 // NATSConfig holds NATS messaging configuration.
@@ -900,8 +904,10 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("select configuration file: %w", err)
 	}
+	var yamlConfig map[string]interface{}
 	if found {
-		if err := readSelectedConfig(v, selection); err != nil {
+		yamlConfig, err = readSelectedConfig(v, selection)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -916,6 +922,13 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	fromYAML, err := applySQLiteReaderConns(&cfg, yamlConfig, yamlKeys, envSnapshot, sources)
+	if err != nil {
+		if fromYAML && found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

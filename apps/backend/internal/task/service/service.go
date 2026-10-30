@@ -545,6 +545,7 @@ type Service struct {
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
+	deferredLaunchDiscard           DeferredLaunchDiscardSettler
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
 	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
