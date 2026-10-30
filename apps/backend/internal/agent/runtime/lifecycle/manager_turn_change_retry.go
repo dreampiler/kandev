@@ -30,7 +30,6 @@ func (m *Manager) retryTurnChangeOperation(
 		if err == nil || permanentTurnChangeError(err) {
 			return err
 		}
-		timeout = turnChangeTerminalCaptureTimeout
 	}
 	return err
 }

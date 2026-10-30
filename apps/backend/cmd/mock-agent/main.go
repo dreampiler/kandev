@@ -125,21 +125,17 @@ func main() {
 
 // Initialize handles the ACP initialize request, returning agent capabilities.
 //
-// The `_meta.claudeCode.promptQueueing` advertisement mirrors what
+// The `_meta.claudeCode` advertisement mirrors what
 // `@agentclientprotocol/claude-agent-acp` sends. It is set deliberately rather
 // than special-casing the mock downstream: prompt handoff and mid-turn steering
-// are gated on this negotiated advertisement, so the mock must earn eligibility
-// the same way a real bridge does or E2E would prove nothing about the gate.
+// are gated on the negotiated prompt-queueing advertisement, and native
+// suggestions are gated on the explicit suggestion declaration, so the mock must
+// earn each independently the same way a real bridge does or E2E would prove
+// nothing about either gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
 	traceACP("initialize", "", nil)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
-	}
-	var meta map[string]any
-	if mockPromptQueueingEnabled() {
-		meta = map[string]any{
-			"claudeCode": map[string]any{"promptQueueing": true},
-		}
 	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
@@ -152,13 +148,28 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
 			},
-			Meta: meta,
+			Meta: mockClaudeCodeMeta(),
 		},
 	}, nil
 }
 
+// mockClaudeCodeMeta advertises the two independent Claude contracts the mock
+// implements. Suggestions are declared explicitly instead of being inferred from
+// the queueing namespace, so E2E exercises the adapter's evidence rule.
+func mockClaudeCodeMeta() map[string]any {
+	claudeCode := map[string]any{"promptSuggestions": mockPromptSuggestionsEnabled()}
+	if mockPromptQueueingEnabled() {
+		claudeCode["promptQueueing"] = true
+	}
+	return map[string]any{"claudeCode": claudeCode}
+}
+
 func mockPromptQueueingEnabled() bool {
 	return strings.ToLower(strings.TrimSpace(os.Getenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING"))) != "false"
+}
+
+func mockPromptSuggestionsEnabled() bool {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("KANDEV_MOCK_AGENT_PROMPT_SUGGESTIONS"))) != "false"
 }
 
 // NewSession creates a new conversation session.
@@ -501,6 +512,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleRetainedCapacity(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// The real OpenCode agent identity returns the captured admission refusal
+	// after advisory native retry metadata. KANDEV_MOCK_PROVIDERS selects this
+	// identity, so the production OpenCode dialect and classifier both run.
+	if resp, err, handled := a.handleOpenCodeCapacity(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
@@ -516,6 +533,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	// real prompt-time ACP error, so it is intercepted here rather than routed
 	// through handlePrompt's emitter.
 	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	// Generic prompt-error continuity: a real error response on a live
+	// connection, with no capacity marker or transient keyword.
+	if resp, err, handled := a.handlePromptErrorContinuity(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
 	a.mu.Lock()
@@ -709,6 +731,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(promptErrorCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
@@ -787,6 +810,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
+		{Name: "prompt-error", Description: "Simulate a generic prompt error on a usable connection (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},
