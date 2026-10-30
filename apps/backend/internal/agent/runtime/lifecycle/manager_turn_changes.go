@@ -227,7 +227,7 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 	m.startTurnChangeRetry(func() {
 		err := m.retryTurnChangeOperation(execution, terminal, completed, turnChangeSummaryTimeout, processor.ProcessTurnChanges)
 		if err != nil {
-			m.abandonTurnChange(execution, terminal, err)
+			m.settleTurnChangeSummary(execution, terminal, err)
 		}
 	})
 }

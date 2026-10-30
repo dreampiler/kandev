@@ -102,10 +102,12 @@ func (m *Manager) abandonTurnChange(execution *AgentExecution, terminal TurnChan
 	return err == nil
 }
 
-// settleTurnChangeCapture continues only the durable terminal write after
-// capture has stopped. Storage uncertainty keeps the original fence held;
-// neither backoff nor an attempt deadline authorizes a successor prompt.
-func (m *Manager) settleTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal, cause error) bool {
+// settleTurnChange continues only the durable terminal write after processing
+// has stopped. Every attempt keeps the captured terminal identity, and
+// ownership is re-checked before each write; shutdown cancels the wait.
+func (m *Manager) settleTurnChange(
+	execution *AgentExecution, terminal TurnChangeTerminal, cause error, stillOwned func() bool,
+) bool {
 	if _, ok := m.turnChangeCaptureHandler.(interface {
 		AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
 	}); !ok {
@@ -113,7 +115,7 @@ func (m *Manager) settleTurnChangeCapture(execution *AgentExecution, terminal Tu
 	}
 	delay := time.Duration(0)
 	for {
-		if !m.waitTurnChangeDelay(delay) || !turnChangeCaptureStillOwned(execution, terminal) {
+		if !m.waitTurnChangeDelay(delay) || !stillOwned() {
 			return false
 		}
 		if m.abandonTurnChange(execution, terminal, cause) {
@@ -125,6 +127,25 @@ func (m *Manager) settleTurnChangeCapture(execution *AgentExecution, terminal Tu
 			delay = min(delay*2, turnChangeRetryMaximumDelay)
 		}
 	}
+}
+
+// settleTurnChangeCapture continues only the durable terminal write after
+// capture has stopped. Storage uncertainty keeps the original fence held;
+// neither backoff nor an attempt deadline authorizes a successor prompt.
+func (m *Manager) settleTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal, cause error) bool {
+	return m.settleTurnChange(execution, terminal, cause, func() bool {
+		return turnChangeCaptureStillOwned(execution, terminal)
+	})
+}
+
+// settleTurnChangeSummary continues only the durable settlement after the
+// summary budget is spent. Capture already released its fence, so the terminal
+// identity is the ownership boundary: the repository settles only that exact
+// interval and treats a missing or superseded one as a durable no-op.
+func (m *Manager) settleTurnChangeSummary(execution *AgentExecution, terminal TurnChangeTerminal, cause error) bool {
+	return m.settleTurnChange(execution, terminal, cause, func() bool {
+		return execution.ID == terminal.ExecutionID && execution.currentStartupAttemptID() == terminal.StartupAttemptID
+	})
 }
 
 func turnChangeCaptureStillOwned(execution *AgentExecution, terminal TurnChangeTerminal) bool {
