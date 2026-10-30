@@ -69,3 +69,27 @@ and resolves the compatible Zod consumers to 4.6.6.
 - The feature delta against that upstream commit remains the manifest, lockfile,
   generated schema and existing delivery documentation. No replacement PR,
   schema policy, UI behavior or operating change is introduced.
+
+## Current upstream reconciliation: 922971904aca
+
+The next normal merge preserves upstream
+`922971904aca81254db41d753d1ed65be66d8d83`, including its new OpenCode plugin
+workspace and dependency graph. The only text conflict is the web
+`@json-render/react` peer resolution in the lockfile. It keeps the existing
+Zod 4.6.6 pin; regeneration with repository pnpm 9.15.9 also deduplicates
+compatible Zod consumers to that version. Incoming workspace declarations and
+other dependency versions remain unchanged.
+
+- Frozen-lockfile installation passed for all nine workspace projects.
+- The existing generator check passed for both schema and guidance. The
+  previously generated nullable-number schema remains current without another
+  generated-file edit.
+- The existing rich-output and generator selection passed 8 files and 161 tests
+  in 11.20 seconds.
+- Full typechecking passed with the same process-local 6 GiB Node heap allowance.
+- The main-relative contribution remains the same six manifest, lockfile,
+  generated-schema and documentation paths. No new tests, runtime behavior,
+  operating settings or replacement PR are introduced.
+
+The earlier upstream integration results retain their original revision scope.
+Hosted checks and maintainer approval remain separate from these source checks.

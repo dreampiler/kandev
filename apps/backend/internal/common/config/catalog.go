@@ -73,6 +73,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "database.sslMode", EnvVars: []string{"KANDEV_DATABASE_SSLMODE"}, Owner: "database", Default: "disable"},
 	{Key: "database.maxConns", EnvVars: []string{"KANDEV_DATABASE_MAXCONNS"}, Owner: "database", Default: "25"},
 	{Key: "database.minConns", EnvVars: []string{"KANDEV_DATABASE_MINCONNS"}, Owner: "database", Default: "5"},
+	{Key: sqliteReaderConnsKey, EnvVars: []string{"KANDEV_SQLITE_READER_CONNS"}, Owner: "database", Default: "4", Description: "SQLite read-only connection pool size. Startup-only; accepts 1 through 64. Ignored for PostgreSQL."},
 	{Key: "nats.url", EnvVars: []string{"KANDEV_NATS_URL"}, Owner: "events", Default: "", Sensitive: true},
 	{Key: "nats.clusterId", EnvVars: []string{"KANDEV_NATS_CLUSTERID"}, Owner: "events", Default: "kandev-cluster"},
 	{Key: "nats.clientId", EnvVars: []string{"KANDEV_NATS_CLIENTID"}, Owner: "events", Default: "kandev-client"},

@@ -147,6 +147,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	}
 	a.mu.Lock()
 	conn := a.acpConn
+	priorSessionID := a.sessionID
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -228,6 +229,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = ""
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -244,6 +246,12 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
+	if sessionID != priorSessionID {
+		// Only a proven conversation replacement discards the prior suggestion
+		// window. A failed transition or a same-ID restore keeps the old
+		// conversation, so its pending suggestion must stay ambiguous.
+		a.resetPromptSuggestionOrigin(priorPromptTurn)
+	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -562,6 +570,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	conn := a.acpConn
 	capabilities := a.capabilities
+	priorSessionID := a.sessionID
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -664,6 +673,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -683,6 +693,11 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
+	if sessionID != priorSessionID {
+		// A same-ID restore keeps the same provider conversation, so its prior
+		// suggestion window must stay ambiguous instead of being discarded.
+		a.resetPromptSuggestionOrigin(priorPromptTurn)
+	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -760,6 +775,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
 		SessionId: acp.SessionId(sessionID), Cwd: a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
+		Meta:       a.promptSuggestionSessionMeta(),
 	})
 	if err != nil {
 		for _, server := range filteredServers {
@@ -773,6 +789,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.configGeneration++
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
