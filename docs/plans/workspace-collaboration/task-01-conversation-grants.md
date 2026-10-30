@@ -30,7 +30,7 @@ history, operating services, unrelated worktrees or Git references. Use temporar
 proofs outside test collection; retain exact commands/results here and remove
 temporary sources after sufficient verification.
 
-## Implemented candidate and original remaining scope
+## Task 01 checkpoint and follow-on scope
 
 This is an API/task-domain foundation, not completion of T3 or a guarantee for
 the main MCP plugin-tool flow. The typed grant store, human/manage GET/PUT API,
@@ -50,15 +50,16 @@ preserves native APIs and saved grants; enabled identity/store errors deny the
 covered call. No operating toggle, grant, profile, model order, history or service
 was changed during implementation.
 
-The [transport gap](../../specs/tasks/system-design/workspace-collaboration.md#transport-coverage-and-original-remaining-work)
-remains original implementation work: server-originated agent invocation context
-is passed to the plugin, but its later long-lived Host RPC has no restored
-conversation/owner principal. Plugin capability/native permissions still apply
-there, and the new conversation narrowing can be bypassed on that path. Payload
-task IDs are not used as identity, and no global plugin principal was invented.
-A bounded per-invocation origin bridge through the existing SDK/broker path is
-the next atomic unit. Profile inheritance, delegated/taskless callers, advertised
-report-tool/UI integration and the grant-editor UI also remain original scope.
+At this Task 01 checkpoint, the [transport gap](../../specs/tasks/system-design/workspace-collaboration.md#transport-coverage-and-original-remaining-work)
+was still open: server-originated agent invocation context reached the plugin,
+but its later long-lived Host RPC had no restored conversation/owner principal.
+Task 02 closes that gap with a bounded per-invocation origin bridge through the
+existing SDK/broker path. Payload task IDs are not used as identity, and no
+global plugin principal was added.
+
+Later changes in this PR add the desktop/mobile grant-editor entry points and
+`message_task_kandev` report delivery. Profile inheritance, delegated/taskless
+callers, and aggregate navigation remain follow-up scope.
 
 ## Executed verification (2026-10-15)
 

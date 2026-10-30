@@ -33,8 +33,11 @@ domain corrections. Do not infer identity from tool JSON or a shared Host field.
 Record focused existing SDK/plugin checks and disposable actual RPC/domain
 proofs here. No permanent tests, new poller, queue, protocol framework, provider
 execution, operating permission changes or Git publication by this worker.
-Profile inheritance, delegation/taskless callers and a full grant-editor UI
-remain original subsequent work.
+At this Task 02 checkpoint, profile inheritance, delegation/taskless callers,
+aggregate navigation and the full grant-editor UI remained subsequent work.
+Later changes in this PR add the desktop/mobile grant-editor entry points and
+`message_task_kandev` report delivery. Profile inheritance, delegation/taskless
+callers and aggregate navigation remain follow-up scope.
 
 ## Implemented behavior
 

@@ -8,25 +8,25 @@ system_design:
 legacy_specs: []
 ---
 
-# Workspace collaboration first server slice
+# Workspace collaboration implementation
 
-Implement [Task 01](task-01-conversation-grants.md) in the independent upstream
-worktree. Preserve the disabled native path, existing task/session history and
-native permission resolver. Use server stream identity, a task-owned typed grant
-store, composition callbacks, independent action enforcement and dedicated
-non-prompting report transport. Add the off-by-default typed native toggle to all
-registry/profile/frontend contracts. Verification is disposable and bounded to
-the changed paths. Git publication and operating activation belong to integration.
+This plan records the workspace collaboration work in [Task 01](task-01-conversation-grants.md)
+and [Task 02](task-02-plugin-caller-context.md). The current PR branch includes
+the task-owned grant store, server-derived caller checks, separate read/report/
+prompt/control grants, non-prompting report delivery, plugin Host caller context,
+and grant-editor entry points on desktop and mobile. The native feature toggle
+remains off by default.
 
-Profile inheritance, taskless callers, delegated authority, the grant editor and
-aggregate navigation remain explicit original follow-up scope, not completed
-behavior or prerequisites for this slice.
+Profile inheritance, taskless callers, delegated authority, and aggregate
+navigation remain follow-up scope. They are not part of this PR.
 
-The [transport coverage](../../specs/tasks/system-design/workspace-collaboration.md#transport-coverage-and-original-remaining-work)
-records the generic plugin Host callback's missing verified conversation origin.
-Task 01 is an API/domain foundation and does not alone claim to enforce grants
-across the main MCP plugin-tool flow.
+At the Task 01 checkpoint, the generic plugin Host callback did not carry a
+verified conversation origin, so Task 01 alone did not enforce grants across
+the main MCP plugin-tool flow. [Task 02](task-02-plugin-caller-context.md)
+closes that transport gap through the existing SDK and gRPC broker. The paired
+[system design](../../specs/tasks/system-design/workspace-collaboration.md#transport-coverage-and-original-remaining-work)
+records the boundary and remaining follow-up scope.
 
-[Task 02](task-02-plugin-caller-context.md) connects that remaining transport
-boundary through the existing SDK/gRPC broker. Preserve Task 01's verified
-domain corrections and reuse its valid authorization/store results.
+The branch also exposes status-report delivery through `message_task_kandev`.
+Task 01's verified domain boundaries and the native permission resolver remain
+the authorization foundation for both transport paths.
