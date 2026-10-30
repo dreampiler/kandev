@@ -20,6 +20,7 @@ import (
 
 // These match agentctl's workspace_git_diff.go collection limits.
 const (
+	localStatusAdded       = "added"
 	localMaxDiffFileSize   = 10 * 1024 * 1024
 	localMaxDiffOutputSize = 256 * 1024
 	localMaxTotalDiffBytes = 2 * 1024 * 1024
@@ -145,7 +146,7 @@ func localHunkLineCounts(diff string) (additions, deletions int) {
 func localChangeStatus(code string) string {
 	switch {
 	case strings.HasPrefix(code, "A"):
-		return "added"
+		return localStatusAdded
 	case strings.HasPrefix(code, "D"):
 		return "deleted"
 	case strings.HasPrefix(code, "R"):

@@ -414,7 +414,7 @@ func TestCollectLocalChangesUsesAgentctlStatusVocabulary(t *testing.T) {
 	for _, file := range files {
 		status[file.Path] = file.Status
 	}
-	if status["keep.txt"] != "modified" || status["new.txt"] != "added" || status["gone.txt"] != "deleted" {
+	if status["keep.txt"] != "modified" || status["new.txt"] != localStatusAdded || status["gone.txt"] != "deleted" {
 		t.Fatalf("statuses = %+v", status)
 	}
 }
