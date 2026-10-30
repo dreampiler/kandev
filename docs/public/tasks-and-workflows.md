@@ -635,7 +635,7 @@ For a new capture, Kandev compares the turn with its captured history. If the br
 
 Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Retained content can expire. Kandev then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
@@ -679,11 +679,19 @@ What a job row can show depends on the agent runtime:
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
 
+For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
+detached shell job from the native exit event. A job can therefore move from
+unknown to completed, failed, or interrupted after the foreground prompt ends.
+The plugin is off by default; see
+[Agents and profiles](agents-and-profiles.md#opencode-terminal-outcomes) for
+activation and compatibility. Without the plugin, or on an unsupported runtime,
+the job keeps the unknown fallback.
+
 Controls appear only when the runtime advertises them and the job is currently
 actionable. Runs that provide observation only, such as a detached OpenCode
-shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
-or input controls, and their output is labeled unavailable rather than shown as
-live logs. The launch banner in the original tool message is not live command
+shell launch without the integration plugin, show no Stop, Interrupt, or input
+controls, and their output is labeled unavailable rather than shown as live
+logs. The launch banner in the original tool message is not live command
 output.
 
 ### Prevent auto-start on open
@@ -761,17 +769,24 @@ or a backend restart stops pending automatic recovery.
 
 ### Model capacity
 
-For interactive tasks, Kandev retries a model-capacity error when the runtime
-supports live continuation and at least one tool has a confirmed result. Kandev
-keeps confirmed actions in the conversation. It asks the agent to continue
-without repeating those actions. This does not guarantee exactly-once effects.
+Kandev supports live model-capacity recovery for tested Codex and OpenCode ACP
+profiles in interactive tasks. OpenCode can run its own short retries first. A
+native retry does not start a Kandev retry and does not use the Kandev attempt
+budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
+the same runtime and continues the unfinished turn there.
+
+Kandev retries a model-capacity error when the runtime supports live
+continuation and at least one tool has a confirmed result. Kandev keeps
+confirmed actions in the conversation. It asks the agent to continue without
+repeating those actions. This does not guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
-from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
-count, next retry, deadline, and **Cancel** action. A new message, a session
-configuration change, or **Cancel** stops pending recovery. A backend restart
-also stops automatic recovery. It does not restore the retry schedule. The
-deadline does not stop a turn that is already running.
+from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
+one of the first five waits. It never shortens a wait. The inline notice shows
+the attempt count, next retry, deadline, and **Cancel** action. A new message, a
+session configuration change, or **Cancel** stops pending recovery. A backend
+restart also stops automatic recovery. It does not restore the retry schedule.
+The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
 is pending, an outcome is uncertain, background work is unaccounted for, the
@@ -1173,6 +1188,7 @@ to review an action and return to your list.
 
 - Kandev removes archived tasks from active views. Saved views that include archived tasks still show them.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
+- Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
 For Git worktrees, archive deletes Kandev-owned checkouts and their local

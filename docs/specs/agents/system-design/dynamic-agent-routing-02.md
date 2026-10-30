@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-29
 owners:
   - cfl
 ---
@@ -205,6 +205,18 @@ require the current exclusive probe lease.
   selections and do not rewrite recorded decisions.
 - Turn-level execution profile, provider, model, and route-generation badges are
   immutable and survive reload even when the current route or profile changes.
+- The session's logical profile and its materialized route stay paired.
+  `startCreatedSession` calls `refuseMaterializedRouteProfileChange` before it
+  persists a changed profile: when `LoadRouteState` returns a positive
+  generation for a different logical profile, the start fails with
+  `ErrMaterializedRouteProfileChange` and nothing is written. The WebSocket
+  launch handler maps this expected refusal to a validation error. Background
+  prepared-session routing holds the same session lifecycle lock across its
+  fresh session read, route claim, and projection write. This serializes route
+  materialization with profile changes: preparation first makes a conflicting
+  start fail, while a profile change first makes preparation resolve the new
+  profile. A different dynamic profile is reached through a new session (the
+  workflow profile-switch path), not by relabelling this one.
 
 ## Scenarios
 

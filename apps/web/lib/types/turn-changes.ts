@@ -25,6 +25,7 @@ export type TurnRepositoryChange = {
   enumeration_complete: boolean;
   comparison_complete: boolean;
   content_complete: boolean;
+  preservation_pending?: boolean;
   comparison_basis?: "direct" | "upstream_adjusted" | "history_unavailable" | "legacy_raw";
   comparison_reason?: string;
   export_state?: "queued" | "running" | "retrying" | "complete" | "unavailable";

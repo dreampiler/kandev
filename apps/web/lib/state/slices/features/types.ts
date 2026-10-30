@@ -27,6 +27,7 @@ export const defaultFeatureFlags = {
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
   agentBackgroundWork: false,
+  opencodePlugin: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

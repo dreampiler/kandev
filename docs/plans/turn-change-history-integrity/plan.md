@@ -428,4 +428,3 @@ Leave all package files unstaged and uncommitted.
 - SQLite/PostgreSQL parity needs real PostgreSQL evidence when configured.
   Existing skips and unrelated executor gaps remain visible.
 - Public docs change with implementation. This package changes internal intent only.
-

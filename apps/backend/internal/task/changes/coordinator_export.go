@@ -15,6 +15,25 @@ func (c *Coordinator) preserveTerminalRepositoryContent(
 	row models.TurnRepositoryChangeSet,
 	client CheckpointClient,
 ) (models.TurnRepositoryChangeSet, error) {
+	archiveClient, archiveOK := client.(ArchiveClient)
+	if !archiveOK || c.content == nil || !c.content.HistoryEnabled() {
+		return c.preserveTerminalRepositoryExport(ctx, changeSet, row, client)
+	}
+	if c.exportLimiter != nil {
+		if !c.exportLimiter.Acquire(ctx) {
+			return row, ctx.Err()
+		}
+		defer c.exportLimiter.Release()
+	}
+	return c.preserveHistoricalRepositoryContent(ctx, changeSet, row, archiveClient)
+}
+
+func (c *Coordinator) preserveTerminalRepositoryExport(
+	ctx context.Context,
+	changeSet *models.TurnChangeSet,
+	row models.TurnRepositoryChangeSet,
+	client CheckpointClient,
+) (models.TurnRepositoryChangeSet, error) {
 	if client == nil || c.content == nil {
 		return c.failTurnRepositoryExport(ctx, row, row.ExportClaimToken, models.TurnChangeReasonContentUnavailable)
 	}

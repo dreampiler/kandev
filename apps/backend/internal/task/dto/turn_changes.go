@@ -49,6 +49,7 @@ type TurnRepositoryChangeDTO struct {
 	EnumerationComplete bool                          `json:"enumeration_complete"`
 	ComparisonComplete  bool                          `json:"comparison_complete"`
 	ContentComplete     bool                          `json:"content_complete"`
+	PreservationPending bool                          `json:"preservation_pending,omitempty"`
 	ComparisonBasis     turnchanges.ComparisonBasis   `json:"comparison_basis,omitempty"`
 	ComparisonReason    models.TurnChangeReason       `json:"comparison_reason,omitempty"`
 	ExportState         models.TurnChangeExportState  `json:"export_state,omitempty"`
@@ -124,7 +125,8 @@ func TurnChangeSetSummaryFromModel(changeSet *models.TurnChangeSet, repositories
 			RepositorySubpath: repository.RepositorySubpath, Availability: repository.Availability,
 			Reason: repository.Reason, EnumerationComplete: repository.EnumerationComplete,
 			ComparisonComplete: repository.ComparisonComplete, ContentComplete: repository.ContentComplete,
-			ComparisonBasis: repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
+			PreservationPending: repository.PreservationState == models.TurnChangePreservationPending,
+			ComparisonBasis:     repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
 			ExportState: repository.ExportState, ExportReason: repository.ExportReason,
 			OverlapIntervals: repository.OverlapIntervals,
 		})
