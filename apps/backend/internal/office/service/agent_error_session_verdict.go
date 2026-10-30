@@ -160,7 +160,7 @@ func (s *Service) agentErrorVerdictTimeout() time.Duration {
 // arrived in time. A still-live or already-superseded session keeps the run
 // claimed for its current execution; a recorded failure applies the deferred
 // failure. A read error is not a verdict: the parked failure and its run
-// identity stay in place and the same bounded re-check is re-armed, so an
+// identity stay in place and a new bounded re-check is scheduled, so an
 // unreadable session is neither applied as a failure nor discarded as a
 // successor.
 func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID string, pending *pendingAgentFailure) {
@@ -169,8 +169,12 @@ func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID stri
 	}
 	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, sessionID)
 	if err != nil {
+		// A fresh timer avoids mutating a timer that another taker may be
+		// stopping. A callback that lost its entry returns at the guard above.
 		if s.isCurrentPendingAgentFailure(sessionID, pending) {
-			pending.timer.Reset(s.agentErrorVerdictTimeout())
+			time.AfterFunc(s.agentErrorVerdictTimeout(), func() {
+				s.recheckPendingAgentFailure(context.Background(), sessionID, pending)
+			})
 			s.logger.Warn("deferred Office run failure: session verdict read failed; re-check rescheduled",
 				zap.String("run_id", pending.runID),
 				zap.String("session_id", sessionID),

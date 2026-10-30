@@ -147,7 +147,7 @@ completing run, so the run it resolves is settled only by the session verdict.
 - The re-check (default two minutes) applies only a recorded failure verdict; a
   still-live session keeps the run claimed for its current execution. A re-check
   read error is not a verdict: the parked failure and its run identity stay in
-  place and the same bounded re-check is re-armed, so neither a failure nor a
+  place and a new bounded re-check is scheduled, so neither a failure nor a
   successor is inferred from an unreadable session.
 - A parked failure does not survive a restart; the run stays claimed until
   stale-claim recovery requeues it.
