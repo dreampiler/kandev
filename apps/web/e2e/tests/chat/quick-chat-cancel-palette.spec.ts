@@ -162,6 +162,9 @@ test.describe("Quick Chat cancellation palette and composer", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    // Buffer settlement frames from the cancelled Quick Chat session so the
+    // pending/disabled observation cannot be raced by the prompt release.
+    const cancellation = await holdCancellationSettlement(testPage);
     // Release the mock cancel hold from the exact cancelled session instead of
     // letting the 8s hold outlive agentctl's acknowledgement window.
     releaseFilePath = path.join(backend.tmpDir, "quick-chat-cancel-release");
@@ -199,17 +202,22 @@ test.describe("Quick Chat cancellation palette and composer", () => {
       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).toBeVisible({ timeout: 15_000 });
 
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${modifier}+k`);
-    const palette = commandDialog(testPage);
-    await expect(palette).toBeVisible({ timeout: 10_000 });
-    await palette.getByRole("combobox").fill("cancel");
-    const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
-    await expect(cancelOption).toHaveCount(1);
-    await cancelOption.click();
-    fs.writeFileSync(releaseFilePath!, "release");
+    try {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await testPage.keyboard.press(`${modifier}+k`);
+      const palette = commandDialog(testPage);
+      await expect(palette).toBeVisible({ timeout: 10_000 });
+      await palette.getByRole("combobox").fill("cancel");
+      const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
+      await expect(cancelOption).toHaveCount(1);
+      cancellation.arm(quickSessionId);
+      await cancelOption.click();
+      fs.writeFileSync(releaseFilePath!, "release");
 
-    await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+      await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    } finally {
+      cancellation.release();
+    }
     await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
