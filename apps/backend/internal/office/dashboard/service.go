@@ -74,13 +74,11 @@ type Repository interface {
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
 	CreateTaskComment(ctx context.Context, comment *models.TaskComment) error
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
-	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
 	// UpdateTaskAssignee returns the task's assignment_generation after the
 	// bump, read back inside the same transaction that wrote the runner
 	// seat (see the sqlite implementation's doc comment).
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
-	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -450,6 +448,7 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
+	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -668,6 +667,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
+	s.taskStateWriter = w
 }
 
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used

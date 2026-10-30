@@ -192,6 +192,9 @@ type CreateRequest struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
@@ -238,6 +241,10 @@ type CreateRequest struct {
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

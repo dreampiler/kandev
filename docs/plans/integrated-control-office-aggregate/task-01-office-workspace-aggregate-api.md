@@ -44,3 +44,14 @@ Out of scope: the standalone `/office/overview` page, its Office store slice, it
 - `cd apps/backend && go test ./internal/office/dashboard ./internal/office/repository/sqlite`
 - `cd apps/backend && go test ./internal/backendapp -run 'TestOfficeScope|TestOfficeRoute|TestOfficeWorkspaceless'`
 - `cd apps/web && pnpm test -- app/office/workspace/activity/activity-row.test.tsx`
+
+## Current-main reconciliation (2026-10-31)
+
+The normal merge preserves the published aggregate and recorded-control source
+and current main. The one service-struct conflict keeps both dependencies:
+`workspaceLister` supplies identity-scoped aggregate reads; `taskStateWriter`
+keeps main's task-owned transactional writes and completion guards. Both setters
+and composition-root bindings remain. No read, mutation or authorization policy
+is replaced, and no schema, API, flag or additional control feature is introduced.
+Existing aggregate and scope tests verify this composition; current results and
+normal hooks are recorded at handoff separately from the historical checks.

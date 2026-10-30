@@ -1194,6 +1194,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
 			McpMode:                        info.McpMode,
+			PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, info.McpMode),
 			AgentConfig:                    agentConfig,
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
@@ -1207,6 +1208,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
 			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
 			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
+			OpenCodePluginRuntime:          openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
 			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
@@ -1514,7 +1516,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 	if rt != nil && runtimeInstance != nil {
-		if stopErr := m.stopWorkspaceRuntimeAndRelease(ctx, rt, runtimeInstance, true); stopErr != nil {
+		if stopErr := m.stopLaunchRuntimeOnRollback(ctx, rt, runtimeInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

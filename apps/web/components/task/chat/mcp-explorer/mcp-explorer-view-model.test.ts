@@ -46,7 +46,7 @@ describe("MCP explorer view model", () => {
     expect(partial.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
     expect(partial[1]).toMatchObject({
       source: "profile",
-      status: "delivered",
+      status: "unknown",
     });
   });
 
@@ -134,6 +134,7 @@ it.each([
   ["definition_disabled", "DefinitionDisabled"],
   ["definition_missing", "DefinitionMissing"],
   ["secret_resolution_failed", "SecretResolution"],
+  ["session_excluded", "SessionExcluded"],
 ])("explains the recorded %s exclusion safely", (reason_code, suffix) => {
   expect(mcpStatusPresentation(server({ status: "filtered", reason_code })).explanationKey).toBe(
     `task:mcpReason${suffix}`,
@@ -153,4 +154,20 @@ it("does not reuse a stale filtered reason for stronger evidence or expose arbit
     mcpStatusPresentation(server({ status: "filtered", reason_code: "sensitive unknown" }))
       .explanationKey,
   ).toBe("task:mcpExplanationFiltered");
+});
+
+// @covers AC-AGENTS-MCP-MANAGEMENT-003.1
+it("uses only current server evidence and never promotes previous attempts", () => {
+  const prior = history([server({ status: "active", tool_count: 12 })]).current;
+  const current = history([]);
+  current.previous = [prior];
+  expect(buildMcpExplorerServers(["kandev"], current)).toEqual([
+    { name: "kandev", status: "unknown" },
+  ]);
+  const failed = server({ status: "failed", summary: "Connection failed" });
+  current.current.servers = [failed];
+  expect(buildMcpExplorerServers(["kandev", "filesystem"], current)).toEqual([
+    failed,
+    { name: "filesystem", source: "profile", status: "unknown" },
+  ]);
 });
