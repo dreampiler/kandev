@@ -5828,6 +5828,22 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 func (r *Repository) UpdateTaskStateIfWorkflowStep(
 	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
 ) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, nil, state)
+}
+
+// UpdateTaskStateIfWorkflowStepAndState atomically checks the observed task
+// state and workflow step before applying a state transition.
+func (r *Repository) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState, state v1.TaskState,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, &expectedState, state)
+}
+
+func (r *Repository) updateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState *v1.TaskState, state v1.TaskState,
+) (bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -5846,17 +5862,21 @@ func (r *Repository) UpdateTaskStateIfWorkflowStep(
 		}
 		return false, err
 	}
-	if stepID != expectedStepID {
+	if stepID != expectedStepID || (expectedState != nil && currentState != *expectedState) {
 		return false, nil
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
 		workflowID, stepID, workflowID, stepID); err != nil {
 		return false, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET state = ?, updated_at = ?
-		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
-	`), state, r.nowUTC(), taskID, expectedStepID)
+	updateQuery := `UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?`
+	args := []any{state, r.nowUTC(), taskID, expectedStepID}
+	if expectedState != nil {
+		updateQuery += ` AND state = ?`
+		args = append(args, *expectedState)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
 	if err != nil {
 		return false, err
 	}
