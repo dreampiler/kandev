@@ -17,7 +17,7 @@ export function markTurnChangeLegacy(dbPath: string, changeSetID: string) {
   }
 }
 
-export type TurnFileLink = { variant: string; contentID: string };
+export type TurnFileLink = { variant: string; contentID: string; createdAt: string };
 
 type TurnFileSnapshot = {
   contentAvailability: string;
@@ -213,7 +213,7 @@ export function pauseTurnFileContent(
     if (!changeSet) throw new Error(`turn change set not found: ${changeSetID}`);
     const links = db
       .prepare(
-        "SELECT variant, content_id AS contentID FROM turn_change_content_links WHERE file_change_id = ?",
+        "SELECT variant, content_id AS contentID, created_at AS createdAt FROM turn_change_content_links WHERE file_change_id = ?",
       )
       .all(file.id) as TurnFileLink[];
 
@@ -272,7 +272,7 @@ export function resumeTurnFileContent(
       "INSERT OR REPLACE INTO turn_change_content_links (file_change_id, variant, content_id, created_at) VALUES (?, ?, ?, ?)",
     );
     for (const link of snapshot.links) {
-      insert.run(fileID, link.variant, link.contentID, new Date().toISOString());
+      insert.run(fileID, link.variant, link.contentID, link.createdAt);
     }
     db.prepare(
       `UPDATE turn_file_changes

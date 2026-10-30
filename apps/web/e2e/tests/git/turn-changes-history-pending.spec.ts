@@ -40,6 +40,12 @@ test.describe("paused turn content preservation", () => {
         "untracked_test.txt",
       );
 
+      const pausedContent = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSetId}/files/${paused.fileID}/content?variant=canonical_patch`,
+      );
+      expect(pausedContent.status).toBe(404);
+
       const card = await reloadUntilTurnCard(testPage, session);
       await expect(card).toBeVisible({ timeout: 30_000 });
       const pendingFile = card.getByRole("button", { name: /untracked_test\.txt/ });
