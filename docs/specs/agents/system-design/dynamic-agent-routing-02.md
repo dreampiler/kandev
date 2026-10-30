@@ -3,8 +3,9 @@ status: draft
 system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
+  - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-29
 owners:
   - cfl
 ---
@@ -19,6 +20,7 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes) |
 
 ## Migrated source detail
 
@@ -97,6 +99,18 @@ require the current exclusive probe lease.
 
 ## Failure modes
 
+- Before adding transcript-derived user rows to a new continuation or choosing
+  a durable relaunch prompt, the orchestrator reads the complete session queue
+  snapshot and, when supported, ordinary pending dispatch claims under the same
+  session admission gate. A concurrent restore cannot move a claim into the
+  queue between these ownership reads. Owned entries
+  and same-session unaccepted claims exclude existing rows by their explicit
+  transcript ID and the existing deterministic queued-message ID. The recorded
+  marker may predate the writer in durable claims and is not required for an
+  exact row-ID match. An absent transcript row has no context to exclude. Read errors
+  stop reconstruction before launch. These reads do not ACK, restore, delete,
+  or dispatch queued work. Saved continuation data and cached retry prompts
+  keep their existing precedence.
 - Invalid or deleted candidate references make that candidate ineligible and
   surface a profile configuration error. They never fall through to a workspace
   default profile.
@@ -191,6 +205,18 @@ require the current exclusive probe lease.
   selections and do not rewrite recorded decisions.
 - Turn-level execution profile, provider, model, and route-generation badges are
   immutable and survive reload even when the current route or profile changes.
+- The session's logical profile and its materialized route stay paired.
+  `startCreatedSession` calls `refuseMaterializedRouteProfileChange` before it
+  persists a changed profile: when `LoadRouteState` returns a positive
+  generation for a different logical profile, the start fails with
+  `ErrMaterializedRouteProfileChange` and nothing is written. The WebSocket
+  launch handler maps this expected refusal to a validation error. Background
+  prepared-session routing holds the same session lifecycle lock across its
+  fresh session read, route claim, and projection write. This serializes route
+  materialization with profile changes: preparation first makes a conflicting
+  start fail, while a profile change first makes preparation resolve the new
+  profile. A different dynamic profile is reached through a new session (the
+  workflow profile-switch path), not by relabelling this one.
 
 ## Scenarios
 

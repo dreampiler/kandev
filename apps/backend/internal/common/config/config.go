@@ -601,6 +601,10 @@ type FeaturesConfig struct {
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 
+	// OpenCodePlugin supplies the Kandev integration plugin to supported
+	// OpenCode v2 launches. Off in every shipped profile and restart-required.
+	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
+
 	// OfficeAgentErrorSessionVerdict defers an Office task run's terminal
 	// failure, and its on_agent_error replacement run, until the failed
 	// session records its verdict. A successor launched in the same session

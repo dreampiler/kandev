@@ -4,6 +4,7 @@ import { test, expect } from "../fixtures/test-base";
 import { seedRunningGeneratingSession } from "./generating-session";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 import { waitForActiveSessionCancellationPending } from "./session-store";
+import { mockTurnGate } from "./mock-turn-gate";
 import { readMockACPTrace } from "./transient-turn-runtime-continuity";
 
 function cancellationEnvironment(uncertain: boolean) {
@@ -24,7 +25,6 @@ export function registerSilentPromptStallTests() {
     let recoveryProfileId: string | undefined;
     let tracePath: string | undefined;
     let cancelReleasePath: string | undefined;
-    let progressReleasePath: string | undefined;
     test.afterEach(async ({ apiClient, backend }, testInfo) => {
       if (testInfo.status !== testInfo.expectedStatus) {
         for (const [name, file] of [
@@ -37,7 +37,6 @@ export function registerSilentPromptStallTests() {
         }
       }
       if (cancelReleasePath) fs.writeFileSync(cancelReleasePath, "release");
-      if (progressReleasePath) fs.writeFileSync(progressReleasePath, "release");
       await releaseEnvironment?.();
       releaseEnvironment = undefined;
       if (recoveryProfileId) await apiClient.deleteAgentProfile(recoveryProfileId, true);
@@ -46,8 +45,6 @@ export function registerSilentPromptStallTests() {
       tracePath = undefined;
       if (cancelReleasePath) fs.rmSync(cancelReleasePath, { force: true });
       cancelReleasePath = undefined;
-      if (progressReleasePath) fs.rmSync(progressReleasePath, { force: true });
-      progressReleasePath = undefined;
     });
 
     test("output clears the real watchdog notice without ending the turn", async ({
@@ -60,33 +57,42 @@ export function registerSilentPromptStallTests() {
       test.setTimeout(120_000);
       releaseEnvironment = await backend.useEnv({ KANDEV_E2E_PROMPT_STALL_TIMEOUT: "1s" });
       if (!isMobile) await testPage.setViewportSize({ width: 600, height: 850 });
-      progressReleasePath = path.join(backend.tmpDir, "silent-turn-progress.release");
-      const { session, sessionId } = await seedRunningGeneratingSession(
-        testPage,
-        apiClient,
-        seedData,
-        "Silent turn resumes output",
-        {
-          predecessorPrompt: `e2e:await_file(${JSON.stringify(progressReleasePath)})\ne2e:message("silent-turn-progress")\ne2e:delay(30000)`,
-          startWithGeneratingTurn: true,
-        },
-      );
-      const notice = session.activeChat().getByTestId("running-action-notice");
-      await expect(notice).toHaveCount(1);
-      const cancel = notice.getByTestId("stall-cancel-turn-button");
-      const box = await cancel.boundingBox();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      fs.writeFileSync(progressReleasePath, "release");
-      await expect(
-        session.activeChat().getByText("silent-turn-progress", { exact: true }),
-      ).toBeVisible({ timeout: 20_000 });
-      await expect(notice).toHaveCount(0);
-      expect((await apiClient.getTaskSession(sessionId)).session.state).toBe("RUNNING");
-      await testPage.reload();
-      await session.waitForLoad();
-      await expect(notice).toHaveCount(0);
-      await assertNoDocumentHorizontalOverflow(testPage);
-      await apiClient.stopSession({ session_id: sessionId, force: true });
+      const outputGate = mockTurnGate(backend.tmpDir, "silent-turn-progress", {
+        announceStart: false,
+      });
+      const completionGate = mockTurnGate(backend.tmpDir, "silent-turn-fixture-finished", {
+        announceStart: false,
+      });
+      try {
+        const { session, sessionId } = await seedRunningGeneratingSession(
+          testPage,
+          apiClient,
+          seedData,
+          "Silent turn resumes output",
+          {
+            predecessorPrompt: [outputGate.prompt, completionGate.prompt].join("\n"),
+            startWithGeneratingTurn: true,
+          },
+        );
+        const notice = session.activeChat().getByTestId("running-action-notice");
+        await expect(notice).toHaveCount(1);
+        const cancel = notice.getByTestId("stall-cancel-turn-button");
+        const box = await cancel.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        await outputGate.release();
+        await expect(
+          session.activeChat().getByText("silent-turn-progress", { exact: true }),
+        ).toBeVisible({ timeout: 20_000 });
+        await expect(notice).toHaveCount(0);
+        expect((await apiClient.getTaskSession(sessionId)).session.state).toBe("RUNNING");
+        await testPage.reload();
+        await session.waitForLoad();
+        await expect(notice).toHaveCount(0);
+        await assertNoDocumentHorizontalOverflow(testPage);
+        await apiClient.stopSession({ session_id: sessionId, force: true });
+      } finally {
+        await Promise.all([outputGate.release(), completionGate.release()]);
+      }
     });
 
     for (const uncertain of [false, true]) {

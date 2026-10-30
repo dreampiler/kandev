@@ -105,6 +105,13 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Kandev integration plugin for supported OpenCode v2 task launches. Off in
+  # every shipped profile until packaged conformance and operator docs exist.
+  KANDEV_FEATURES_OPENCODE_PLUGIN:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Office agent-error session verdict: defer an Office task run's terminal
   # failure and its on_agent_error replacement until the failed session
   # records its verdict. Off in every profile until it is user-ready.

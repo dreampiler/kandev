@@ -72,6 +72,7 @@ type CreateInstanceRequest struct {
 	SessionID              string              `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
 	TaskID                 string              `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
 	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions      bool                `json:"prompt_suggestions,omitempty"`   // Ask native-suggestion agents to emit next-prompt suggestions
 	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
@@ -123,6 +124,10 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

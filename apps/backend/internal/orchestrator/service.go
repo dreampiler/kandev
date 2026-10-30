@@ -1265,6 +1265,12 @@ type Service struct {
 	// Nil is the common case; see LaunchCredentialReminter.
 	launchCredentialReminter LaunchCredentialReminter
 
+	// ceilingDeferredLaunchSettler lets the component that queued a
+	// ceiling-deferred launch settle its own durable record once the ceiling
+	// replay admits or terminally drops that launch. Nil is the common case;
+	// see CeilingDeferredLaunchSettler.
+	ceilingDeferredLaunchSettler CeilingDeferredLaunchSettler
+
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
 	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler

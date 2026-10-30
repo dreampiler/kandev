@@ -24,6 +24,7 @@ export const defaultFeatureFlags = {
   coordinatorPhase31: false,
   codexAppServer: false,
   agentBackgroundWork: false,
+  opencodePlugin: false,
   officeAgentErrorSessionVerdict: false,
 } as const;
 

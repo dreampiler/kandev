@@ -15,6 +15,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -147,6 +148,13 @@ type Adapter struct {
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
 
+	// promptSuggestionSupport caches the generic native-suggestion support
+	// resolved from the initialize response. It is support only: effective
+	// enablement also requires the launch request. Derived once under `mu`
+	// rather than re-read from `capabilities` because the untyped metadata map
+	// would race with concurrent readers.
+	promptSuggestionSupport bool
+
 	// Update channel
 	updatesCh chan AgentEvent
 	// Emission is serialized independently of mu so control events flush pending
@@ -190,6 +198,14 @@ type Adapter struct {
 	// "ready" signal, and the last one always wins in the frontend.
 	isLoadingSession bool
 	loadReplayPlan   *acp.SessionUpdatePlan
+
+	// nativeGeneration identifies the current native conversation within this
+	// process. A reset, new, load, or resume advances it so stale plugin claims
+	// and callbacks cannot select a successor session.
+	nativeGeneration uint64
+	// openCodePluginClaims retains immutable launch bindings after the active
+	// tool-call map drops the foreground launch at prompt end.
+	openCodePluginClaims map[string]opencodeplugin.Claim
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
@@ -333,6 +349,8 @@ type Adapter struct {
 	// and wait for acknowledgment before reporting success.
 	promptTurnMu sync.Mutex
 	promptTurn   *promptTurnState
+	// suggestionOrigin is guarded by promptTurnMu.
+	suggestionOrigin promptSuggestionOrigin
 
 	// promptGate is a 1-slot ownership token for session/prompt calls. Calls are
 	// serialized by default so ScheduleWakeup cannot race a user prompt and
@@ -396,6 +414,8 @@ type promptTurnState struct {
 	handedOff                    bool
 	gateOwned                    bool
 	finishing                    bool
+	// suggestion is guarded by the adapter's promptTurnMu.
+	suggestion promptSuggestionTurn
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -516,6 +536,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:      make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
 		handoffProtectedToolCalls: make(map[string]struct{}),
@@ -584,6 +605,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 		acpclient.WithCursorTaskHandler(a.handleCursorTask),
+		acpclient.WithExtensionNotificationHandler(a.handleExtensionNotification),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -631,35 +653,48 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	}
 	a.capabilities = resp.AgentCapabilities
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
+	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
+		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,
+	)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
 		attribute.Bool("supports_prompt_queueing", promptQueueing),
+		attribute.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		attribute.String("prompt_suggestion_evidence", string(suggestionEvidence)),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
 		zap.Bool("supports_load_session", a.capabilities.LoadSession),
-		zap.Bool("supports_prompt_queueing", promptQueueing))
+		zap.Bool("supports_prompt_queueing", promptQueueing),
+		zap.Bool("supports_prompt_suggestions", promptSuggestionSupport),
+		zap.String("prompt_suggestion_evidence", string(suggestionEvidence)))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
+	a.promptSuggestionSupport = promptSuggestionSupport
 	a.mu.Unlock()
 
-	// Emit agent capabilities event with prompt capabilities and auth methods
+	// Emit agent capabilities event with prompt capabilities and auth methods.
+	// Raw support is provider evidence; the legacy field keeps its effective
+	// launch-enablement meaning.
+	nativePromptSuggestionsSupported := promptSuggestionSupport
 	a.sendUpdate(AgentEvent{
-		Type:                    streams.EventTypeAgentCapabilities,
-		SupportsImage:           a.capabilities.PromptCapabilities.Image,
-		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
-		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
-		SupportsPromptQueueing:  promptQueueing,
-		AuthMethods:             authMethods,
+		Type:                             streams.EventTypeAgentCapabilities,
+		SupportsImage:                    a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:                    a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext:          a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:           promptQueueing,
+		SupportsPromptSuggestions:        a.cfg.PromptSuggestions && promptSuggestionSupport,
+		NativePromptSuggestionsSupported: &nativePromptSuggestionsSupported,
+		AuthMethods:                      authMethods,
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {
