@@ -1235,6 +1235,7 @@ export type AgentProfilePortable = {
   agent_name: string;
   model?: string;
   mode?: string;
+  config_options?: Record<string, string>;
 };
 
 export type WorkflowPortable = {

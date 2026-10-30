@@ -369,6 +369,22 @@ Each conversation scrolls independently, and the deck scrolls sideways when
 needed. Short windows temporarily show Columns with an explanation in Display; Grid
 returns when there is enough height, without changing the saved choice.
 
+### Keep chosen tasks in a fixed order
+
+1. In **View settings**, set **Task scope** to **Selected tasks**.
+2. Under **Sort**, choose **Selection order**.
+3. Open **Choose tasks** and select the tasks in the order you want the
+   columns. Each selected task shows its position.
+4. Select **Save**.
+
+The deck keeps that order after a reload and while the agents work. A selected
+task that only becomes active while the page is open joins at the end; reload or
+select **Reapply sort** to move it into its selected position. To move a task to
+the end, clear it and select it again. **Select all** adds the visible
+tasks in list order. Use the direction button to reverse the order. Selection
+order is available only for selected tasks; switching the scope to **All
+eligible tasks** changes the sort to **Attention**.
+
 With auto-hide enabled on a mouse or trackpad, the whole composer and its
 controls hide when idle. Only the existing CI popover remains, when available.
 Hover over a chat or focus its tile with the keyboard to reveal the composer.
@@ -718,6 +734,8 @@ Select **Walkthrough** from Changes or Review. Kandev sends the built-in `change
   title="Follow a code walkthrough"
   caption="A guided walkthrough moves from an explanation to the exact file and lines it describes."
 />
+
+The walkthrough shows when the agent last published it, using your selected language and local time. Hover over the timestamp to see its timezone. Publishing a replacement updates this timestamp.
 
 When the agent publishes the walkthrough:
 
