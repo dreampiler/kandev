@@ -295,6 +295,8 @@ const (
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 	// MetadataKeyCausingRunID keeps the Office cause across a lifecycle restart.
 	MetadataKeyCausingRunID = "causing_run_id"
+	// MetadataKeyTerminalCausingRunID preserves the launch identity for terminal events.
+	MetadataKeyTerminalCausingRunID = "terminal_causing_run_id"
 	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
 	// across runtime and backend restarts so restore policy can distinguish a
 	// relocation from an unchanged workspace.
@@ -449,6 +451,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
 	MetadataKeyCausingRunID:             true,
+	MetadataKeyTerminalCausingRunID:     true,
 	MetadataKeyOriginalWorkspacePath:    true,
 	metadataKeyPassthroughMCPClaims:     true,
 }
@@ -480,6 +483,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
 	MetadataKeyCausingRunID:          true,
+	MetadataKeyTerminalCausingRunID:  true,
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
@@ -912,12 +916,19 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if causingRunID == "" && req.Metadata != nil {
 		causingRunID, _ = req.Metadata[MetadataKeyCausingRunID].(string)
 	}
+	terminalCausingRunID := causingRunID
+	if req.Metadata != nil {
+		if persisted, ok := req.Metadata[MetadataKeyTerminalCausingRunID].(string); ok {
+			terminalCausingRunID = persisted
+		}
+	}
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
 		startupDisposition:         startupDispositionFromMetadata(metadata),
 		ID:                         ri.InstanceID,
 		CausingRunID:               causingRunID,
+		TerminalCausingRunID:       terminalCausingRunID,
 		ExecutorType:               executorType,
 		RunID:                      req.Env["KANDEV_RUN_ID"],
 		TaskID:                     req.TaskID,
