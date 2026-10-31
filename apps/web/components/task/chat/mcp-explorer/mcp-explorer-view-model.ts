@@ -43,7 +43,7 @@ export function buildMcpExplorerServers(
           : {
               name,
               source: "profile" as const,
-              status: "delivered" as const,
+              status: "unknown" as const,
             },
       );
     return [...observedServers, ...configuredOnly];
@@ -67,6 +67,7 @@ export function mcpStatusLabelKey(status: MCPAttachmentStatus): string {
 }
 
 const FILTER_REASON_KEYS: Record<string, string> = {
+  session_excluded: "task:mcpReasonSessionExcluded",
   http_unsupported: "task:mcpReasonHttpUnsupported",
   sse_unsupported: "task:mcpReasonSseUnsupported",
   duplicate_name: "task:mcpReasonDuplicateName",

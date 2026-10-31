@@ -53,6 +53,7 @@ type TurnChangeTerminal = lifecycle.TurnChangeTerminal
 type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
 type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
 type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
+type RuntimeStorageObservation = lifecycle.RuntimeStorageObservation
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
@@ -138,6 +139,14 @@ type Runtime interface {
 
 	// ExecuteBackgroundWorkAction executes an action on a background workload in the running execution.
 	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
+
+	// ResolveRunPermission selects one offered option on a pending permission
+	// request of a run-owned execution.
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+
+	// CancelRunPermission cancels a pending permission request of a run-owned
+	// execution.
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.
