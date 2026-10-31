@@ -195,6 +195,6 @@
   "controlCircuits.failures_other": "連續失敗 {{count}} 次",
   "controlCircuits.lastRecorded": "最後記錄：{{time}}",
   "integratedControl.readDenied": "您無權讀取此列表。",
-  "controlRestore.contractUnavailable": "此版本不提供此概览。这些数值尚未确认。",
+  "controlRestore.contractUnavailable": "此版本不提供此概覽。這些數值尚未確認。",
   "controlRefresh.retainedAt": "重新整理失敗 · 顯示 {{time}} 的值"
 }
