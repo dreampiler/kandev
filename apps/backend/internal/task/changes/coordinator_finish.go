@@ -555,6 +555,55 @@ func (c *Coordinator) acceptTurnRepositoryComparison(
 	return c.repository.AcceptTurnRepositoryComparison(acceptCtx, changeSetID, row.ID, expectation)
 }
 
+// preserveHistoricalRepositoryContent retains the accepted interval in a
+// backend-owned Git source instead of exporting every file into SQL.
+func (c *Coordinator) preserveHistoricalRepositoryContent(
+	ctx context.Context,
+	changeSet *models.TurnChangeSet,
+	row models.TurnRepositoryChangeSet,
+	client ArchiveClient,
+) (models.TurnRepositoryChangeSet, error) {
+	row.ContentSource = models.TurnChangeSourceGitArchive
+	receipt, err := c.content.Preserve(ctx, client, row)
+	if err != nil {
+		c.logger.Warn("turn change content preservation failed",
+			zap.String("change_set_id", changeSet.ID), zap.String("checkout_id", row.CheckoutID),
+			zap.Error(err))
+		row.ContentComplete, row.Reason = false, models.TurnChangeReasonContentUnavailable
+		row.PreservationState = models.TurnChangePreservationPending
+		return row, err
+	}
+	row.PreservationAttempts = receipt.Attempts
+	row.PreservationBytes = receipt.Bytes
+	row.PreservationReceipt = receipt.Receipt
+	if receipt.Source != "" {
+		row.ContentSource = receipt.Source
+	}
+	if !receipt.Complete && receipt.Cause != nil {
+		c.logger.Warn("turn change content preservation did not settle",
+			zap.String("change_set_id", changeSet.ID), zap.String("checkout_id", row.CheckoutID),
+			zap.Bool("retryable", receipt.Retryable), zap.Int64("attempts", receipt.Attempts),
+			zap.String("reason", string(receipt.Reason)), zap.Error(receipt.Cause))
+	}
+	if receipt.Complete {
+		row.ContentComplete = true
+		row.PreservationState = models.TurnChangePreservationReady
+		row.Reason = ""
+		return row, nil
+	}
+	row.ContentComplete = false
+	row.Reason = receipt.Reason
+	if row.Reason == "" {
+		row.Reason = models.TurnChangeReasonContentUnavailable
+	}
+	if receipt.Retryable {
+		row.PreservationState = models.TurnChangePreservationPending
+	} else {
+		row.PreservationState = models.TurnChangePreservationUnavailable
+	}
+	return row, nil
+}
+
 func unavailableTurnRepository(row models.TurnRepositoryChangeSet, reason models.TurnChangeReason) models.TurnRepositoryChangeSet {
 	row.Availability, row.Reason = models.TurnChangeAvailabilityUnavailable, reason
 	row.ContentComplete, row.ComparisonComplete, row.EnumerationComplete = false, false, false
@@ -587,6 +636,9 @@ func (c *Coordinator) captureAndAcceptTurnRepositoryEnd(
 		return row, errors.Join(fmt.Errorf("capture end for checkout %q: hash algorithm changed from %q to %q", row.CheckoutID, row.HashAlgorithm, end.HashAlgorithm), cleanupErr)
 	}
 	row.EndCommitOID, row.EndTreeOID, row.EndReachabilityRef = end.CommitOID, end.TreeOID, end.ReachabilityRef
+	if end.CommonGitDir != "" {
+		row.SourceGitDir = end.CommonGitDir
+	}
 	row.EndCapturedAt = timePtr(end.CapturedAt.UTC())
 	row.EndProvenanceJSON = encodeTurnChangeProvenance(end.Provenance)
 	row.CleanupPending = row.CleanupPending || row.EndReachabilityRef != ""

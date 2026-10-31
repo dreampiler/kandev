@@ -59,6 +59,15 @@ describe("projectTurnRepositoryAvailability", () => {
         availability: "ready",
         comparison_complete: true,
         content_complete: false,
+        preservation_pending: true,
+      },
+      "pending",
+    ],
+    [
+      {
+        availability: "ready",
+        comparison_complete: true,
+        content_complete: false,
         export_state: "queued",
       },
       "ready",

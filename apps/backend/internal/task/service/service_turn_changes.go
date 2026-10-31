@@ -10,9 +10,16 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 var ErrTurnChangeContentExpired = errors.New("turn change content expired")
+
+// IsRetryableTurnChangeContentError reports a temporary archive read failure.
+// The verified snapshot stays intact; callers may retry the same read.
+func IsRetryableTurnChangeContentError(err error) bool {
+	return errors.Is(err, changes.ErrHistoryReadRetryable)
+}
 
 type TurnChangeContentExpiredError struct {
 	Reason models.TurnChangeReason
@@ -25,6 +32,11 @@ func (e *TurnChangeContentExpiredError) Unwrap() error { return ErrTurnChangeCon
 const (
 	defaultTurnChangePageSize = 50
 	maxTurnChangePageSize     = 100
+	// Legacy SQL history keeps its shipped fixed deadline only on installations
+	// where the shared compaction policy is unavailable.
+	DefaultTurnChangeLegacyRetention         = 30 * 24 * time.Hour
+	DefaultTurnChangeLegacyTaskBytes         = 128 << 20
+	DefaultTurnChangeLegacyInstallationBytes = 1 << 30
 )
 
 func normalizeTurnChangePage(offset, limit int) (int, int) {
@@ -84,14 +96,18 @@ func (s *Service) ReadTurnChangeContent(ctx context.Context, sessionID, changeSe
 		return nil, err
 	}
 	if changeSet.Availability == models.TurnChangeAvailabilityExpired ||
-		(changeSet.RetainUntil != nil && !changeSet.RetainUntil.After(time.Now().UTC())) {
+		(s.legacyTurnChangeRetention() && changeSet.RetainUntil != nil && !changeSet.RetainUntil.After(time.Now().UTC())) {
 		reason := changeSet.ExpiryReason
 		if reason == "" {
 			reason = string(models.TurnChangeReasonExpiredAge)
 		}
 		return nil, &TurnChangeContentExpiredError{Reason: models.TurnChangeReason(reason)}
 	}
-	return changes.NewContentService(s.turnChanges, nil).Read(ctx, changeSetID, fileChangeID, variant)
+	content := s.turnChangeContent
+	if content == nil {
+		content = changes.NewContentService(s.turnChanges, nil)
+	}
+	return content.Read(ctx, changeSetID, fileChangeID, variant)
 }
 
 func (s *Service) PublishTurnChangeSummary(ctx context.Context, taskID, sessionID, changeSetID string) error {
@@ -157,6 +173,7 @@ type turnRepositoryChangeSummaryEvent struct {
 	EnumerationComplete bool                          `json:"enumeration_complete"`
 	ComparisonComplete  bool                          `json:"comparison_complete"`
 	ContentComplete     bool                          `json:"content_complete"`
+	PreservationPending bool                          `json:"preservation_pending,omitempty"`
 	ComparisonBasis     turnchanges.ComparisonBasis   `json:"comparison_basis,omitempty"`
 	ComparisonReason    models.TurnChangeReason       `json:"comparison_reason,omitempty"`
 	ExportState         models.TurnChangeExportState  `json:"export_state,omitempty"`
@@ -191,12 +208,41 @@ func projectTurnChangeSummaryEvent(changeSet *models.TurnChangeSet, repositories
 			RepositorySubpath: repository.RepositorySubpath, Availability: repository.Availability,
 			Reason: repository.Reason, EnumerationComplete: repository.EnumerationComplete,
 			ComparisonComplete: repository.ComparisonComplete, ContentComplete: repository.ContentComplete,
-			ComparisonBasis: repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
+			PreservationPending: repository.PreservationState == models.TurnChangePreservationPending,
+			ComparisonBasis:     repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
 			ExportState: repository.ExportState, ExportReason: repository.ExportReason,
 			OverlapIntervals: repository.OverlapIntervals,
 		})
 	}
 	return projected
+}
+
+// legacyTurnChangeRetention reports whether this installation still uses the
+// shipped fixed-deadline SQL history path. Git-backed history is governed only
+// by the shared compaction policy.
+func (s *Service) legacyTurnChangeRetention() bool {
+	return s.turnChangeContent == nil || !s.turnChangeContent.HistoryEnabled()
+}
+
+func (s *Service) runTurnChangeRetentionSweep(ctx context.Context, now time.Time) {
+	if s.turnChanges == nil || !s.legacyTurnChangeRetention() {
+		return
+	}
+	result, err := s.turnChanges.ApplyTurnChangeRetention(ctx, models.TurnChangeRetentionPolicy{
+		RetainFor:         DefaultTurnChangeLegacyRetention,
+		TaskBytes:         DefaultTurnChangeLegacyTaskBytes,
+		InstallationBytes: DefaultTurnChangeLegacyInstallationBytes,
+	}, now.UTC())
+	if err != nil {
+		s.logger.Warn("turn-change retention sweep failed", zap.Error(err))
+		return
+	}
+	if result.ExpiredChangeSets > 0 || result.DeletedContents > 0 {
+		s.logger.Info("turn-change retention sweep expired historical content",
+			zap.Int64("change_sets", result.ExpiredChangeSets),
+			zap.Int64("content_objects", result.DeletedContents),
+			zap.Int64("freed_payload_bytes", result.FreedPayloadBytes))
+	}
 }
 
 func turnChangeCountsAvailable(repositories []*models.TurnRepositoryChangeSet) bool {

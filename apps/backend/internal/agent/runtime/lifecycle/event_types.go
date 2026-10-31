@@ -46,6 +46,7 @@ type AgentEventPayload struct {
 	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
 	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
 	CausingRunID              string                           `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID      string                           `json:"terminal_causing_run_id,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.

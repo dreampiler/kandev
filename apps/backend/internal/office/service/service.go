@@ -431,6 +431,7 @@ type Service struct {
 	workspaceGroupCleaner   WorkspaceGroupCleaner
 	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
+	taskStateWriter         shared.TaskStateWriter
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
 	agentTokenMinter        AgentTokenMinter
@@ -655,6 +656,12 @@ func (s *Service) SetWorkspaceGroupCleaner(cleaner WorkspaceGroupCleaner) {
 // available for isolated tests and older composition roots.
 func (s *Service) SetTaskTreeDeleter(deleter TaskTreeDeleter) {
 	s.taskTreeDeleter = deleter
+}
+
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *Service) SetTaskStateWriter(writer shared.TaskStateWriter) {
+	s.taskStateWriter = writer
 }
 
 // SetConfigSyncCleaner wires the config sync service after startup

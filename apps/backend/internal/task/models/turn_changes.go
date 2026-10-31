@@ -124,6 +124,16 @@ type TurnRepositoryChangeSet struct {
 	EndCapturedAt           *time.Time                  `db:"end_captured_at" json:"end_captured_at,omitempty"`
 	StartReachabilityRef    string                      `db:"start_ref" json:"-"`
 	EndReachabilityRef      string                      `db:"end_ref" json:"-"`
+	SourceGitDir            string                      `db:"source_git_dir" json:"-"`
+	ContentSource           TurnChangeContentSource     `db:"content_source" json:"-"`
+	PreservationState       TurnChangePreservation      `db:"preservation_state" json:"-"`
+	PreservationReason      TurnChangeReason            `db:"preservation_reason" json:"-"`
+	PreservationAttempts    int64                       `db:"preservation_attempts" json:"-"`
+	PreservationBytes       int64                       `db:"preservation_bytes" json:"-"`
+	PreservationReceipt     string                      `db:"preservation_receipt" json:"-"`
+	PreservationDeadline    *time.Time                  `db:"preservation_deadline" json:"-"`
+	TaskID                  string                      `db:"task_id" json:"-"`
+	SessionID               string                      `db:"session_id" json:"-"`
 	Availability            TurnChangeAvailability      `db:"availability" json:"availability"`
 	Reason                  TurnChangeReason            `db:"reason" json:"reason,omitempty"`
 	CleanupPending          bool                        `db:"cleanup_pending" json:"-"`
@@ -288,6 +298,54 @@ const (
 	TurnChangeContentNewRendering   TurnChangeContentVariant = "new_rendering"
 )
 
+// TurnChangeContentSource identifies where historical bytes come from.
+// An empty value is legacy SQL content retained before Git sources existed.
+type TurnChangeContentSource string
+
+const (
+	TurnChangeSourceLegacySQL  TurnChangeContentSource = "legacy_sql"
+	TurnChangeSourceGitArchive TurnChangeContentSource = "git_archive"
+	TurnChangeSourceGitCommon  TurnChangeContentSource = "git_common"
+)
+
+func (s TurnChangeContentSource) Valid() bool {
+	switch s {
+	case "", TurnChangeSourceLegacySQL, TurnChangeSourceGitArchive, TurnChangeSourceGitCommon:
+		return true
+	default:
+		return false
+	}
+}
+
+// TurnChangePreservation tracks backend-owned object preservation for one
+// repository interval. It is independent from summary availability.
+type TurnChangePreservation string
+
+const (
+	TurnChangePreservationNone        TurnChangePreservation = ""
+	TurnChangePreservationPending     TurnChangePreservation = "pending"
+	TurnChangePreservationReady       TurnChangePreservation = "ready"
+	TurnChangePreservationUnavailable TurnChangePreservation = "unavailable"
+)
+
+func (s TurnChangePreservation) Valid() bool {
+	switch s {
+	case TurnChangePreservationNone, TurnChangePreservationPending,
+		TurnChangePreservationReady, TurnChangePreservationUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// TurnFileContentSource is the server-owned read context for one file. Browser
+// input never supplies any of these identities or paths.
+type TurnFileContentSource struct {
+	ChangeSet  *TurnChangeSet
+	Repository *TurnRepositoryChangeSet
+	File       *TurnFileChange
+}
+
 // TurnChangeFileContent is the bounded executor export for one immutable file
 // entry. Nil payloads are unavailable; non-nil empty rendering blobs are valid.
 type TurnChangeFileContent struct {
@@ -329,6 +387,49 @@ type TurnChangeRetentionResult struct {
 	ExpiredChangeSets int64
 	DeletedContents   int64
 	FreedPayloadBytes int64
+}
+
+// TurnHistoryRetentionCandidate is one terminal change set evaluated by the
+// shared history-compaction cutoff. All fields are server-owned.
+type TurnHistoryRetentionCandidate struct {
+	ChangeSetID       string                     `db:"change_set_id"`
+	TaskID            string                     `db:"task_id"`
+	TerminalAt        *time.Time                 `db:"terminal_at"`
+	Repositories      []*TurnRepositoryChangeSet `db:"-"`
+	LegacySQLBytes    int64                      `db:"-"`
+	PreservationBytes int64                      `db:"-"`
+}
+
+// TurnHistoryExpiryResult reports work committed by one SQL expiry pass.
+type TurnHistoryExpiryResult struct {
+	ExpiredChangeSets int64
+	DeletedContents   int64
+	FreedPayloadBytes int64
+}
+
+// TurnHistoryInventory is the bounded analysis projection for the shared
+// compaction card. Byte categories stay separate on purpose.
+type TurnHistoryCleanupIntent struct {
+	ID             string    `db:"id" json:"id"`
+	SourceID       string    `db:"source_id" json:"source_id"`
+	StartRef       string    `db:"start_ref" json:"start_ref"`
+	EndRef         string    `db:"end_ref" json:"end_ref"`
+	StartCommitOID string    `db:"start_commit_oid" json:"start_commit_oid"`
+	EndCommitOID   string    `db:"end_commit_oid" json:"end_commit_oid"`
+	ChangeSetID    string    `db:"change_set_id" json:"change_set_id"`
+	CheckoutID     string    `db:"checkout_id" json:"checkout_id"`
+	RepositoryID   string    `db:"repository_id" json:"repository_id"`
+	SourceGitDir   string    `db:"source_git_dir" json:"source_git_dir,omitempty"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+}
+
+type TurnHistoryInventory struct {
+	Tasks          int64
+	Snapshots      int64
+	LegacySQLBytes int64
+	ArchiveBytes   int64
+	InactiveSince  *time.Time
+	Complete       bool
 }
 
 type TurnChangeSetFinalization struct {

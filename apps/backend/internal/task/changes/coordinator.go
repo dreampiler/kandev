@@ -355,6 +355,7 @@ func (c *Coordinator) captureStart(ctx context.Context, admission Admission, cli
 		row.StartTreeOID = captured.TreeOID
 		row.HashAlgorithm = captured.HashAlgorithm
 		row.StartReachabilityRef = captured.ReachabilityRef
+		row.SourceGitDir = captured.CommonGitDir
 		row.StartProvenanceJSON = encodeTurnChangeProvenance(captured.Provenance)
 		row.CleanupPending = captured.ReachabilityRef != ""
 		capturedAt := captured.CapturedAt.UTC()
@@ -497,6 +498,16 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 		if !row.CleanupPending || !turnChangeRefsSettled(row) {
 			continue
 		}
+		// A pending preservation still needs the executor-owned refs to retry
+		// against the accepted endpoint pair.
+		if row.PreservationState == models.TurnChangePreservationPending {
+			continue
+		}
+		// Common Git checkpoints are root commits. Keep their refs until the
+		// shared compaction owner explicitly expires the interval.
+		if row.ContentSource == models.TurnChangeSourceGitCommon {
+			continue
+		}
 		cleanupFailed := false
 		for _, endpoint := range []struct {
 			boundary turnchanges.CheckpointBoundary
@@ -535,6 +546,10 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 }
 
 func turnChangeRefsSettled(row models.TurnRepositoryChangeSet) bool {
+	if row.PreservationState == models.TurnChangePreservationReady ||
+		row.PreservationState == models.TurnChangePreservationUnavailable {
+		return true
+	}
 	return row.ExportState == models.TurnChangeExportComplete || row.ExportState == models.TurnChangeExportUnavailable
 }
 

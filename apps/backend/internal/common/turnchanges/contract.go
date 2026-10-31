@@ -2,7 +2,11 @@
 // repository intervals captured around an admitted agent turn.
 package turnchanges
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Availability string
 
@@ -108,6 +112,7 @@ type Provenance struct {
 	Unborn              bool               `json:"unborn,omitempty"`
 	HeadCommitOID       string             `json:"head_commit_oid,omitempty"`
 	HeadRef             string             `json:"head_ref,omitempty"`
+	HeadBindingID       string             `json:"head_binding_id,omitempty"`
 	TargetConfigured    bool               `json:"target_configured"`
 	TargetIdentity      string             `json:"target_identity,omitempty"`
 	TargetRef           string             `json:"target_ref,omitempty"`
@@ -123,6 +128,17 @@ type Provenance struct {
 func (p *Provenance) Valid() bool {
 	return p != nil && p.Version == ProvenanceVersion2 && p.ChangeSetID != "" && p.CheckoutID != "" &&
 		(p.Boundary == CheckpointStart || p.Boundary == CheckpointEnd)
+}
+
+// SameBranchBinding reports whether both endpoints carry the same valid
+// generated-branch binding identity. A match can relax only the symbolic
+// ref-name check; every other history eligibility rule still applies.
+func SameBranchBinding(start, end *Provenance) bool {
+	if start == nil || end == nil || start.HeadBindingID == "" || start.HeadBindingID != end.HeadBindingID {
+		return false
+	}
+	parsed, err := uuid.Parse(start.HeadBindingID)
+	return err == nil && parsed.String() == start.HeadBindingID
 }
 
 type PolicyResolutionKind string
@@ -180,6 +196,7 @@ type CheckpointResult struct {
 	TreeOID         string             `json:"tree_oid"`
 	HashAlgorithm   string             `json:"hash_algorithm"`
 	ReachabilityRef string             `json:"reachability_ref"`
+	CommonGitDir    string             `json:"common_git_dir,omitempty"`
 	CapturedAt      time.Time          `json:"captured_at"`
 	Reused          bool               `json:"reused,omitempty"`
 	Provenance      *Provenance        `json:"provenance,omitempty"`
@@ -298,4 +315,38 @@ type CheckpointExport struct {
 	NextCursor              int64           `json:"next_cursor,omitempty"`
 	InventoryFingerprint    string          `json:"inventory_fingerprint,omitempty"`
 	TotalFiles              int64           `json:"total_files,omitempty"`
+}
+
+// ArchiveRequest asks the executor to export the exact accepted object
+// closure for one immutable interval. Object identity is always server-owned;
+// the archive never accepts arbitrary revisions.
+type ArchiveRequest struct {
+	ChangeSetID    string   `json:"change_set_id"`
+	KnownObjects   []string `json:"known_objects,omitempty"`
+	CheckoutID     string   `json:"checkout_id"`
+	Repo           string   `json:"repo,omitempty"`
+	HashAlgorithm  string   `json:"hash_algorithm"`
+	StartCommitOID string   `json:"start_commit_oid"`
+	StartTreeOID   string   `json:"start_tree_oid"`
+	EndCommitOID   string   `json:"end_commit_oid"`
+	EndTreeOID     string   `json:"end_tree_oid"`
+}
+
+// CheckpointArchive is a self-contained pack containing the accepted commits,
+// both interval trees, and every tree/blob needed to render their difference.
+// Objects lists the verified object identities in Pack for the importer.
+type CheckpointArchive struct {
+	ChangeSetID       string     `json:"change_set_id"`
+	CheckoutID        string     `json:"checkout_id"`
+	HashAlgorithm     string     `json:"hash_algorithm"`
+	StartCommitOID    string     `json:"start_commit_oid"`
+	StartTreeOID      string     `json:"start_tree_oid"`
+	EndCommitOID      string     `json:"end_commit_oid"`
+	EndTreeOID        string     `json:"end_tree_oid"`
+	Pack              []byte     `json:"pack"`
+	Objects           []string   `json:"objects"`
+	ObjectCount       int64      `json:"object_count"`
+	UncompressedBytes int64      `json:"uncompressed_bytes"`
+	Complete          bool       `json:"complete"`
+	Reason            ReasonCode `json:"reason,omitempty"`
 }

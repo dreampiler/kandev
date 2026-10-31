@@ -59,10 +59,39 @@ Agents that report background shell commands, subagents, or monitors feed the sh
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
-- **OpenCode ACP** reports a detached shell launch with its native shell identity. The supported OpenCode versions end their ACP subscription with the foreground prompt, so Kandev keeps the launch inspectable but marks its later activity unknown instead of promising completion, live output, or controls. The original launch banner stays in the tool message.
+- **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
 A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.
+
+#### OpenCode terminal outcomes
+
+Kandev can supply a small integration plugin to supported OpenCode v2 task
+launches. The plugin observes native shell terminal events through a private
+loopback callback, so an owned job can move from unknown to completed, failed,
+or interrupted after the foreground prompt ends.
+
+This integration is opt-in. Enable **OpenCode integration plugin** in
+**Settings > System > Feature Toggles**, or set
+`KANDEV_FEATURES_OPENCODE_PLUGIN=true`, and restart Kandev. An environment value
+wins over a stored toggle. The integration is off in every shipped profile.
+
+Requirements and behavior:
+
+- The runtime must be OpenCode v2 2.2.0. Other versions and OpenCode v1 keep the
+  existing ACP behavior and the unknown-job fallback.
+- Kandev supplies the plugin automatically. Do not install an npm package or
+  add a project plugin.
+- Existing `opencode.json`, inline configuration, user plugins, credentials,
+  and MCP settings keep their meaning. A malformed or conflicting inline
+  configuration disables only this integration for that launch.
+- The shared **Agent background work** feature must also be on. Turning it off
+  prevents shell claims and workload observations.
+- A terminal result can arrive after the foreground prompt. Intermediate
+  activity can still show unknown. Output streaming, process controls, and
+  automatic assistant follow-ups remain unavailable.
+- A job with no terminal evidence stays unknown. The plugin does not replay
+  events lost while OpenCode or the executor was stopped.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
 
@@ -482,7 +511,7 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
 | Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
-| Auto-approve all permissions           | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default.                                                                                                                                                                                   |
+| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                                                                          |
 | MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
 | Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
 | Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
@@ -862,7 +891,9 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 
 ## Permissions and unattended work
 
-In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
+In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, Kandev selects an offered `allow_once` response, or `allow_always` when allow-once is not offered, without waiting. If the agent supplies no allow response, the request stays pending for a person. Automatic approval never supplies a denial or cancellation. It shows the ordinary tool progress instead of an approval prompt, and permission history keeps the selected option and automatic source.
+
+If an automatic decision fails before dispatch while the request is still answerable, Kandev exposes the request for a person. After a decision is dispatched, a failed or uncertain outcome shows non-actionable feedback instead of a second answer.
 
 Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
 
