@@ -45,13 +45,22 @@ parsing, and changes to recovery gates.
 
 1. A Claude ACP failure with message `Internal error` and error kind
    `rate_limit_error` or `overloaded_error`, or with an explicit 429/529 status,
-   is retained as provider capacity.
+   preserves its allowlisted metadata and classifies as provider capacity.
+   Runtime retention separately requires a proven remote response and the
+   current-turn/runtime gates from [ACP prompt continuity](../../specs/platform/system-design/acp-prompt-error-continuity.md).
 2. Another adapter's kind, a generic wrapper kind, a fractional status, and an
    opaque provider code alone do not change classification.
 3. ACP `-32000` classifies as authentication required; `-32603` does not.
 4. Metadata is lent only to a diagnostic whose normalized text matches.
 
 ## Verification
+
+Current-main integration uses
+`TestRetainedACPApplicationErrorPreservesStructuredProviderSignals` with the
+existing real SDK error-response fixture. Every remote case retains a safe
+projection; the same positive/negative metadata cases still assert capacity
+classification independently. Local errors remain excluded by the existing
+continuity tests. The original pre-continuity verification below is historical.
 
 - `go test ./internal/agentctl/server/adapter/transport/acp/ -run TestRetainableACPApplicationErrorUsesStructuredProviderSignals`
   fails on the base revision (four structured-only cases are not retained) and

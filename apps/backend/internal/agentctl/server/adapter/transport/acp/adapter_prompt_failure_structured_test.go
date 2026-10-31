@@ -3,26 +3,25 @@ package acp
 import (
 	"testing"
 
-	sdk "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
-// A provider failure whose only routing signal is structured metadata (the
-// ACP SDK flattens the message to "Internal error") must still be recognised
-// as provider capacity, so the turn is retained instead of being torn down as
-// a generic internal error.
+// Remote prompt errors preserve structured capacity evidence even when the
+// visible message is generic. Runtime retention follows response provenance;
+// classification remains independent and provider-scoped.
 //
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32
-func TestRetainableACPApplicationErrorUsesStructuredProviderSignals(t *testing.T) {
+func TestRetainedACPApplicationErrorPreservesStructuredProviderSignals(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		provider  string
-		data      any
-		wantValid bool
+		name         string
+		provider     string
+		data         any
+		wantCapacity bool
 	}{
-		{name: "claude rate limit kind", provider: claudeAgentID, data: map[string]any{"errorKind": "rate_limit_error"}, wantValid: true},
-		{name: "claude overloaded kind", provider: claudeAgentID, data: map[string]any{"errorKind": "overloaded_error"}, wantValid: true},
-		{name: "explicit http 429", provider: codexAgentID, data: map[string]any{"statusCode": float64(429), "errorCode": "rate_limit"}, wantValid: true},
-		{name: "explicit http 529", provider: claudeAgentID, data: map[string]any{"statusCode": float64(529)}, wantValid: true},
+		{name: "claude rate limit kind", provider: claudeAgentID, data: map[string]any{"errorKind": "rate_limit_error"}, wantCapacity: true},
+		{name: "claude overloaded kind", provider: claudeAgentID, data: map[string]any{"errorKind": "overloaded_error"}, wantCapacity: true},
+		{name: "explicit http 429", provider: codexAgentID, data: map[string]any{"statusCode": float64(429), "errorCode": "rate_limit"}, wantCapacity: true},
+		{name: "explicit http 529", provider: claudeAgentID, data: map[string]any{"statusCode": float64(529)}, wantCapacity: true},
 		{name: "kind outside its provider namespace", provider: codexAgentID, data: map[string]any{"errorKind": "rate_limit_error"}},
 		{name: "generic wrapper kind", provider: claudeAgentID, data: map[string]any{"errorKind": "AI_APICallError"}},
 		{name: "fractional status ignored", provider: claudeAgentID, data: map[string]any{"statusCode": 429.5}},
@@ -30,12 +29,16 @@ func TestRetainableACPApplicationErrorUsesStructuredProviderSignals(t *testing.T
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a := newTestAdapterForAgent(test.provider)
-			providerError, ok := a.retainableACPApplicationError(&sdk.RequestError{Code: -32603, Message: "Internal error", Data: test.data})
-			if ok != test.wantValid {
-				t.Fatalf("retainable = %v, want %v (provider error %+v)", ok, test.wantValid, providerError)
+			err := remoteACPRequestError(t, -32603, "Internal error", test.data)
+			providerError, ok := a.retainedACPApplicationError(err)
+			if !ok || providerError == nil || !providerError.Valid() {
+				t.Fatalf("provider error = %+v, retained = %v; want a valid remote ACP diagnostic", providerError, ok)
 			}
-			if ok && (providerError == nil || !providerError.Valid()) {
-				t.Fatalf("provider error = %+v, want a valid ACP prompt diagnostic", providerError)
+			classified := routingerr.Classify(providerError.RoutingInput(routingerr.PhasePromptSend, a.agentID, providerError.Message))
+			capacity := classified.Confidence == routingerr.ConfHigh && !classified.UserAction &&
+				(classified.Code == routingerr.CodeProviderOverloaded || classified.Code == routingerr.CodeModelCapacity || classified.Code == routingerr.CodeRateLimited)
+			if capacity != test.wantCapacity {
+				t.Fatalf("capacity = %v, want %v (classification %+v, provider error %+v)", capacity, test.wantCapacity, classified, providerError)
 			}
 		})
 	}

@@ -71,3 +71,18 @@ allowlisted-metadata section of
   unrelated failure; kinds are matched only for the declaring adapter.
 - An unmapped HTTP status relabelled by prose could report authentication for
   a gateway error; a valid status without a mapping stays unknown.
+
+
+## Current-main integration — 2026-10-31
+
+Main's accepted [ACP prompt continuity contract](../../specs/platform/system-design/acp-prompt-error-continuity.md)
+uses actual remote-response provenance and current-turn/runtime ownership to
+preserve a usable session. Classification does not decide manual runtime
+retention. Keep that boundary while carrying this package's allowlisted fields
+through the safe projection and the capacity-continuation classifier.
+
+The existing structured ACP test now uses the main real remote-response helper.
+Its positive and negative metadata cases retain the same classification
+expectations while all proven remote errors receive safe projections. The
+original pre-continuity baseline results above remain historical; local
+transport/decode/deadline errors are still covered by main's exclusion tests.

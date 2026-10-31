@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-04
-updated: 2026-10-20
+updated: 2026-10-31
 owners:
   - Kandev
 ---
@@ -350,6 +350,12 @@ Kanban, Office, retained-turn and diagnostic-correlation consumers use the same
 safe projection and central classifier. The existing retry/fallback policy,
 execution/generation fences, diagnostic text matching, and output/effect guards
 remain authoritative. Metadata does not bypass them or repair old attempts.
+
+Manual ACP runtime preservation follows the separate
+[response-provenance continuity contract](acp-prompt-error-continuity.md).
+Structured classification supplies diagnostics and supported automatic-recovery
+or capacity-continuation evidence; it does not replace the remote-response,
+current-turn, connection, cancellation, or effect gates.
 
 ## Failure modes
 

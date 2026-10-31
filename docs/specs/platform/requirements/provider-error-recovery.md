@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-08
-updated: 2026-10-20
+updated: 2026-10-31
 owners:
   - Kandev
 ---
@@ -63,7 +63,7 @@ duplicate transcript rows or stale recovery context.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.29:** The primary launch prompt shall use credential-only, unbounded redaction on every attempt, including attempt 0. Provider output and `FailureReason` shall use the diagnostic tier.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.30:** Cursor terminal failure presentation, persisted diagnostics, and technical details shall retain the bounded sanitized provider condition. A resource-exhaustion or availability diagnostic shall not be replaced by a fabricated HTTP/2, TCP, or network-failure explanation. Sanitization shall remove sensitive content without inventing a cause; if diagnostic detail cannot be retained, Kandev shall use a neutral provider-error explanation.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.31:** The explicit bounded Cursor `RetriableError: [resource_exhausted]` envelope shall permit a short same-provider retry as transient `provider_resource_exhausted`. The category alone shall not assert an account quota, billing failure, rate-reset deadline, or provider-switch permission. Explicit hard quota/authentication evidence, user cancellation, unknown diagnostics, and stale evidence shall retain their existing recovery policy.
-- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32:** Every consumer that classifies a provider diagnostic, including the ACP retained-turn check, Kanban and Office failure handling, retained turn-failure messages, and lifecycle diagnostic correlation, shall pass the diagnostic's allowlisted structured metadata to the shared classifier together with its message. An explicitly supplied HTTP error status shall classify before message-text rules, and a valid status without a mapped code shall stay unknown rather than be relabelled by prose. The ACP authentication-required code `-32000` shall classify as authentication required; the generic JSON-RPC internal-error code shall carry no meaning. An error kind shall be interpreted only in the namespace of the adapter that declared it, and generic wrapper kinds, another adapter's kind, and opaque provider codes shall not imply any semantic code. A classifier input that already carries a normalized routing error shall return it unchanged. Metadata from a diagnostic whose message does not match the classified text shall not be lent to that text. Structured metadata shall not bypass the existing identity, diagnostic-correlation, output, or effect gates, and criterion `.24` continues to govern `RequestError.Data` content outside the allowlisted fields.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32:** All consumers that classify provider diagnostics, including ACP retained-turn/capacity checks, Kanban/Office failures, retained turn-failure messages and lifecycle correlation, shall pass the diagnostic's allowlisted metadata and message to the shared classifier. Explicit HTTP error statuses precede text rules; valid unmapped statuses stay unknown despite prose. ACP authentication code `-32000` means authentication required; generic JSON-RPC internal-error codes carry no meaning. Interpret error kinds only in their declaring adapter's namespace; wrapper kinds, foreign kinds and opaque provider codes imply no semantic code. Return already normalized routing errors unchanged. Never lend metadata to text that does not match its diagnostic message. Keep identity, diagnostic-correlation, output and effect gates; criterion `.24` still governs `RequestError.Data` outside the allowlisted fields.
 
 ## Out of scope
 
@@ -85,3 +85,8 @@ and harness) and
 diagnostic text correlation, allowlisted prompt-error metadata), and
 [part 4](../system-design/provider-response-attempt-recovery.md)
 (provider-owned response-attempt replacement and transcript retraction).
+
+
+
+The [interactive rate-throttle extension](interactive-rate-throttle-retry.md)
+adds bounded retry eligibility when reset metadata is absent.
