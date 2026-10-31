@@ -367,6 +367,7 @@ func initDynamicRuntimeResolver(
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
 		dynamicruntime.WithCircuitLogger(log.Zap()),
+		dynamicruntime.WithCircuitBackoffEscalation(cfg.Features.DynamicCircuitBackoffEscalation),
 	)
 	if err := dynamicCircuits.Restore(ctx); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)

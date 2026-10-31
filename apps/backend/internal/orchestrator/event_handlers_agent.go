@@ -2771,6 +2771,7 @@ func (s *Service) finishAgentCompleted(
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
+	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)

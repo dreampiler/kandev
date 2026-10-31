@@ -218,6 +218,25 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:    "features.dynamicCircuitBackoffEscalation",
+			EnvVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION",
+			Kind:   KindFeature,
+			Label:  "Dynamic circuit backoff escalation",
+			Description: "Lengthens the dynamic routing backoff for a candidate that keeps failing, " +
+				"from one minute up to four hours, instead of re-probing it every minute.",
+			Stability: StabilityExperimental,
+			RiskLevel: RiskMedium,
+			RiskDescription: "A candidate that failed several times in a row can stay skipped for up to four hours, " +
+				"or until a later provider reset time, even after its provider recovers. Sessions then use the next " +
+				"configured candidate or wait. A turn that completes without a provider error clears the failure count. Requires Dynamic agent routing.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicCircuitBackoffEscalation },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicCircuitBackoffEscalation = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             keyCodexAppServer,
 			EnvVar:          envCodexAppServer,
 			Kind:            KindFeature,

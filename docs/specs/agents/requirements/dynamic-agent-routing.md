@@ -2,10 +2,11 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-29
+updated: 2026-10-31
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing Requirements
 
 ## Overview
@@ -37,6 +38,9 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.15:** Automatic queue delivery shall not reserve a queued message for a session whose route is `action_required` and whose `executors_running` row is absent. The message shall stay queued and visible with the session's route recovery actions, and a successful route action shall make it deliverable again. A session with a live executor row, and a session without a dynamic route, shall keep the existing delivery behavior.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.16:** When a queued dispatch fails because a WAITING_FOR_INPUT session whose route is still `starting` has no `executors_running` row, Kandev shall mark that route `action_required` with the orphaned-starting reason, keep the message queued, and stop automatic redelivery until a route action runs. It shall not change the session state. A session whose launch is still pending shall keep its existing retry.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23:** When a start would change the logical profile of a session whose durable route is already materialized for a different logical profile, Kandev shall refuse the start before writing the session and return a validation error. The session label, concrete profile, and route shall stay unchanged and no agent shall launch. A session without a materialized route keeps its first profile selection, and a route for the requested profile resumes normally. See the [guard package](../../../plans/materialized-route-profile-guard/plan.md).
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.19:** A qualifying classified failure that may not advance the route, because the attempt already produced output or effects, shall still open the shared circuit of the candidate that produced it, charged under the same generation and candidate rule as AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.10. The route's generation, candidate, and status and the failed turn's existing recovery surface shall stay unchanged and no successor shall launch; later selections shall skip the open circuit until it recovers. An unclassified failure, or a failure of a superseded generation or predecessor execution, shall open no circuit.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20:** While the `features.dynamicCircuitBackoffEscalation` runtime flag is enabled, each consecutive qualifying failure of one circuit shall open it for 1, 5, 15, and 30 minutes, then 1, 2, and 4 hours, capped at 4 hours. A failure that arrives while the circuit is still open within its window shall belong to the same incident and shall not advance the count. A failed probe shall advance the count. A successful probe shall close the circuit but keep the count, so the next qualifying failure, including one reported mid-turn, continues the ladder; only a turn on that candidate that completes without a provider error shall reset the count to zero. A reset hint later than the ladder deadline shall win; a reset time Kandev inferred without an explicit provider date shall be capped at 24 hours, while an explicit provider reset time shall not be capped. An owner-release hold shall never be replaced. While the flag is disabled, every open shall use the fixed one-minute backoff extended only by a later reset hint, and persisted failure counts shall be ignored.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.21:** The consecutive failure count shall persist with the durable circuit snapshot on SQLite and PostgreSQL, with deadlines stored in UTC, and a backend restart with the flag enabled shall restore it so the next failure continues the ladder. Upgrading an existing database shall add the count with a zero default without changing existing circuit rows.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
