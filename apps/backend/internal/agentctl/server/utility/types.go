@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -208,6 +209,7 @@ type ProbeConfigOption struct {
 	CurrentValue string                    `json:"current_value"`
 	Category     string                    `json:"category,omitempty"`
 	Options      []ProbeConfigOptionChoice `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog     `json:"catalog,omitempty"`
 }
 
 type ProbeConfigOptionChoice struct {

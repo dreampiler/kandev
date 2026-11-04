@@ -766,7 +766,6 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
 			ON task_message_send_operations(created_at)`)
 
-	_ = r.migrate.Apply("task_message_send_operations.requested_question_id", `ALTER TABLE task_message_send_operations ADD COLUMN requested_question_id TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrateTurnChangeHistorySchema(); err != nil {
 		return err
 	}
