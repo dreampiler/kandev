@@ -154,3 +154,49 @@ exhausted temporary space. Resetting this task's generated Go cache recovered
 about 50GB, and the host rerun passed. Shared Docker data was not altered.
 The UI is unchanged by this cleanup, so the screenshots from the UI fixup
 commit remain representative.
+
+## Operating-source transcript ownership correction
+
+This section records the earlier `d549fa694` integration; its follow-up status
+does not describe later queue-delivery changes.
+
+The upstream #4848 review identified that an ordinary queue dispatch claim is
+persisted before its transcript is recorded. Its stored recorded marker can
+therefore remain false after the real writer succeeds, including after a stale
+claim is restored. The operating source's existing held-transcript helper now
+matches exact existing transcript row IDs without depending on that marker.
+This preserves queue priority rather than dispatching, acknowledging or changing
+queued work. No new identity algorithm, schema or recovery policy is introduced.
+
+Two cases in the existing `provider_interruption_queue_test.go` use the real
+writer and SQLite queue/transcript storage: an unaccepted reservation and a row
+restored from the stale durable claim. They check both existing recovery-context
+consumers and unchanged queue/claim snapshots. This backport retains the source's
+separate orphan-runtime behavior and the concurrent routing changes. The
+multi-source Send Now claim inventory remains a separate follow-up; these cases
+do not claim it is fixed.
+
+After integrating upstream main `d549fa694`, the real-writer cases and selected
+queue/recovery, Quick Chat acceptance/identity/failure/CAS, boot authorization,
+executor ownership and overnight statistics controls pass with `-trimpath
+-tags fts5 -race -count=1` in nine packages. The orchestrator run takes 11.348s;
+the remaining affected package runs also pass. The classifier controls pass
+(1.510s). A wider routing-error run still hits the pre-existing Windows npx
+fixture's HOME/USERPROFILE mismatch; the exact upstream remediation function
+and test reproduce it (0.056s). No cleanup guard was weakened and no full
+routing-error suite pass is claimed.
+
+The additional main integration resolves fourteen conflict files while keeping
+private launch origin/read-only handling and upstream Quick Chat startup
+acceptance. Eleven locale files merge without conflicting JSON values. Focused
+web verification passes in sixteen files (149 tests), and the full web type
+check passes with an 8GiB child-process heap after the default 4GiB heap was
+exhausted. No source/configuration change or reduced check was used for that
+memory retry. Runtime installation, restart and database changes are separate.
+
+The combined Quick Chat session view exceeded the existing 100-line and
+complexity-15 limits. Extracting only its unchanged launch-error wrapper keeps
+the same provider values, read-only conditional and DOM structure. The affected
+two test files pass again (27 tests), direct ESLint passes with zero allowed
+warnings, the full type check passes, and the refreshed production web build
+passes. No lint limit or feature behavior was changed.

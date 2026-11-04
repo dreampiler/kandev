@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -55,8 +56,9 @@ func (e *Executor) candidateUsageLaunchRequest(ctx context.Context, session *mod
 }
 
 func candidateUsageLocalExecutor(kind string) bool {
+	const legacyLocalPCExecutorType = "local_pc"
 	switch kind {
-	case sourceTypeLocal, "local_pc", string(models.ExecutorTypeWorktree), "standalone":
+	case string(models.ExecutorTypeLocal), legacyLocalPCExecutorType, string(models.ExecutorTypeWorktree), string(agentruntime.RuntimeStandalone):
 		return true
 	default:
 		return false
