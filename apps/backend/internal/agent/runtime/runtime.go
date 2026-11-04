@@ -36,6 +36,13 @@ type ProviderTurnAdmission = lifecycle.ProviderTurnAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+
+// CapturedResourceCircuitKey reads the immutable resource of an execution;
+// it never reconstructs identity from current profile settings.
+func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, profileID string) string {
+	return lifecycle.CapturedResourceCircuitKey(metadata, executionID, profileID)
+}
+
 type AgentExecution = lifecycle.AgentExecution
 type WorkspaceInfo = lifecycle.WorkspaceInfo
 type RuntimeFootprintSnapshot = agentruntime.RuntimeFootprintSnapshot
@@ -56,6 +63,7 @@ type TurnChangeTerminal = lifecycle.TurnChangeTerminal
 type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
 type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
 type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
+type RuntimeStorageObservation = lifecycle.RuntimeStorageObservation
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
@@ -141,6 +149,14 @@ type Runtime interface {
 
 	// ExecuteBackgroundWorkAction executes an action on a background workload in the running execution.
 	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
+
+	// ResolveRunPermission selects one offered option on a pending permission
+	// request of a run-owned execution.
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+
+	// CancelRunPermission cancels a pending permission request of a run-owned
+	// execution.
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.

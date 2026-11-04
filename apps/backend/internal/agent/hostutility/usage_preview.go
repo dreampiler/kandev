@@ -25,7 +25,7 @@ func (m *Manager) PreviewProfileUsage(ctx context.Context, profileID string) *us
 	if !ok {
 		return nil
 	}
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil
 	}
@@ -34,6 +34,7 @@ func (m *Manager) PreviewProfileUsage(ctx context.Context, profileID string) *us
 	if err != nil {
 		return nil
 	}
+	env = mergeInferenceEnv(env, localEnv)
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil {
 		return nil

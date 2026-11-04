@@ -17,11 +17,17 @@ import (
 type ReviewChangeSource struct {
 	executions    ExecutionLookup
 	sessionReader SessionReader
+	execAccess    sessionExecAccessChecker
+}
+
+type sessionExecAccessChecker interface {
+	CheckSessionExecAccess(ctx context.Context, sessionID string) error
 }
 
 // NewReviewChangeSource builds a change source over the execution lookup.
 func NewReviewChangeSource(executions ExecutionLookup, sessionReader SessionReader) *ReviewChangeSource {
-	return &ReviewChangeSource{executions: executions, sessionReader: sessionReader}
+	checker, _ := executions.(sessionExecAccessChecker)
+	return &ReviewChangeSource{executions: executions, sessionReader: sessionReader, execAccess: checker}
 }
 
 // UncommittedFiles returns the working-tree per-file payloads.
@@ -100,7 +106,20 @@ func (s *ReviewChangeSource) agentctlCommittedFiles(ctx context.Context, session
 	if result == nil {
 		return nil, nil
 	}
+	if err := cumulativeDiffResponseError(sessionID, result.Success, result.Error, result.ErrorCode); err != nil {
+		return nil, err
+	}
 	return result.Files, nil
+}
+
+func cumulativeDiffResponseError(sessionID string, success bool, detail, errorCode string) error {
+	if success || (detail == "" && errorCode == "") {
+		return nil
+	}
+	if detail == "" {
+		detail = errorCode
+	}
+	return fmt.Errorf("cumulative diff for session %s: %s", sessionID, detail)
 }
 
 // localReviewReader is implemented by the backend's durable session adapter.
@@ -117,9 +136,17 @@ func (s *ReviewChangeSource) withLocalFallback(ctx context.Context, sessionID st
 	if !ok {
 		return files, err
 	}
+	if s.execAccess == nil {
+		return files, err
+	}
+	// The local reader bypasses execution creation, so it must pass the same
+	// session.exec check before it can read the persisted checkout.
+	if accessErr := s.execAccess.CheckSessionExecAccess(ctx, sessionID); accessErr != nil {
+		return nil, accessErr
+	}
 	local, localErr := reader.LocalReviewFiles(ctx, sessionID, committed)
 	if localErr != nil {
-		return nil, fmt.Errorf("%w; local git fallback: %v", err, localErr)
+		return nil, fmt.Errorf("%w; local git fallback: %w", err, localErr)
 	}
 	return local, nil
 }

@@ -62,8 +62,15 @@ func (r *Repository) writeRepositoryCheckout(ctx context.Context, row *models.Re
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	stored, found, err := r.lockRepositoryUpdatedAt(ctx, tx, row.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("repository not found: %s", row.ID)
+	}
 	proposed := *row
-	proposed.UpdatedAt = nextRepositoryUpdatedAt(row.UpdatedAt)
+	proposed.UpdatedAt = nextRepositoryUpdatedAt(stored)
 	query, args := repositoryUpdateQuery(&proposed, intent)
 	var branch string
 	var pull bool

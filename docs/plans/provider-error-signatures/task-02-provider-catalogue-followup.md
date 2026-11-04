@@ -46,7 +46,9 @@ suspension until a new reset window. Retry-later wording supplies no reset.
 - routingerr/routingerr.go: pass raw text beside its sanitized excerpt.
 - routingerr/provider_neutral_rules.go: labeled error_type, preserving field order independence and the existing status prefix.
 
-All source paths are under apps/backend/internal/agent/runtime.
+The original catalogue paths are under apps/backend/internal/agent/runtime.
+The ACP projection follow-up also updates the shared provider-message sanitizer
+under apps/backend/internal/agentctl/types/streams.
 
 ## Verification
 
@@ -91,3 +93,22 @@ identity for bare Free notices. That higher-priority rule is consumed through
 the existing bounded neutral proof; the portable catalogue fallback does not
 replace it. The integrated regression asserts that exact Native identity while
 preserving the standalone catalogue's other cases.
+## ACP projection follow-up
+
+Opaque daily-reason values could be redacted before the classifier received the
+ACP error. The shared sanitizer reduces recognized error-line reasons that
+would be redacted to the fixed labels `free-models-per-day` and `limit_rpd/model`
+before applying the existing credential, URL and identifier redaction. Opaque
+suffixes are discarded. Already-safe reasons retain their original text and
+complete diagnostic identity. No new wire field, reset estimate or routing
+policy is introduced.
+
+Three classification cases in the existing `opencode_stderr_test.go` pass through
+the actual ProviderErrorFromError projection, JSON transport and classifier. Two
+additional controls preserve unchanged safe daily diagnostics and their complete
+identity. The old
+sanitizer loses both daily rules (0.111s); the correction preserves them while
+redacting credentials and keeping an unrelated opaque reason generic. Selected
+ACP, stream sanitization and signature controls passed with fts5/race detection
+(1.330s/1.063s/1.084s). This does not claim the unrelated Windows npx fixture or
+hosted CI passed.

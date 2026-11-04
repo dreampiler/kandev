@@ -52,7 +52,6 @@ func TestCircuitFailureCountSurvivesRestart(t *testing.T) {
 	clock := func() time.Time { return now }
 	before := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitClock(clock),
-		dynamicruntime.WithCircuitBackoffEscalation(true),
 	)
 	for range 2 {
 		before.OpenFailure("profile:candidate-a", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
@@ -64,7 +63,6 @@ func TestCircuitFailureCountSurvivesRestart(t *testing.T) {
 
 	after := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitClock(clock),
-		dynamicruntime.WithCircuitBackoffEscalation(true),
 	)
 	if err := after.Restore(ctx); err != nil {
 		t.Fatalf("Restore: %v", err)
@@ -96,7 +94,6 @@ func TestClosedCircuitFailureCountSurvivesRestart(t *testing.T) {
 	clock := func() time.Time { return now }
 	options := []dynamicruntime.CircuitRegistryOption{
 		dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitClock(clock),
-		dynamicruntime.WithCircuitBackoffEscalation(true),
 	}
 	before := dynamicruntime.NewCircuitRegistry(options...)
 	before.OpenFailure("profile:candidate-a", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})

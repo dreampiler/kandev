@@ -8,8 +8,8 @@ plan: "plan.md"
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 acceptance_criteria:
-  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23
-  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24
+  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.33
+  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.34
 system_design:
   - ../../specs/agents/system-design/dynamic-agent-routing-02.md
 ---

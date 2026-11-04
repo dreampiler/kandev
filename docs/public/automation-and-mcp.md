@@ -328,7 +328,16 @@ Native session continuation and provider-managed compaction remain authoritative
 
 ### Automation coordinator MCP
 
-Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, plugins, and arbitrary capability settings.
+Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, arbitrary plugin tools, and arbitrary capability settings.
+
+### Opt-in plugin tools
+
+A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
+
+Access is bounded to the automation, workspace, plugin installation, and plugin policy version shown at save time. Reinstalling a plugin or saving its configuration, including a secret-only change, requires review and reselection. Previously selected tools stay visible for reference but grant nothing until the owner selects current tools again. Clearing a plugin's selection removes its access.
+
+Discovery and every call re-read the current approval. Removed tools, disabled plugins, stale policy versions, and unreadable approval data fail closed. Plugin tools add no core or administrative MCP capability, and results stay in automation history: a hidden run never adds a task to Kanban or the sidebar without an explicit task-creation action.
+
 
 The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
@@ -343,6 +352,26 @@ The same data is available directly over REST for scripting: `GET /api/v1/worksp
 Workspace MCP definitions are reusable, workspace-owned server configurations. Open **Settings > Workspaces > _workspace_ > MCP servers** to use the **Configured** and **Marketplace** views. This page manages MCP servers that Kandev delivers to agents. **External MCP** is separate and exposes Kandev's own MCP endpoint to outside clients.
 
 Add a custom definition as a remote endpoint, an exact-version managed npm package, or an existing executable. Bind secrets by workspace-secret reference. Saving a definition does not download, connect to, or start a server. Managed npm packages are materialized lazily in a Kandev-owned task-executor cache and do not change repository files or lockfiles.
+
+After adding a custom or marketplace server, **Saved to _workspace_** confirms
+its name in **Configured**. Choose **Done** to leave it saved, or **Use in** to
+choose a repository, an enabled agent profile in this workspace, or an existing
+task session. **Use in** is also available on saved catalog cards.
+
+Review the scope, then choose **Open MCP settings**. This only opens the existing
+editor and highlights the server once. Select its checkbox to add it. Repository
+and profile edits use **Save changes** and affect future sessions in that scope.
+A session link opens the named conversation; open its plug menu and **Customize**
+to select the server. That selection saves automatically for this session and
+uses the provider's existing application timing.
+
+If owner discovery fails or the owner becomes unavailable, the definition stays
+saved. Retry reads the current choices; it does not register another server or
+start an agent. Enable disabled definitions before using **Use in**.
+
+If Kandev cannot confirm the save, choose **Review saved servers**. This refreshes
+the catalog before you can add another server. Check for the server you intended
+to save; Kandev does not repeat an uncertain registration automatically.
 
 For an executable, each **Arguments** row is one argument, including spaces or an empty value. Configure non-secret environment values or HTTP headers in the editor. Use **Secret bindings** to choose a workspace or global secret reference for a credential. Only the reference is saved in the definition; the task executor receives the bound value when the server is prepared.
 
@@ -383,6 +412,21 @@ An active turn keeps its current MCP list. Existing task sessions save a desired
 ## Task MCP
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
+
+### Discover executors and profiles
+
+Call `list_executors_kandev` without arguments to list the executors and
+profiles available to the task caller. The catalogue includes custom executor
+IDs. It filters foreign-owned executors and profiles, including foreign
+profiles on a shared executor. A visible executor can have no visible profiles.
+
+Use a returned profile ID as `executor_profile_id` in `create_task_kandev`.
+`list_executor_profiles_kandev(executor_id)` remains available when you need
+to look up profiles for one known executor. Discovery does not authorize a
+future launch: task creation and executor admission check current ownership.
+With authentication disabled, the existing single-user identity can see all
+resources. See [Private executors and profiles](executors.md#private-executors-and-profiles)
+for the ownership rules.
 
 ### Manage linked pull and merge requests
 
@@ -428,6 +472,13 @@ GitHub auto-fix turn; it does not report manual work or GitLab auto-fix turns.
 `list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
 GitLab MR associations in the provider-neutral `change_requests` field; the
 legacy `prs` field remains GitHub-only for compatibility.
+
+`list_related_tasks_kandev` defaults to the current task. Another target is
+readable only when it is an ancestor, a descendant, a sibling with a shared
+non-empty parent, or a blocker of the caller in the same workspace. An
+unrelated task is denied, including in the same workspace. The compact output
+option is not a separate permission: `verbose` adds descriptions and never
+widens access.
 
 Unlinking changes only the active association and its matching automation
 state. It does not delete conversation history, terminal receipts, or the
@@ -536,9 +587,9 @@ or task tree.
 
 ### Native rich output
 
-Task and Office agents can call `show_rich_output_kandev` when a workspace file,
+Task and Office agents with the Rich Output package can call `show_rich_output_kandev` when a workspace file,
 trend, comparison, or small metric group is materially clearer as a native
-presentation than as prose. The injected agent context requires this tool for
+presentation than as prose. When that package is selected, the injected agent context requires this tool for
 structured comparisons, recorded checks, charts, graphs, plots, file previews
 and KPI or metric requests when suitable data is available. Prefer plain text or Markdown for ordinary answers. Small textual comparisons can remain Markdown tables. For structured multi-row
 comparisons, verification findings or a prominent observation, agents can use
@@ -555,6 +606,8 @@ field and expected shape for the selected component and source form. Ambiguous
 forms report separate alternatives. Agents can correct a rejected call using
 that feedback and discovered examples; rejected values and file contents are
 not included in the diagnostic.
+If a rich-output call fails, select its error icon to read the diagnostic
+before you correct the call.
 
 | Component | Purpose |
 | --- | --- |
@@ -714,7 +767,9 @@ change the accepted chart or table.
 File bytes do not persist. Image file cards expand and load automatically when
 they appear in the conversation. Select **Hide preview** to collapse an image
 and **Preview** to reopen it. Click or tap the image to inspect it in a larger
-dialog, as with image attachments. Close the dialog to return to the preview.
+dialog, as with image attachments. Select **Actual size** to inspect image
+details and scroll within the dialog; select **Fit** to see the whole image
+again. Close the dialog to return to the preview. Each opening starts in Fit.
 To start image cards collapsed, turn off **Show image previews by default** in
 **Settings > Preferences > Appearance** and select **Save changes**. This
 preference is saved on this device and applies when a card has no retained
@@ -877,7 +932,7 @@ A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
+| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, executors, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
 | Coordination                        | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
 | User interaction                    | Ask a structured question when the current agent/session supports it.                                                                                                                                                                                              |
 | Plans                               | Create, get, update, and delete the current task plan; apply exact edits; list, read, and restore revisions.                                                                                                                                                        |
@@ -1012,7 +1067,7 @@ The database migration is additive. Rolling back the application binary leaves t
 
 ## Office MCP and runtime CLI
 
-Office runs use a smaller MCP surface than regular task-mode sessions. The built-in Office server registers exactly these tools:
+Office runs use a smaller MCP surface than regular task-mode sessions. Core registers the required Office tools below; `show_rich_output_kandev` belongs to the optional Rich Output package, which is on by default. See [Built-in MCP packages](builtin-mcp-packages.md).
 
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
@@ -1102,7 +1157,7 @@ Taskless launch and session creation remain separate Office scheduler work.
 
 ## Profile and executor MCP
 
-An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. The built-in Kandev task server is injected separately and cannot be replaced by a profile entry named `kandev`.
+An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. Kandev injects its [built-in packages](builtin-mcp-packages.md) separately. Their native server names, including `kandev`, are reserved and cannot be replaced by profile entries.
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
@@ -1117,7 +1172,7 @@ The explorer has server, tool-list, and tool-detail levels. On desktop, the
 server list stays visible beside the active level. On touch devices, select a
 server to open its tool list. Select **Back to servers** to return.
 
-Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+Select a native package server after it serves `tools/list`. The tool list is sorted and
 scrolls independently from the explorer header. Each row shows the tool name
 and an estimated token value. Select a tool to open its description and
 arguments. Select **Back to tools** to return to the same list position.

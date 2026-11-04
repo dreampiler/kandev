@@ -22,8 +22,9 @@ system_design:
 Keep already-persisted archive-reclaim operations out of writer admission while
 preserving authority for genuinely new intents. This work order records the
 implemented runtime change in [PR #4849](https://github.com/kdlbs/kandev/pull/4849).
-The documentation follow-up changes no runtime source and claims no merge,
-deployment or fresh hosted coverage result.
+The maintainer follow-up adds permanent repository regressions without changing
+production runtime behavior. Neither follow-up claims merge, deployment or fresh
+hosted coverage success.
 
 ## In scope
 
@@ -47,8 +48,8 @@ production-data repair, runtime deployment and permanent test infrastructure.
    owner guards. Concurrent misses remain idempotent, and unarchive or ownership
    changes cannot authorize delayed destruction.
 3. Existing bounded reconciliation, job state/retry handling and audited resource
-   removal remain intact. The documentation delta supplies accurate delivery
-   traceability without relaxing the coverage check or rerunning unchanged tests.
+   removal remain intact. Permanent repository tests protect the admission path;
+   the delivery documents preserve traceability without changing coverage rules.
 
 ## Files likely touched
 
@@ -60,6 +61,10 @@ Documentation-only follow-up:
 
 - `docs/plans/archive-reclaim-writer-admission/plan.md`
 - `docs/plans/archive-reclaim-writer-admission/task-01-skip-persisted-reclaim-admission.md`
+
+Maintainer regression follow-up:
+
+- `apps/backend/internal/task/repository/sqlite/resource_cleanup_archive_reclaim_test.go`
 
 ## Requirement-to-evidence mapping
 
@@ -115,13 +120,29 @@ Focused admission/protection checks passed in 35.945 seconds; independent
 concurrent creation persisted exactly one operation and passed in 0.511 seconds.
 Existing service controls passed in 17.783 seconds, and persistence race
 conformance passed in 122.284 seconds. Normal commit hooks and independent review
-passed for the source correction. These are original validation facts, reused
-without a new runtime run for this documentation-only follow-up.
+passed for the source correction. These are original validation facts.
 
 The minute-scale native SQLite latency was not independently reproduced.
 PostgreSQL was not exercised because no DSN was available. A broad SQL guard
 reported ten existing findings in three unchanged baseline files; it was not a
 global pass. No checker, exemption or unrelated source was changed.
+
+### Maintainer regression tests (2026-10-27)
+
+The permanent repository tests use a file-backed SQLite database with separate
+writer and read-only reader pools. They cover persisted-operation progress while
+the writer is held, unchanged persisted job state, current and stale generations,
+reader errors, cancellation, incoming managed envelopes, existing recovery and
+managed-deletion barriers, and both guards on new operation misses.
+
+The focused command passed:
+
+```text
+go test -trimpath -tags fts5 -p 2 ./internal/task/repository/sqlite -run '^TestCreateArchiveReclaimTaskResourceCleanupJob' -count=1
+```
+
+Changed-file Go lint passed with `0 issues`. Hosted checks for the updated PR
+head must be read separately from this local result.
 
 Documentation follow-up: catalog validation passed (403 decisions and 1,747
 specifications), as did specification lint and whitespace checks. The existing

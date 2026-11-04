@@ -27,7 +27,7 @@ func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(ctx context.Cont
 }
 
 func (r *ProfileExecutionResolver) loadSelectionProfile(ctx context.Context, profileID, sessionID string) (dynamic.Profile, error) {
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil || !r.engine.OrderedTiersEnabled() || sessionID == "" {
 		return profile, err
 	}

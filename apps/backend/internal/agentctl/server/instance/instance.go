@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -225,6 +226,9 @@ type CreateRequest struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
@@ -257,6 +261,10 @@ type CreateRequest struct {
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
 
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
+
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
@@ -271,6 +279,10 @@ type CreateRequest struct {
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

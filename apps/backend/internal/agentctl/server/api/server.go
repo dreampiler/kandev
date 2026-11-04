@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -89,6 +91,9 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		s.executionUsage = nativeUsage[0]
 		procMgr.SetExecutionUsageService(s.executionUsage)
 	}
+	if mcpServer != nil {
+		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
 		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
@@ -99,7 +104,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -128,6 +133,7 @@ func (s *Server) setupRoutes() {
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
+		api.GET("/runtime/storage", s.handleRuntimeStorage)
 		api.GET("/info", s.handleInfo)
 		api.GET("/system/metrics", s.handleSystemMetrics)
 
@@ -249,6 +255,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/turn-changes/delete", s.handleGitTurnCheckpointDelete)
 		api.POST("/git/turn-changes/compare", s.handleGitTurnCheckpointCompare)
 		api.POST("/git/turn-changes/export", s.handleGitTurnCheckpointExport)
+		api.POST("/git/turn-changes/archive", s.handleGitTurnCheckpointArchive)
 		api.GET("/git/turn-changes/scopes", s.handleGitTurnCheckpointScopes)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
@@ -278,6 +285,8 @@ func (s *Server) setupRoutes() {
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
+		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
@@ -395,6 +404,11 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
 		return
 	}
+	current := s.mcpServer.Profile()
+	if current.BuiltinPackages != nil && mcpprofile.Legacy(req.Mode, false, nil).Surface != current.Surface {
+		c.JSON(http.StatusForbidden, gin.H{"error": "built-in MCP surface is bound until the next process start"})
+		return
+	}
 	s.mcpServer.SetMode(req.Mode)
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
 }
@@ -429,16 +443,19 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	DeliveryHealth process.DeliveryHealth `json:"delivery_health"`
-	AgentStatus    string                 `json:"agent_status"`
-	ProcessInfo    map[string]interface{} `json:"process_info"`
-	Uptime         string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth          `json:"delivery_health"`
+	RuntimeStorage *streams.RuntimeStorageSnapshot `json:"runtime_storage,omitempty"`
+	AgentStatus    string                          `json:"agent_status"`
+	ProcessInfo    map[string]interface{}          `json:"process_info"`
+	Uptime         string                          `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
+	runtimeStorage := s.procMgr.CachedRuntimeStorage()
 	c.JSON(http.StatusOK, StatusResponse{
 		AgentStatus:    string(s.procMgr.Status()),
 		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		RuntimeStorage: runtimeStorage,
 		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }

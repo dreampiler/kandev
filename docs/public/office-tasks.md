@@ -16,6 +16,10 @@ Open **Projects** or the sidebar's project add action, create a project, and ope
 
 A project can list local repository paths and supported Git URLs. Root tasks created with that project and no explicit repository selection attach the project's sources before their first launch. An explicit repository selection takes precedence, and a child inherits its parent's repository context. Invalid or unreadable project sources can prevent task creation.
 
+Bare remote URLs resolve from the selected workspace. Public GitHub, GitLab, and Azure DevOps URLs use the built-in provider rules. A self-managed GitLab URL resolves when the workspace has a GitLab connection whose host matches the URL origin exactly, including its scheme, host, and port. An installed repository plugin can resolve its own URL when the plugin is active, declares the repository inspection capability, and has a connection configured for that workspace. Kandev does not hold hostname lists for other providers, so install the plugin for the provider you use.
+
+An unknown URL, a URL that no connection or plugin recognizes, and a URL that two providers both recognize are rejected before any repository or task is created. Saved repository IDs and explicit provider selections keep their existing resolution rules and never fall back to another provider.
+
 Changing the project's sources later does not change existing task attachments. Check the task's actual repository context if it was created before a project edit. See [Executors](executors.md) for environment setup and [Git operations](git-operations.md) for worktrees and repository behavior.
 
 ## Create and assign a task
@@ -24,9 +28,26 @@ Changing the project's sources later does not change existing task attachments. 
 2. Enter a title and a description with the expected result and acceptance checks.
 3. Choose a **Project**. The Office task dialog requires a project and a non-empty title before enabling Create.
 4. Choose an **Assignee**, status, and priority. Choose an Office team member as the assignee; its runtime execution profile is configured separately.
-5. Create the task and open its detail page to inspect the saved properties and activity.
+5. Add files with the paperclip, by pasting an image, or by dropping files on the description box. The composer shows a thumbnail for images and a file chip for other files.
+6. Inspect an attachment before you create the task. Select an image chip to open the larger viewer. Select a file chip to see its name and size.
+7. Create the task and open its detail page to inspect the saved properties and activity. The agent receives the attachments when Office starts the task.
 
-![Office New Task dialog with a task title and Customer portal project selected](../screenshots/office-new-task.png)
+![Office New Task dialog with attachment chips, a Customer portal project selected, and the Create Task action](../screenshots/office-new-task.png)
+
+Attachment limits:
+
+- Up to 10 files.
+- At most 100 MiB per file and 100 MiB in total.
+
+Previews: supported image types use the same preview behavior as the Kanban task composer. Other files show their metadata and are delivered as files, not rendered in the browser.
+
+Upload states:
+
+- Each file shows its upload state. If an upload fails, retry it or remove it.
+- Create stays disabled while a file is uploading, failed, or expired.
+- Removing the problem file enables Create again. Ready files stay attached.
+
+Closing the dialog keeps a draft with its ready attachments. Discard removes the draft and its staged files.
 
 For example, “Add account recovery” should explain expired-link behavior, successful reset behavior, and the tests you expect. “Improve the portal” leaves the result and stopping point unclear.
 

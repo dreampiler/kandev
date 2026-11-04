@@ -25,9 +25,10 @@ import (
 // classifies from the Input alone, so any of them makes the answer true
 // regardless of text.
 func MayClassify(in Input) bool {
-	if in.HTTPStatus != 0 || in.ExitCode != nil || in.StructuredErr != nil ||
-		in.ACPCode != 0 || in.ErrorKind != "" || in.ProviderCode != "" ||
-		in.ManagedRuntimePackageSpec != "" || in.ResetHint != nil {
+	if in.KeywordContext.Enabled && in.KeywordContext.Diagnostic {
+		return true
+	}
+	if hasStructuredClassificationEvidence(in) {
 		return true
 	}
 	if inj := getInjection(); inj != nil {
@@ -49,6 +50,12 @@ func MayClassify(in Input) bool {
 	// Classify reads both raw and sanitized evidence; redaction can introduce
 	// placeholder literals, so the prefilter must cover both representations.
 	return mayMatchText(text) || mayMatchText(Sanitize(text))
+}
+
+func hasStructuredClassificationEvidence(in Input) bool {
+	return in.HTTPStatus != 0 || in.ExitCode != nil || in.StructuredErr != nil ||
+		in.ACPCode != 0 || in.ErrorKind != "" || in.ProviderCode != "" ||
+		in.ManagedRuntimePackageSpec != "" || in.ResetHint != nil
 }
 
 // mayMatchText reports whether text contains at least one literal that some

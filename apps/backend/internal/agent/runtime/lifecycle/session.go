@@ -806,11 +806,11 @@ func (sm *SessionManager) initializeACPConnection(
 		if result == nil || result.SessionID != execution.RequiredNativeConversationID {
 			err = ErrDeliveryOwnerMismatch
 		} else {
-			err = retireInterruptedDeliverySubmission(ctx, client, execution)
+			err = retireInterruptedDeliverySubmission(ctx, sm.deliveryJournalReleaser(), client, execution)
 		}
 	}
 	if err == nil && execution.replacesPredecessorGeneration() {
-		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
+		if retireErr := retireUnresolvedDeliverySubmissions(ctx, sm.deliveryJournalReleaser(), client, execution); retireErr != nil {
 			err = retireErr
 		}
 	}
@@ -837,6 +837,7 @@ func (sm *SessionManager) initializeACPConnection(
 
 func retireUnresolvedDeliverySubmissions(
 	ctx context.Context,
+	releaser deliveryJournalReleaser,
 	client *agentctl.Client,
 	execution *AgentExecution,
 ) error {
@@ -851,7 +852,7 @@ func retireUnresolvedDeliverySubmissions(
 		if submission.HarnessGeneration >= execution.DeliveryHarnessGeneration || !submissionNeedsRecoveryRetirement(submission) {
 			continue
 		}
-		if err := client.RetireDeliverySubmission(ctx, submission.ID); err != nil {
+		if err := releaser.retire(ctx, client, submission.ID); err != nil {
 			return fmt.Errorf("retire durable delivery submission %s: %w", submission.ID, err)
 		}
 	}
@@ -1790,6 +1791,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return nil, err
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -2156,6 +2160,7 @@ func (sm *SessionManager) materializeAttachments(
 		result[i].Name = materialized.Name
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
+		result[i].Path = materialized.Path
 		result[i].Data = ""
 		if result[i].DeliveryMode == "" {
 			result[i].DeliveryMode = attachmentDeliveryPrompt

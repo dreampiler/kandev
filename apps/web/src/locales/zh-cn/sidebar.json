@@ -253,7 +253,7 @@
   "controlRestore.noModelActivity": "此记录样本中未返回模型活动。",
   "controlRestore.partialMeasurements": "部分测量值不可用。数据来源原因：{{reasons}}。",
   "controlRestore.usageReadAt": "缓存使用量列表读取时间",
-  "controlCircuits.title": "动态路由断路器",
+  "controlCircuits.title": "提供商资源熔断器",
   "controlCircuits.installationWide": "整个安装",
   "controlCircuits.empty": "没有记录的断路器。这并不表示所有供应商都可达。",
   "controlCircuits.blocking_one": "有 {{count}} 个断路器正在阻止路由",
@@ -484,5 +484,9 @@
   "controlSummary.waitReasons.blocked": "受阻",
   "controlSummary.waitReasons.approval": "等待批准",
   "controlSummary.waitReasons.hold": "暂停",
-  "controlSummary.waitReasons.basis": "记录的任务数。输入等待和阶段原因可能计入同一任务，因此不是总计。"
+  "controlSummary.waitReasons.basis": "记录的任务数。输入等待和阶段原因可能计入同一任务，因此不是总计。",
+  "controlCircuits.state.available": "可用",
+  "controlCircuits.code.missingCredentials": "缺少凭据",
+  "controlCircuits.code.providerNotConfigured": "尚未配置提供商",
+  "controlCircuits.code.networkUnavailable": "网络不可用"
 }

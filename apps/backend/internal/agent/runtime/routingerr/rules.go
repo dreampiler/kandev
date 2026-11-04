@@ -8,11 +8,23 @@ type rule struct {
 	code       Code
 	confidence Confidence
 	// rawText matches the raw diagnostic instead of the sanitized excerpt. It is
-	// for a signature whose identifying text the shared sanitizer masks; the
-	// rule still keeps its place in the catalogue, so a higher-priority provider
-	// rule (a payment or credit notice on the same diagnostic) still wins.
+	// only for bounded signatures whose distinguishing text the sanitizer masks;
+	// the stored/displayed excerpt remains sanitized.
 	rawText bool
 }
+
+// RuleOpenCodeCapacityAdmission is the bounded OpenCode capacity signature.
+// Its relative reset hint is derived by Classify from this exact rule only,
+// and capacity continuation on that provider requires this rule rather than a
+// broad capacity phrase.
+const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
+
+const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
+	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
+
+// openCodeAdmissionRefusedLinePattern is the same signature used for rule
+// matching, so the reset hint can be read from the exact line that matched.
+var openCodeAdmissionRefusedLinePattern = regexp.MustCompile(openCodeAdmissionRefusedSignature)
 
 // Provider rules match provider error signatures, never a bare topic word.
 // Every error channel these rules read can also carry an agent's own words
@@ -100,19 +112,18 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 		// Keep this provider-scoped rule limited to OpenCode's unlabelled opening line only.
 		mustRule("opencode.stderr.free_usage_unlabelled.v1", `(?im)^\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
-		// The OpenRouter daily notices state their own cadence. They read the raw
-		// diagnostic because the shared sanitizer masks the daily reason code
-		// ("free-models-per-day-high-balance" falls to the opaque-run catch-all
-		// and "limit_rpd/<model>" is collapsed by the path pass), and they keep
-		// this catalogue position so a payment, credit or quota notice on the
-		// same diagnostic still wins.
+		// OpenCode's upstream admission refusal is temporary capacity pressure,
+		// not a quota or generic runtime error. The bracketed token and the full
+		// opening line are required so bare capacity prose or a quoted example
+		// cannot suspend a healthy account.
+		mustRule(RuleOpenCodeCapacityAdmission, openCodeAdmissionRefusedSignature, CodeModelCapacity, ConfHigh),
+		// OpenRouter daily notices state their cadence in reason tokens that the
+		// shared sanitizer redacts. Match the raw diagnostic, but keep this
+		// signature after credit/subscription/quota rules in the existing order.
 		mustRawRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
 		mustRawRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
-		// OpenCode Zen's "Rate limit exceeded. Please try again later", optionally
-		// wrapped as "Error from provider (<host>):". The wording states no day or
-		// minute cadence, so it is a generic rate limit and never a daily
-		// allowance; the rule ID only names the signature. It stays ahead of the
-		// generic rate rule.
+		// OpenCode Zen's retry-later line states no daily/minute cadence. Keep it
+		// a generic rate limit and do not derive a reset from "try again later".
 		mustRule("opencode.rate.try_later.v1", `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
@@ -127,6 +138,26 @@ var providerRules = map[string][]rule{
 		mustRule("amp.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("amp.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 	},
+	// Antigravity's structured classifier emits these exact normalized
+	// prefixes. Matching them lets the existing Kanban and Office consumers
+	// recover the same category from the message without re-reading private
+	// native evidence.
+	"antigravity-acp": {
+		mustRule("antigravity.native.auth.v1", antigravityMessageRule(AntigravityAuthMessage), CodeAuthRequired, ConfHigh),
+		mustRule("antigravity.native.subscription.v1", antigravityMessageRule(AntigravitySubscriptionMessage), CodeSubscriptionRequired, ConfHigh),
+		mustRule("antigravity.native.model_access.v1", antigravityMessageRule(AntigravityModelAccessMessage), CodeModelUnavailable, ConfHigh),
+		mustRule("antigravity.native.quota.v1", antigravityMessageRule(AntigravityQuotaMessage), CodeQuotaLimited, ConfHigh),
+		mustRule("antigravity.native.throttle.v1", antigravityMessageRule(AntigravityThrottleMessage), CodeRateLimited, ConfHigh),
+		mustRule("antigravity.native.provider_overloaded.v1", antigravityMessageRule(AntigravityProviderOverloadedMessage), CodeProviderOverloaded, ConfHigh),
+		mustRule("antigravity.native.provider_failure.v1", antigravityMessageRule(AntigravityProviderMessage), CodeProviderUnavailable, ConfHigh),
+		mustRule("antigravity.native.unknown.v1", antigravityMessageRule(AntigravityUnknownMessage), CodeUnknownProvider, ConfMedium),
+		mustRule("antigravity.outcome.unverified.v1", antigravityMessageRule(AntigravityOutcomeUnverifiedMessage), CodeAgentRuntime, ConfHigh),
+	},
+}
+
+func antigravityMessageRule(message string) string {
+	return `(?im)^\s*(?:(?:Internal\s+error|API\s+Error|Error):\s*)?` +
+		regexp.QuoteMeta(message) + `\b`
 }
 
 func mustRule(id, pat string, code Code, conf Confidence) rule {

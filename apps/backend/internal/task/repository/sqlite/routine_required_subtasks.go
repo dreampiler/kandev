@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -37,22 +39,31 @@ func (r *Repository) guardRequiredSubtaskAssignmentsTx(ctx context.Context, tx *
 }
 
 func requiredSubtaskCount(raw string) (int, error) {
-	var requirement struct {
-		Count int `json:"required_subtask_count"`
-	}
-	if err := json.Unmarshal([]byte(raw), &requirement); err != nil {
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		if json.Valid([]byte(raw)) || !strings.Contains(raw, `"`+taskmodels.MetaKeyRequiredSubtaskCount+`"`) {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("read required subtask assignments: %w", err)
 	}
-	if requirement.Count < 0 {
+	encodedCount, ok := metadata[taskmodels.MetaKeyRequiredSubtaskCount]
+	if !ok {
+		return 0, nil
+	}
+	var count int
+	if err := json.Unmarshal(encodedCount, &count); err != nil {
+		return 0, fmt.Errorf("read required subtask assignments: %w", err)
+	}
+	if count < 0 {
 		return 0, fmt.Errorf("%w: invalid required subtask assignments", repoerrors.ErrTaskCompletionGateBlocked)
 	}
-	return requirement.Count, nil
+	return count, nil
 }
 
 // Used by both the write guard and bounded read models; workflow defaults are
 // deliberately insufficient evidence of a task-specific durable assignment.
 func assignedRoutineChildrenSQL(parent string) string {
-	return `CASE WHEN COALESCE(` + parent + `.metadata, '{}') LIKE '%"required_subtask_count"%' THEN
+	return `CASE WHEN COALESCE(` + parent + `.metadata, '{}') LIKE '%"kandev.office_required_subtask_count"%' THEN
 		(SELECT COUNT(*) FROM tasks child
 		WHERE child.parent_id=` + parent + `.id AND child.workspace_id=` + parent + `.workspace_id AND child.is_ephemeral=0
 		AND child.state NOT IN ('CANCELLED','FAILED')

@@ -417,7 +417,7 @@
   "tasks": "任务",
   "taskReadRefreshFailureNotice": "无法刷新任务详情。当前视图仍可使用。",
   "taskReadTemporarilyUnavailable": "任务暂时不可用",
-  "taskReadTemporarilyUnavailableDescription": "无法加载此任务。请检查网络连接后重试。",
+  "taskReadTemporarilyUnavailableDescription": "Kandev 暂时无法加载此任务。请稍后重试。",
   "taskStateBlocked": "已阻塞",
   "taskStateCancelled": "已取消",
   "taskStateCompleted": "已完成",
@@ -565,5 +565,12 @@
   "conversationSearch_query_too_broad": "请使用至少 3 个连续的字母、汉字或数字。",
   "conversationSearch_title": "命令面板",
   "notificationChildStallBody": "子任务已停滞，但父任务无法接收提醒。",
-  "notificationChildStallTitle": "子任务需要处理"
+  "notificationChildStallTitle": "子任务需要处理",
+  "notificationPermissionBody": "智能体正在等待您的批准。",
+  "notificationPermissionTitle": "智能体需要权限",
+  "notificationSessionFailedBody": "智能体会话因错误而结束。",
+  "notificationSessionFailedTitle": "智能体会话失败",
+  "offlineTitle": "当前处于离线状态",
+  "offlineDescription": "Kandev 需要连接到服务器。请检查网络，然后重试。",
+  "offlineRetry": "重试"
 }

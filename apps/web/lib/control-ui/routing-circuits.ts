@@ -38,6 +38,9 @@ export const CIRCUIT_CODE_KEYS: Record<string, string> = {
   auth_required: "sidebar:controlCircuits.code.authRequired",
   subscription_required: "sidebar:controlCircuits.code.subscriptionRequired",
   account_blocked: "sidebar:controlCircuits.code.accountBlocked",
+  missing_credentials: "sidebar:controlCircuits.code.missingCredentials",
+  provider_not_configured: "sidebar:controlCircuits.code.providerNotConfigured",
+  network_unavailable: "sidebar:controlCircuits.code.networkUnavailable",
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -94,7 +97,18 @@ export function sortCircuits(circuits: readonly RoutingCircuit[]): RoutingCircui
   );
 }
 
+/** Whether the circuit currently refuses dispatch. */
+export function isCircuitBlocking(circuit: RoutingCircuit, now = Date.now()): boolean {
+  return (
+    circuit.state === "half_open" ||
+    (circuit.state === "open" && (!circuit.until || Date.parse(circuit.until) > now))
+  );
+}
+
 /** How many circuits are blocking right now; closed rows are history. */
-export function blockingCircuitCount(circuits: readonly RoutingCircuit[]): number {
-  return circuits.filter((circuit) => circuit.state !== "closed").length;
+export function blockingCircuitCount(
+  circuits: readonly RoutingCircuit[],
+  now = Date.now(),
+): number {
+  return circuits.filter((circuit) => isCircuitBlocking(circuit, now)).length;
 }

@@ -456,6 +456,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 	}
 	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
 		cmd = "/e2e:" + scenario
+	} else if scenario, ok := parseOfficeScenarioDirective(prompt); ok {
+		cmd = "/e2e:" + scenario
 	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return
@@ -530,10 +532,14 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitDetachedBackgroundWork(e, cmd)
 	case strings.EqualFold(cmd, "/parked-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/parked-fixture "):
 		emitParkedFixture(e, cmd)
+	case strings.EqualFold(cmd, "/opencode-background-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/opencode-background-fixture "):
+		emitOpenCodeBackgroundFixture(e, cmd)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
 		emitAsyncSubagentLifecycle(e, cmd, false)
+	case strings.EqualFold(cmd, "/async-followup") || strings.HasPrefix(strings.ToLower(cmd), "/async-followup "):
+		emitAsyncFollowup(e, strings.TrimSpace(cmd[len("/async-followup"):]))
 	default:
 		emitRandomResponse(e, cmd, model)
 	}

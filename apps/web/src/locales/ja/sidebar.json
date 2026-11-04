@@ -253,7 +253,7 @@
   "controlRestore.noModelActivity": "この記録サンプルにはモデル活動が返されませんでした。",
   "controlRestore.partialMeasurements": "一部の測定値を確認できません。データソースの理由: {{reasons}}。",
   "controlRestore.usageReadAt": "キャッシュ使用量一覧の取得時刻",
-  "controlCircuits.title": "動的ルーティング遮断器",
+  "controlCircuits.title": "プロバイダーリソースのサーキット",
   "controlCircuits.installationWide": "インストール全体",
   "controlCircuits.empty": "記録された遮断器はありません。すべてのプロバイダーに到達できるという意味ではありません。",
   "controlCircuits.blocking_one": "ルーティングを遮断中の回路 {{count}} 件",
@@ -484,5 +484,9 @@
   "controlSummary.waitReasons.blocked": "ブロック",
   "controlSummary.waitReasons.approval": "承認待ち",
   "controlSummary.waitReasons.hold": "保留",
-  "controlSummary.waitReasons.basis": "記録されたタスク数です。入力待ちとステージ理由で同じタスクが数えられるため、合計ではありません。"
+  "controlSummary.waitReasons.basis": "記録されたタスク数です。入力待ちとステージ理由で同じタスクが数えられるため、合計ではありません。",
+  "controlCircuits.state.available": "利用可能",
+  "controlCircuits.code.missingCredentials": "認証情報がありません",
+  "controlCircuits.code.providerNotConfigured": "プロバイダーが設定されていません",
+  "controlCircuits.code.networkUnavailable": "ネットワークを利用できません"
 }

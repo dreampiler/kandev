@@ -5,10 +5,11 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-20
+updated: 2026-10-31
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing System Design Part 2
 
 ## Purpose and boundaries
@@ -17,10 +18,10 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes) |
+| Requirement                                             | Design section                                    |
+| ------------------------------------------------------- | ------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                  | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes)                   |
 
 ## Migrated source detail
 
@@ -103,7 +104,9 @@ require the current exclusive probe lease.
 
 - Before adding transcript-derived user rows to a new continuation or choosing
   a durable relaunch prompt, the orchestrator reads the complete session queue
-  snapshot and, when supported, ordinary pending dispatch claims. Owned entries
+  snapshot and, when supported, ordinary pending dispatch claims under the same
+  session admission gate. A concurrent restore cannot move a claim into the
+  queue between these ownership reads. Owned entries
   and same-session unaccepted claims exclude existing rows by their explicit
   transcript ID and the existing deterministic queued-message ID. The recorded
   marker may predate the writer in durable claims and is not required for an
@@ -264,14 +267,16 @@ require the current exclusive probe lease.
   relaunches keep refusing terminal sessions.
 - Queue delivery treats a route that awaits a user action as a delivery
   block, not a launch in progress (`REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`,
-  AC 001.25 and 001.26). The automatic drain cores skip a session whose route
+  AC 001.15 and 001.16). The automatic drain cores skip a session whose route
   is `action_required` and which has no `executors_running` row, next to the
   existing session-recovery-block skip. A queued dispatch that still reaches
   `ensureSessionRunning` and fails because a WAITING_FOR_INPUT session's
   `starting` route has no executor row applies the orphan-sweep release at
-  that moment, then restores the entry for manual recovery instead of
-  requeueing it. The route recovery banner is the visible block, and the
-  successor launch from Retry or Try next drains the retained entry. A session
+  that moment, then restores or releases the entry for manual recovery instead
+  of requeueing it. A retained durable delivery is released in place and
+  remains one row with the same id; only an entry removed by the reservation is
+  restored. The route recovery banner is the visible block, and the
+  successor launch from Retry or Try next drains the visible entry. A session
   without a dynamic route keeps the runtime-unavailable requeue, because its
   missing executor row can belong to a launch that has not run yet.
 - A Retry or Try next on such an orphaned route has no predecessor to stop and
@@ -309,9 +314,14 @@ require the current exclusive probe lease.
   `startCreatedSession` calls `refuseMaterializedRouteProfileChange` before it
   persists a changed profile: when `LoadRouteState` returns a positive
   generation for a different logical profile, the start fails with
-  `ErrMaterializedRouteProfileChange` and nothing is written. A different
-  dynamic profile is reached through a new session (the workflow
-  profile-switch path), not by relabelling this one.
+  `ErrMaterializedRouteProfileChange` and nothing is written. The WebSocket
+  launch handler maps this expected refusal to a validation error. Background
+  prepared-session routing holds the same session lifecycle lock across its
+  fresh session read, route claim, and projection write. This serializes route
+  materialization with profile changes: preparation first makes a conflicting
+  start fail, while a profile change first makes preparation resolve the new
+  profile. A different dynamic profile is reached through a new session (the
+  workflow profile-switch path), not by relabelling this one.
 
 ## Scenarios
 

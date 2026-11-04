@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
@@ -107,10 +108,17 @@ func (a *Adapter) claimPromptTurnCompletion(turn *promptTurnState) bool {
 	return true
 }
 
+func (a *Adapter) promptTurnWasHandedOff(turn *promptTurnState) bool {
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	return turn != nil && turn.handedOff
+}
+
 // finishPromptTurn releases whichever turn still owns the physical gate token.
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
 	a.promptTurnMu.Lock()
+	a.recordPromptFinishedForSuggestionLocked(turn)
 	if a.promptTurn == turn {
 		a.promptTurn = nil
 	}
@@ -284,6 +292,18 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 		case diagnostic := <-turn.providerErrorCh:
 			if sessionID == "" || diagnostic.SessionID != sessionID {
 				continue
+			}
+			// Codex reports a quota notice before its prompt error response. Give
+			// that response the existing bounded settlement window before a local
+			// cancellation can erase its remote-response provenance. Only an actual
+			// RPC result reaches the retained-error path; a notice alone still uses
+			// the conservative provider-diagnostic fallback below.
+			if a.agentID == codexAgentID && diagnostic.ProviderError.Source == streams.ProviderErrorSourceAgentMessage {
+				select {
+				case <-turn.rpcDone:
+					return nil
+				case <-time.After(a.promptCancelTimeout()):
+				}
 			}
 			providerErr := &providerPromptError{ProviderError: diagnostic.ProviderError}
 			if turn.endTurn != nil {

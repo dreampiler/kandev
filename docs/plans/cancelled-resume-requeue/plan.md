@@ -2,7 +2,7 @@
 created: 2026-10-20
 status: done
 requirements:
-  - REQ-TASKS-RESUME-PROMPT-QUEUE-003
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-004
 system_design:
   - ../../specs/tasks/system-design/resume-prompt-queue.md
 legacy_specs: []

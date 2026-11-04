@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/api/client";
 
 const fixture = vi.hoisted(() => ({
   limits: true,
-  data: { workspaces: [{ id: "w1", name: "One" }] },
+  data: { owner: {}, identity: "owner", workspaces: [{ id: "w1", name: "One" }] },
   state: {
     auth: { mode: "enabled", authenticated: true, user: { id: "owner" } },
     agentProfiles: { items: [{ id: "profile-one", workspace_id: "w1" }] },
@@ -23,6 +23,9 @@ vi.mock("./integrated-control-provider", () => ({
 vi.mock("@/lib/api/domains/provider-usage-api", () => ({
   readProfileExecutionUsage: fixture.unsafeUsage,
   readCachedProfileExecutionUsage: fixture.safeUsage,
+}));
+vi.mock("@/lib/api/domains/routing-circuits-api", () => ({
+  getRoutingCircuits: async () => ({ circuits: [] }),
 }));
 vi.mock("./control-model-activity", () => ({
   ControlModelActivity: () => <div data-testid="recorded-model-activity" />,

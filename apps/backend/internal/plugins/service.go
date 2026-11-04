@@ -22,7 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/plugins/webapp"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type userStateCleanupStore interface {
@@ -58,6 +58,13 @@ type Service struct {
 	taskChangeRequestAuthorizer           func(context.Context, string, string) error
 	mu                                    sync.Mutex
 	approvalEffectMu                      sync.Mutex
+	// agentToolPolicyMu serializes automation selection validation/write
+	// against plugin installation and configuration policy rotation.
+	agentToolPolicyMu sync.RWMutex
+	// recordPersistMu serializes whole-record registry snapshot writes so a
+	// policy rotation cannot revert a status, restart count, or auto-update
+	// change (and vice versa).
+	recordPersistMu sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and
 	// transitions into active one atomic reservation. Per-plugin lifecycle
 	// locks cannot protect two different IDs claiming the same identity.
@@ -81,7 +88,7 @@ type Service struct {
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
-	dispatchLocks *keyedRWMutex
+	dispatchLocks *keyedContextRWMutex
 
 	// agentToolInstallMu makes exposed-name collision validation and registry
 	// insertion one atomic catalog mutation across different plugin IDs.
@@ -99,27 +106,29 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir                 string
-	store                      store.Store
-	approvals                  *approvalLedger
-	registry                   *Registry
-	state                      *state.Store
-	exactCommandStore          *state.CommandStore
-	userState                  *state.UserStore
-	instances                  *instances.Store
-	instanceState              *state.InstanceStore
-	webArtifacts               *webapp.ArtifactStore
-	webRuntime                 *webapp.Runtime
-	eventHub                   *webapp.EventHub
-	eventSubscription          bus.Subscription
-	userStateCleanup           userStateCleanupStore
-	agentConvs                 AgentConversationService
-	managedConvs               ManagedAgentConversationService
-	managedAutomationSchedules ManagedConversationScheduleService
-	eventBus                   bus.EventBus
-	conversationTokens         *conversationTokenManager
-	conversationEpoch          string
-	log                        *logger.Logger
+	pluginsDir                   string
+	store                        store.Store
+	approvals                    *approvalLedger
+	registry                     *Registry
+	state                        *state.Store
+	exactCommandStore            *state.CommandStore
+	userState                    *state.UserStore
+	instances                    *instances.Store
+	instanceState                *state.InstanceStore
+	webArtifacts                 *webapp.ArtifactStore
+	webRuntime                   *webapp.Runtime
+	eventHub                     *webapp.EventHub
+	eventSubscription            bus.Subscription
+	workspaceDeletedSubscription bus.Subscription
+	userStateCleanup             userStateCleanupStore
+	agentConvs                   AgentConversationService
+	managedConvs                 ManagedAgentConversationService
+	managedAutomationSchedules   ManagedConversationScheduleService
+	automationHistoryData        AutomationHistoryDataSource
+	eventBus                     bus.EventBus
+	conversationTokens           *conversationTokenManager
+	conversationEpoch            string
+	log                          *logger.Logger
 
 	deliverer                       Deliverer
 	agentToolCatalogListener        AgentToolCatalogListener
@@ -159,6 +168,7 @@ type Service struct {
 	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
 	// outlive the late SetTaskPRSource wiring.
 	taskPRs               taskPRSource
+	changeRequests        *state.ChangeRequestStore
 	taskWriter            taskWriter
 	workspaceAdminWriter  WorkspaceAdminWriter
 	sourceIssueController SourceIssueController
@@ -231,7 +241,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:                             log,
 		httpClient:                      &http.Client{},
 		lifecycleLocks:                  newKeyedMutex(),
-		dispatchLocks:                   newKeyedRWMutex(),
+		dispatchLocks:                   newKeyedContextRWMutex(),
 		agentToolGeneration:             uuid.NewString(),
 		eventHub:                        webapp.NewEventHub(),
 		conversationTokens:              newConversationTokenManager(),
@@ -328,26 +338,6 @@ type keyedMutex struct {
 	locks map[string]*sync.Mutex
 }
 
-type keyedRWMutex struct {
-	mu    sync.Mutex
-	locks map[string]*sync.RWMutex
-}
-
-func newKeyedRWMutex() *keyedRWMutex {
-	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
-}
-
-func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	lock, ok := k.locks[key]
-	if !ok {
-		lock = &sync.RWMutex{}
-		k.locks[key] = lock
-	}
-	return lock
-}
-
 func newKeyedMutex() *keyedMutex {
 	return &keyedMutex{locks: make(map[string]*sync.Mutex)}
 }
@@ -379,6 +369,12 @@ func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentToolCatalogListener = listener
+}
+
+// NotifyAgentToolCatalogChanged forwards an external invalidation (an
+// automation selection change) through the existing catalog listener path.
+func (s *Service) NotifyAgentToolCatalogChanged() {
+	s.notifyAgentToolCatalogChanged()
 }
 
 func (s *Service) notifyAgentToolCatalogChanged() {
@@ -619,6 +615,24 @@ func (s *Service) taskPRSourceDep() taskPRSource {
 	return s.taskPRs
 }
 
+// SetChangeRequestStore wires the Host-owned task change-request ledger
+// behind the exact Report/Remove RPCs. Wired at Provide time with the other
+// state stores; a nil store leaves those RPCs returning Unavailable.
+func (s *Service) SetChangeRequestStore(store *state.ChangeRequestStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.changeRequests = store
+}
+
+// changeRequestStoreDep returns the currently wired change-request ledger,
+// guarded by s.mu against the SetChangeRequestStore write. Hosts read it at
+// call time so late wiring reaches already-running plugins.
+func (s *Service) changeRequestStoreDep() *state.ChangeRequestStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.changeRequests
+}
+
 func (s *Service) SetInteractionResponder(responder interactionResponder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -691,6 +705,21 @@ func (s *Service) managedConversationScheduleDeps() ManagedConversationScheduleS
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.managedAutomationSchedules
+}
+
+// SetAutomationHistoryDataSource wires the automation-owned history reader.
+// It is read live by every Host instance so late wiring reaches hosts created
+// before the automation service existed.
+func (s *Service) SetAutomationHistoryDataSource(source AutomationHistoryDataSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automationHistoryData = source
+}
+
+func (s *Service) automationHistoryDataDependency() AutomationHistoryDataSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.automationHistoryData
 }
 
 // writeDependencies returns the currently-wired task messenger and task
@@ -796,6 +825,7 @@ func (s *Service) Shutdown() {
 
 // Close stops plugin runtimes after workers stop.
 func (s *Service) Close() error {
+	s.closeWorkspaceDeletedEvents()
 	s.Shutdown()
 	return nil
 }
@@ -907,6 +937,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		messageData:                s.messageData,
 		interactionData:            s.interactionData,
 		taskPRsDep:                 s.taskPRSourceDep,
+		changeRequestsDep:          s.changeRequestStoreDep,
 		pendingTaskTransitions:     s.pendingTaskTransitionSourceDep,
 		taskWriter:                 s.taskWriter,
 		workspaceAdminWriter:       s.workspaceAdminWriter,
@@ -918,6 +949,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentConversations:         s.agentConversationDeps,
 		managedConversations:       s.managedAgentConversationDeps,
 		managedAutomationSchedules: s.managedConversationScheduleDeps,
+		automationHistoryDataDep:   s.automationHistoryDataDependency,
 		log:                        s.log,
 	}
 }

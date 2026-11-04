@@ -40,6 +40,9 @@ const errorDetailKeyErrorCode = "error_code"
 // added to the error log of an unmapped (500) failure so the caller can name
 // the request it was serving.
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string, logFields ...zap.Field) {
+	if handleBuiltinCreationHTTPError(c, err) {
+		return
+	}
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
 		return

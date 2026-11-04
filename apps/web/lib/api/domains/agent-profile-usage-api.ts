@@ -12,6 +12,7 @@ export type AgentProfileUsage = {
   profile_id: string;
   model_id: string;
   state: "ok" | "unsupported" | "unavailable" | "no_usage_api";
+  stale?: boolean;
   reason?: string;
   status?: number;
   source: "provider_api" | "proxy" | "none";

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
@@ -65,7 +67,7 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -105,8 +107,9 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
-	boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
-	taskSvc.SetWorkspaceCollaboration(boundary, repos.Task)
+	taskSvc.SetWorkspaceCollaboration(&workspaceCollaborationBoundary{
+		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
+	}, repos.Task)
 
 	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
 
@@ -128,6 +131,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	}
 	pluginsSvc := integrations.pluginsSvc
 	if pluginsSvc != nil {
+		boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
 		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
 	}
 
@@ -365,7 +369,6 @@ func initDynamicRuntimeResolver(
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
 		dynamicruntime.WithCircuitLogger(log.Zap()),
-		dynamicruntime.WithCircuitBackoffEscalation(cfg.Features.DynamicCircuitBackoffEscalation),
 	)
 	if err := dynamicCircuits.Restore(ctx); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
@@ -487,6 +490,7 @@ func initIntegrationWiring(
 		automationComponents.Service.SetManagedConversationDestinationResolver(pluginsSvc)
 		automationComponents.Service.SetManagedConversationAutomationDelivery(managedConversationAutomationDeliveryAdapter{plugins: pluginsSvc})
 		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
+		pluginsSvc.SetAutomationHistoryDataSource(automationHistoryAdapter{service: automationComponents.Service})
 	}
 	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log)
 	if err != nil {
@@ -537,6 +541,9 @@ func wireTaskWorkflowCrossReferences(
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
 	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkflowAuthorizationRequiredChecker(taskSvc.WorkflowAuthorizationRequired)
+	workflowSvc.SetWorkflowMutationReadOnlyChecker(taskSvc.WorkflowMutationReadOnly)
+	workflowSvc.SetWorkspaceMutationReadOnlyChecker(taskSvc.WorkspaceWorkflowMutationReadOnly)
 	workflowSvc.SetExecutorMutationChecker(taskSvc.AuthorizeWorkflowExecutorMutation)
 	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
 	// A step's queue_run action names the task it starts work on, so the
@@ -558,6 +565,7 @@ func wireTaskWorkflowCrossReferences(
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetAgentProfileLookup(buildAgentProfileLookup(repos))
 	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 }
 
@@ -592,6 +600,7 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize github: %w", recordErr)
 	}
 	if githubSvc != nil {
+		taskSvc.SetGitHubRepositoryOriginVerifier(gitHubRepositoryOriginVerifier{connections: githubSvc})
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetComparisonTargetObserver(taskSvc)
 		githubSvc.SetPromptResolver(promptSvc)
@@ -1089,7 +1098,7 @@ func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
 		return err
 	}
 	if repository == nil || repository.WorkspaceID != workspaceID ||
-		!strings.EqualFold(repository.Provider, "github") || !isPublicGitHubProviderHost(repository.ProviderHost) {
+		!strings.EqualFold(repository.Provider, "github") || !isValidGitHubProviderHost(repository.ProviderHost) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	if strings.EqualFold(repository.ProviderOwner, owner) && strings.EqualFold(repository.ProviderName, repoName) {
@@ -1106,6 +1115,10 @@ func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
 		ctx, workspaceID, repository, link, owner, repoName, providerID, parentProviderID, strictIdentity,
 	); handled {
 		return destinationErr
+	}
+	host, _ := githubhost.Parse(repository.ProviderHost)
+	if found && (!strings.EqualFold(binding.SourceRepository.Host, host.String())) {
+		return fmt.Errorf("contribution host does not match repository")
 	}
 	return authorizeRemoteContribution(binding, found, owner, repoName, providerID, strictIdentity)
 }
@@ -1135,8 +1148,7 @@ func (a *githubBrokerScopeAuthorizer) authorizeContributionDestination(
 	if err != nil {
 		return true, fmt.Errorf("validate contribution destination scope: %w", err)
 	}
-	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub ||
-		!strings.EqualFold(destination.TargetRepository.Host, "github.com") {
+	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub {
 		return false, nil
 	}
 	if !contributionDestinationScopeMatches(
@@ -1158,6 +1170,10 @@ func contributionDestinationScopeMatches(
 	owner, repoName, providerID, parentProviderID string,
 	strictIdentity bool,
 ) bool {
+	host, err := githubhost.Parse(repository.ProviderHost)
+	if err != nil || !strings.EqualFold(destination.SourceRepository.Host, host.String()) || !strings.EqualFold(destination.TargetRepository.Host, host.String()) {
+		return false
+	}
 	parts := strings.Split(destination.TargetRepository.Path, "/")
 	canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) ||
@@ -1207,7 +1223,7 @@ func authorizeRemoteContribution(
 	strictIdentity bool,
 ) error {
 	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
-		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
+		!binding.CollaborationAllowed {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	parts := strings.Split(binding.SourceRepository.Path, "/")
@@ -1787,8 +1803,13 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-task-change-requests",
 	} {
-		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
+		initErr := initErrors[id]
+		if id == "plugin-state" {
+			initErr = errors.Join(initErr, initErrors["plugin-command-receipts"])
+		}
+		if err := recordRequiredStore(ctx, tracker, id, initErr); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -1874,6 +1895,7 @@ type pluginTaskWriteService interface {
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	FindTaskByExternalIDForCreate(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error)
 	UpdateTaskExact(ctx context.Context, id string, req taskservice.ExactTaskUpdateRequest) (*taskservice.ExactTaskUpdateResult, error)
 	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
@@ -1885,6 +1907,17 @@ type pluginsTaskWriterAdapter struct {
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
 	created, _, err := a.createTask(ctx, in, "")
 	return created, err
+}
+
+func (a pluginsTaskWriterAdapter) FindTaskByExternalID(ctx context.Context, workspaceID, rawExternalID string) (*taskmodels.Task, bool, error) {
+	task, found, err := a.svc.FindTaskByExternalIDForCreate(ctx, workspaceID, rawExternalID)
+	if errors.Is(err, taskservice.ErrExternalIDInvalid) {
+		return nil, false, status.Error(codes.InvalidArgument, "external_id is required and must be valid")
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return task, found, nil
 }
 
 func (a pluginsTaskWriterAdapter) CreateTaskExact(ctx context.Context, in plugins.ExactTaskCreateInput) (*taskmodels.Task, bool, error) {
@@ -1950,13 +1983,23 @@ func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) err
 	return a.svc.DeleteTask(ctx, id)
 }
 
+// pluginTaskMetadata builds a plugin-created task's metadata. The launch
+// profiles are stored under the same keys native issue watchers use, so a task
+// that a workflow step starts later launches with the profiles the plugin chose.
 func pluginTaskMetadata(in plugins.TaskCreateInput) (map[string]interface{}, error) {
-	if in.Metadata == nil && in.Source == "" {
+	agentProfileID, executorProfileID := in.Launch.AgentProfileID, in.Launch.ExecutorProfileID
+	if in.Metadata == nil && in.Source == "" && agentProfileID == "" && executorProfileID == "" {
 		return nil, nil
 	}
-	metadata := make(map[string]interface{}, len(in.Metadata)+1)
+	metadata := make(map[string]interface{}, len(in.Metadata)+3)
 	for key, value := range in.Metadata {
 		metadata[key] = value
+	}
+	if agentProfileID != "" {
+		metadata[taskmodels.MetaKeyAgentProfileID] = agentProfileID
+	}
+	if executorProfileID != "" {
+		metadata[taskmodels.MetaKeyExecutorProfileID] = executorProfileID
 	}
 	if in.Source == "" {
 		return metadata, nil
@@ -2513,10 +2556,15 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 		if err != nil || profile == nil {
 			return nil
 		}
+		options := maps.Clone(profile.ConfigOptions)
+		if options == nil {
+			options = map[string]string{}
+		}
 		return &wfmodels.AgentProfilePortable{
-			AgentName: profile.AgentDisplayName,
-			Model:     profile.Model,
-			Mode:      profile.Mode,
+			AgentName:     profile.AgentDisplayName,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			ConfigOptions: &options,
 		}
 	}
 }
@@ -2627,18 +2675,7 @@ func (a codeHostBranchListerAdapter) ListRepoBranches(
 	ctx context.Context, source taskservice.RemoteBranchSource,
 ) ([]taskservice.Branch, error) {
 	if strings.EqualFold(source.Provider, "github") {
-		if a.github == nil {
-			return nil, fmt.Errorf("GitHub branch provider is unavailable")
-		}
-		remote, err := a.github.ListRepoBranchesForWorkspace(ctx, source.WorkspaceID, source.Owner, source.Name)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]taskservice.Branch, 0, len(remote))
-		for _, branch := range remote {
-			out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
-		}
-		return out, nil
+		return a.listGitHubRepoBranches(ctx, source)
 	}
 	if a.plugins == nil {
 		return nil, fmt.Errorf("plugin repository branch provider is unavailable")

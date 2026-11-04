@@ -1489,8 +1489,6 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		}
 		repository.SecretBindings = replacement
 	}
-	repository.UpdatedAt = time.Now().UTC()
-
 	if req.SecretBindings != nil {
 		mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator)
 		if !ok {
@@ -1829,7 +1827,7 @@ func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string
 // Repository script operations
 
 func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {
-	if err := s.authorizeRepositoryID(ctx, req.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, req.RepositoryID); err != nil {
 		return nil, err
 	}
 	script := &models.RepositoryScript{
@@ -1864,7 +1862,7 @@ func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *Up
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, script.RepositoryID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -1892,7 +1890,7 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, script.RepositoryID); err != nil {
 		return err
 	}
 	if err := s.repoEntities.DeleteRepositoryScript(ctx, id); err != nil {

@@ -42,10 +42,11 @@ adds a one-time migration.
 
 ## Verification strategy
 
-Repository tests on an on-disk SQLite database through `NewWithDB`, so the
-table under test is the same stub production uses. They must fail on the base
-commit and pass after. An environment-gated PostgreSQL test covers the same
-delete and migration.
+Disposable explicit repository checks use an on-disk SQLite database through
+`NewWithDB`, so the table under test is the same stub production uses.
+Compare the pre-change source with the candidate, including rollback and marker
+controls. The original PostgreSQL case remains environment-gated. No permanent
+test or upgrade-fixture change is imported into this independent port.
 
 ## Verification results
 
@@ -56,3 +57,11 @@ Recorded in the task work order.
 - A test that seeds steps without a workflow and then reopens the repository
   on a database without the marker would see those steps removed. Fresh
   databases write the marker on first boot, so seeding after boot is unaffected.
+
+## Independent upstream port
+
+On 2026-10-23, the pre-change source reproduced three retained-step failures and
+the candidate passed all four SQLite cases with race detection (2.679s). The
+not-found rollback and post-marker no-repeat controls preserve unrelated rows.
+PostgreSQL was not configured. The work order distinguishes these observations
+from original integrated results; operating databases remain unchanged.

@@ -16,6 +16,7 @@ import {
   STEP_COLORS,
   hasOnEnterAction,
   hasOnExitAction,
+  stageTypeOnHoldToggle,
   type TransitionEventKey,
 } from "./workflow-pipeline-editor-helpers";
 import {
@@ -338,9 +339,9 @@ type StepHoldRowProps = {
   readOnly: boolean;
 };
 
-// The step's hold nature. Setting it stops the workspace overview from reading
-// this step's name, so a task parked here is counted and listed as held whatever
-// the step is called, and a step merely named "hold" is not.
+// The step's hold nature, stored as stage_type. Consumers read the stored value
+// instead of the step's name, so renaming a hold step keeps it a hold and naming
+// a step "hold" does not make it one.
 function StepHoldRow({ step, savedStep, onUpdate, readOnly }: StepHoldRowProps) {
   const { t } = useTranslation();
   const stageType = step.stage_type ?? "custom";
@@ -349,7 +350,7 @@ function StepHoldRow({ step, savedStep, onUpdate, readOnly }: StepHoldRowProps) 
       id={`${step.id}-hold-step`}
       checked={stageType === "hold"}
       onCheckedChange={(checked) =>
-        !readOnly && onUpdate({ stage_type: checked ? "hold" : "custom" })
+        !readOnly && onUpdate({ stage_type: stageTypeOnHoldToggle(checked, savedStep?.stage_type) })
       }
       disabled={readOnly}
       label={t("workflows:holdStep")}

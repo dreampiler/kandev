@@ -36,4 +36,5 @@ case " ${GOFLAGS:-} " in
 esac
 
 cd apps/backend
-exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m --concurrency="$GOMAXPROCS"
+# Worktrees share the linter cache; wait for its existing owner.
+exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=15m --allow-serial-runners --concurrency="$GOMAXPROCS"

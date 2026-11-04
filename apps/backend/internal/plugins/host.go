@@ -15,7 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // pluginHost implements pluginsdk.Host (the kandev.plugin.v1 Host RPCs, §3
@@ -78,6 +78,10 @@ type pluginHost struct {
 	// taskPRsDep resolves the source at read time so a host created before
 	// SetTaskPRSource still observes the late wiring.
 	taskPRsDep func() taskPRSource
+	// changeRequestsDep resolves the Host-owned task change-request ledger
+	// at call time so a host created before SetChangeRequestStore still
+	// observes the late wiring.
+	changeRequestsDep func() *state.ChangeRequestStore
 	// pendingTaskTransitions resolves the orchestrator queue at read time for
 	// hosts created before its late backend wiring.
 	pendingTaskTransitions func() pendingTaskTransitionSource
@@ -122,6 +126,7 @@ type pluginHost struct {
 	agentConversations         func() AgentConversationService
 	managedConversations       func() ManagedAgentConversationService
 	managedAutomationSchedules func() ManagedConversationScheduleService
+	automationHistoryDataDep   func() AutomationHistoryDataSource
 
 	// log receives the dependency-derivation-failure diagnostic emitted by
 	// attachDependencies (see host_data_dependencies.go). nil on a bare test

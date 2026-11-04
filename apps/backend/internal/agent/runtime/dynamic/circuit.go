@@ -41,9 +41,9 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
-	// failures counts consecutive qualifying failures while backoff
-	// escalation is enabled. Only a turn that completes without a provider
-	// error resets it; a successful probe closes the circuit but keeps it.
+	// failures counts consecutive qualifying failures. Only a turn that
+	// completes without a provider error resets it; a successful probe closes
+	// the circuit but keeps the count.
 	failures int
 	// updatedAt is when this circuit last changed. It travels with the durable
 	// row so a read surface can say how fresh its observation is.
@@ -53,7 +53,7 @@ type circuit struct {
 // held reports whether the circuit stays open until an owner release: it has
 // no expiry and admits no probe.
 func (c circuit) held() bool {
-	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
+	return c.state == CircuitOpen && (routingerr.HoldsUntilRelease(c.code) || (c.code == routingerr.CodeModelUnavailable && c.until.IsZero()))
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.
@@ -64,8 +64,7 @@ type CircuitSnapshot struct {
 	Until      time.Time
 	Code       routingerr.Code
 	ProbeUntil time.Time
-	// Failures is the consecutive qualifying failure count. It is ignored on
-	// restore while backoff escalation is disabled.
+	// Failures is the consecutive qualifying failure count.
 	Failures int
 	// UpdatedAt is when the circuit last changed. Zero means the persisted row
 	// predates this field or the caller did not supply one.
@@ -102,21 +101,13 @@ func WithCircuitLogger(log *zap.Logger) CircuitRegistryOption {
 	}
 }
 
-// WithCircuitBackoffEscalation enables the escalating backoff ladder for
-// repeated qualifying failures of one resource. Disabled, every open uses the
-// fixed backoff and persisted failure counts are ignored.
-func WithCircuitBackoffEscalation(enabled bool) CircuitRegistryOption {
-	return func(registry *CircuitRegistry) { registry.escalation = enabled }
-}
-
 type CircuitRegistry struct {
-	mu         sync.Mutex
-	now        func() time.Time
-	circuits   map[string]circuit
-	persist    CircuitPersistence
-	logger     *zap.Logger
-	pending    map[string]struct{}
-	escalation bool
+	mu       sync.Mutex
+	now      func() time.Time
+	circuits map[string]circuit
+	persist  CircuitPersistence
+	logger   *zap.Logger
+	pending  map[string]struct{}
 }
 
 func NewCircuitRegistry(options ...CircuitRegistryOption) *CircuitRegistry {
@@ -149,7 +140,7 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
 			updatedAt: snapshot.UpdatedAt,
 		}
-		if r.escalation && snapshot.Failures > 0 {
+		if snapshot.Failures > 0 {
 			entry.failures = snapshot.Failures
 		}
 		r.circuits[snapshot.Key] = entry
@@ -355,11 +346,9 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	} else {
 		entry.state = CircuitOpen
 		entry.until = now.Add(backoff)
-		if r.escalation {
-			entry.failures++
-			if escalated := now.Add(escalatedBackoff(entry.failures)); escalated.After(entry.until) {
-				entry.until = escalated
-			}
+		entry.failures++
+		if escalated := now.Add(escalatedBackoff(entry.failures)); escalated.After(entry.until) {
+			entry.until = escalated
 		}
 	}
 	entry.updatedAt = now.UTC()
@@ -467,4 +456,43 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	}
 	delete(r.pending, key)
 	return nil
+}
+
+// acquireProbes takes every open scope of one candidate together. It never
+// changes a circuit when any scope is unavailable, so a refused selection does
+// not consume a probe or count as a failed provider attempt.
+func (r *CircuitRegistry) acquireProbes(keys []string, duration time.Duration) ([]ProbeLease, bool) {
+	if duration <= 0 {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.now()
+	seen := make(map[string]bool, len(keys))
+	pending := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		entry, exists := r.circuits[key]
+		if !exists || entry.state == CircuitClosed {
+			continue
+		}
+		if entry.held() || now.Before(entry.until) || now.Before(entry.probeUntil) {
+			return nil, false
+		}
+		pending = append(pending, key)
+	}
+	leases := make([]ProbeLease, 0, len(pending))
+	for _, key := range pending {
+		r.flushPendingLocked(key)
+		entry := r.circuits[key]
+		lease := ProbeLease{Key: key, ExpiresAt: now.Add(duration)}
+		entry.state, entry.probeUntil, entry.updatedAt = CircuitHalfOpen, lease.ExpiresAt, now.UTC()
+		r.circuits[key] = entry
+		_ = r.persistSnapshotLocked(key)
+		leases = append(leases, lease)
+	}
+	return leases, true
 }

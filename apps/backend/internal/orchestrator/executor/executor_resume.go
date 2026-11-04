@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,9 +12,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
@@ -444,12 +445,31 @@ func validPRBaseIdentity(
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
 		return false, prBaseMismatchHeadBranch
 	}
+	attachedRepository = normalizePRBaseHeadAlias(base, attachedRepository)
+	headRepository = normalizePRBaseHeadAlias(base, headRepository)
+	if expected != nil {
+		copy := *expected
+		copy.HeadRepository = normalizePRBaseHeadAlias(base, copy.HeadRepository)
+		expected = &copy
+	}
 	if expected != nil || contribution {
 		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
 			headRepository, hasHeadRepository, contribution)
 	}
 	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
 		headRepository, hasHeadRepository)
+}
+
+// normalizePRBaseHeadAlias recognizes only the alias pair returned for this live
+// head repository. Stored identities and unrelated repository IDs stay intact.
+func normalizePRBaseHeadAlias(base models.PRBase, repository models.ComparisonTargetRepository) models.ComparisonTargetRepository {
+	head := base.Target.HeadRepository
+	if base.HeadRepositoryNodeID != "" && head.ProviderID != "" &&
+		repository.ProviderID == base.HeadRepositoryNodeID &&
+		strings.EqualFold(repository.Host, head.Host) && strings.EqualFold(repository.Path, head.Path) {
+		repository.ProviderID = head.ProviderID
+	}
+	return repository
 }
 
 func validBoundPRBaseIdentity(
@@ -523,7 +543,8 @@ func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.C
 }
 
 func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
-	if !isGitHubComparisonHost(repository.Host) {
+	host, err := githubhost.Parse(strings.TrimSpace(repository.Host))
+	if err != nil {
 		return models.ComparisonTargetRepository{}, false
 	}
 	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
@@ -531,27 +552,10 @@ func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepos
 		return models.ComparisonTargetRepository{}, false
 	}
 	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-	repository.Host = defaultGitHubHost
+	repository.Host = host.String()
 	repository.Path = owner + "/" + name
-	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	repository.RemoteURL = fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, name)
 	return repository, true
-}
-
-func isGitHubComparisonHost(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.User != nil || parsed.Port() != "" ||
-		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return false
-	}
-	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
-		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
@@ -1302,7 +1306,7 @@ func (e *Executor) resumeSession(
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -1437,7 +1441,20 @@ func (e *Executor) resumeSession(
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
-			if startAgent {
+			if startAgent && resumeInitialState == models.TaskSessionStateWaitingForInput &&
+				e.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+				// A recovered idle runtime has no new boot event to clear our STARTING claim.
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					if errors.Is(rollbackErr, ErrSessionStateSuperseded) {
+						// A newer owner preserves the duplicate-runtime classification.
+						return nil, errors.Join(ErrExecutionAlreadyRunning, rollbackErr)
+					}
+					return nil, rollbackErr
+				}
+			} else if startAgent {
 				// The live process owns this session's active lifecycle. Keep the
 				// STARTING projection for that process to reconcile instead of
 				// marking it FAILED as if this duplicate launch had failed.
@@ -1454,7 +1471,7 @@ func (e *Executor) resumeSession(
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(launchCtx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(launchCtx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -2222,7 +2239,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, false); err != nil {
 		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
@@ -2276,13 +2293,14 @@ func (e *Executor) applyResumeMCPSettings(
 	if err != nil {
 		return err
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	profileContext, err := e.launchMCPProfile(ctx, taskID, session, req.StartAgent)
 	if err != nil {
 		return err
 	}
 	req.McpMode = mode
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 	return nil
 }
 

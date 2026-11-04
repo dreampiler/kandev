@@ -12,8 +12,8 @@ type backoffClock struct{ now time.Time }
 
 func (c *backoffClock) Now() time.Time { return c.now }
 
-func newBackoffRegistry(clock *backoffClock, escalation bool, persistence CircuitPersistence) *CircuitRegistry {
-	options := []CircuitRegistryOption{WithCircuitClock(clock.Now), WithCircuitBackoffEscalation(escalation)}
+func newBackoffRegistry(clock *backoffClock, persistence CircuitPersistence) *CircuitRegistry {
+	options := []CircuitRegistryOption{WithCircuitClock(clock.Now)}
 	if persistence != nil {
 		options = append(options, WithCircuitPersistence(persistence))
 	}
@@ -36,58 +36,9 @@ func rateLimitedOpen(now time.Time) FailureOpen {
 }
 
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
-func TestCircuitBackoffWithoutEscalationKeepsTheFixedMinute(t *testing.T) {
-	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	persistence := newStubCircuitPersistence()
-	registry := newBackoffRegistry(clock, false, persistence)
-	for attempt := 1; attempt <= 4; attempt++ {
-		registry.OpenFailure("binding", rateLimitedOpen(clock.now))
-		if got, want := circuitUntil(t, registry, "binding"), clock.now.Add(time.Minute); !got.Equal(want) {
-			t.Fatalf("open %d until = %v, want %v", attempt, got, want)
-		}
-		clock.now = clock.now.Add(time.Hour)
-	}
-	lease, ok := registry.AcquireProbe("binding", time.Second)
-	if !ok {
-		t.Fatal("AcquireProbe failed after expiry")
-	}
-	registry.ReleaseProbe(lease, false, circuitBackoff)
-	if got, want := circuitUntil(t, registry, "binding"), clock.now.Add(time.Minute); !got.Equal(want) {
-		t.Fatalf("failed probe until = %v, want %v", got, want)
-	}
-	if got := registry.Failures("binding"); got != 0 {
-		t.Fatalf("failures = %d, want 0 while escalation is disabled", got)
-	}
-	if row := persistence.rows["binding"]; row.Failures != 0 {
-		t.Fatalf("persisted failures = %d, want 0", row.Failures)
-	}
-}
-
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
-func TestCircuitBackoffWithoutEscalationIgnoresPersistedCount(t *testing.T) {
-	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	persistence := newStubCircuitPersistence()
-	persistence.rows["binding"] = CircuitSnapshot{
-		Key: "binding", State: CircuitOpen, Until: clock.now.Add(-time.Minute),
-		Code: routingerr.CodeRateLimited, Failures: 5,
-	}
-	registry := newBackoffRegistry(clock, false, persistence)
-	if err := registry.Restore(context.Background()); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-	if got := registry.Failures("binding"); got != 0 {
-		t.Fatalf("restored failures = %d, want 0 while escalation is disabled", got)
-	}
-	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
-	if got, want := circuitUntil(t, registry, "binding"), clock.now.Add(time.Minute); !got.Equal(want) {
-		t.Fatalf("until = %v, want %v", got, want)
-	}
-}
-
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestCircuitBackoffEscalatesAcrossRepeatedOpens(t *testing.T) {
 	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	registry := newBackoffRegistry(clock, true, nil)
+	registry := newBackoffRegistry(clock, nil)
 	want := []time.Duration{
 		time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute,
 		time.Hour, 2 * time.Hour, 4 * time.Hour, 4 * time.Hour,
@@ -109,7 +60,7 @@ func TestCircuitBackoffEscalatesAcrossRepeatedOpens(t *testing.T) {
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestCircuitBackoffCountsOneIncidentOnce(t *testing.T) {
 	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	registry := newBackoffRegistry(clock, true, nil)
+	registry := newBackoffRegistry(clock, nil)
 	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
 	first := circuitUntil(t, registry, "binding")
 	clock.now = clock.now.Add(10 * time.Second)
@@ -129,7 +80,7 @@ func TestCircuitBackoffCountsOneIncidentOnce(t *testing.T) {
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestCircuitBackoffProbeOutcomesAndCleanTurnReset(t *testing.T) {
 	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	registry := newBackoffRegistry(clock, true, nil)
+	registry := newBackoffRegistry(clock, nil)
 	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
 	clock.now = clock.now.Add(2 * time.Minute)
 
@@ -172,24 +123,6 @@ func TestCircuitBackoffProbeOutcomesAndCleanTurnReset(t *testing.T) {
 	}
 }
 
-// Disabled, a clean turn has nothing to reset and a successful probe keeps the
-// fixed behavior.
-//
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
-func TestCircuitBackoffResetFailuresWithoutEscalationIsANoOp(t *testing.T) {
-	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	persistence := newStubCircuitPersistence()
-	registry := newBackoffRegistry(clock, false, persistence)
-	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
-	saves := persistence.saves
-	if registry.ResetFailures("binding") || persistence.saves != saves {
-		t.Fatal("ResetFailures acted while escalation is disabled")
-	}
-	if registry.EscalationEnabled() {
-		t.Fatal("EscalationEnabled = true, want false")
-	}
-}
-
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestCircuitBackoffResetHints(t *testing.T) {
 	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
@@ -208,7 +141,7 @@ func TestCircuitBackoffResetHints(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clock := &backoffClock{now: start}
-			registry := newBackoffRegistry(clock, true, nil)
+			registry := newBackoffRegistry(clock, nil)
 			hint := start.Add(tc.hint)
 			registry.OpenFailure("binding", FailureOpen{
 				Code: routingerr.CodeQuotaLimited, Now: start, ResetHint: &hint, ResetHintInferred: tc.inferred,
@@ -224,7 +157,7 @@ func TestCircuitBackoffResetHints(t *testing.T) {
 func TestCircuitBackoffCountPersistsAndRestores(t *testing.T) {
 	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
 	persistence := newStubCircuitPersistence()
-	registry := newBackoffRegistry(clock, true, persistence)
+	registry := newBackoffRegistry(clock, persistence)
 	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
 	clock.now = clock.now.Add(time.Hour)
 	registry.OpenFailure("binding", rateLimitedOpen(clock.now))
@@ -233,7 +166,7 @@ func TestCircuitBackoffCountPersistsAndRestores(t *testing.T) {
 		t.Fatalf("persisted row = %#v, want 2 failures with a UTC deadline", row)
 	}
 
-	restored := newBackoffRegistry(clock, true, persistence)
+	restored := newBackoffRegistry(clock, persistence)
 	if err := restored.Restore(context.Background()); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -252,7 +185,7 @@ func TestCircuitBackoffCountPersistsAndRestores(t *testing.T) {
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestCircuitBackoffNeverReplacesAHold(t *testing.T) {
 	clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
-	registry := newBackoffRegistry(clock, true, nil)
+	registry := newBackoffRegistry(clock, nil)
 	if _, err := registry.Hold("binding", routingerr.CodeAccountBlocked); err != nil {
 		t.Fatalf("Hold: %v", err)
 	}

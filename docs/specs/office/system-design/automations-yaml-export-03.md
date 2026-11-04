@@ -98,6 +98,7 @@ This table is the contract AC-22 tests against. Every field of `Automation` and
 | `Automation` | `WebhookSecret` | excluded — secret |
 | `Automation` | `ID` | excluded — instance identity |
 | `Automation` | `WorkspaceID` | excluded — instance identity |
+| Automation | ParentTaskID | excluded — installation-local parent task binding |
 | `Automation` | `LastTriggeredAt` | excluded — runtime state |
 | `Automation` | `CreatedAt` | excluded — runtime state / fire anchor |
 | `Automation` | `UpdatedAt` | excluded — runtime state |

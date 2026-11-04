@@ -95,6 +95,9 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return err
+	}
 	if m.executorAdmission != nil {
 		var err error
 		ctx, err = m.executorAdmission(ctx, execution.SessionID, getMetadataString(execution.MetadataSnapshot(), "executor_id"), getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorProfileID))
@@ -146,6 +149,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		}
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
+	if err := m.verifyBuiltinExecution(ctx, execution); err != nil {
+		return err
+	}
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}

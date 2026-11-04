@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -65,8 +66,9 @@ func (c *failingAgentctlCommandClient) StartProcess(ctx context.Context, req age
 }
 
 type shellProcess struct {
-	cmd    *exec.Cmd
 	output *lockedBuffer
+	stop   func(context.Context) error
+	done   chan struct{}
 }
 
 type lockedBuffer struct {
@@ -94,7 +96,8 @@ func (c *shellProcessClient) StartProcess(_ context.Context, req agentctl.StartP
 	}
 	output := &lockedBuffer{}
 	cmd.Stdout, cmd.Stderr = output, output
-	if err := cmd.Start(); err != nil {
+	stop, release, err := startOwnedCredentialShell(cmd)
+	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -104,12 +107,15 @@ func (c *shellProcessClient) StartProcess(_ context.Context, req agentctl.StartP
 		c.processes = map[string]*shellProcess{}
 	}
 	id := fmt.Sprintf("process-%d", len(c.commands))
-	c.processes[id] = &shellProcess{cmd: cmd, output: output}
+	process := &shellProcess{output: output, stop: stop, done: make(chan struct{})}
+	c.processes[id] = process
 	go func() {
 		_ = cmd.Wait()
+		_ = release()
 		c.mu.Lock()
 		delete(c.processes, id)
 		c.mu.Unlock()
+		close(process.done)
 	}()
 	return &agentctl.ProcessInfo{ID: id, Status: agentctltypes.ProcessStatusRunning}, nil
 }
@@ -127,12 +133,14 @@ func (c *shellProcessClient) GetProcess(_ context.Context, id string, _ bool) (*
 	}, nil
 }
 
-func (c *shellProcessClient) StopProcess(_ context.Context, id string) error {
+func (c *shellProcessClient) StopProcess(ctx context.Context, id string) error {
 	c.mu.Lock()
 	process, ok := c.processes[id]
 	c.mu.Unlock()
 	if ok {
-		_ = process.cmd.Process.Kill()
+		err := process.stop(ctx)
+		<-process.done
+		return err
 	}
 	return nil
 }
@@ -233,6 +241,7 @@ func TestAgentctlFileUploaderPreservesExistingFileWhenChunkTransferFails(t *test
 func TestUploadPluginExecutorAgentCredentialsCopiesSelectedFiles(t *testing.T) {
 	localHome := t.TempDir()
 	t.Setenv("HOME", localHome)
+	t.Setenv("USERPROFILE", localHome)
 	source := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
 	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
 		t.Fatal(err)
@@ -250,15 +259,19 @@ func TestUploadPluginExecutorAgentCredentialsCopiesSelectedFiles(t *testing.T) {
 	}
 
 	executor := NewPluginRemoteExecutor(nil, newTestLogger())
+	declaredAuth := agents.NewOpenCodeACP().RemoteAuth()
+	declaredAuth.Methods[0].SourceFiles[runtime.GOOS] = []string{".local/share/opencode/auth.json"}
 	req := &ExecutorCreateRequest{
 		SessionID:   "session-1",
-		AgentConfig: agents.NewOpenCodeACP(),
+		AgentConfig: &remoteAuthAgent{MockAgent: &agents.MockAgent{}, id: agents.OpenCodeACPAgentID, remoteAuth: declaredAuth},
 		Metadata: map[string]interface{}{
 			"remote_credentials":      `["agent:opencode-acp:files:0"]`,
 			MetadataKeyRemoteAuthHome: remoteHome,
 		},
 	}
-	executor.uploadPluginExecutorAgentCredentials(context.Background(), &shellProcessClient{}, req)
+	client := &shellProcessClient{}
+	t.Cleanup(func() { stopAll(client) })
+	executor.uploadPluginExecutorAgentCredentials(context.Background(), client, req)
 
 	merged, err := os.ReadFile(existing)
 	if err != nil {
@@ -282,8 +295,13 @@ func TestUploadPluginExecutorAgentCredentialsWithoutSelectionRunsNothing(t *test
 
 func stopAll(client *shellProcessClient) {
 	client.mu.Lock()
-	defer client.mu.Unlock()
+	processes := make([]*shellProcess, 0, len(client.processes))
 	for _, process := range client.processes {
-		_ = process.cmd.Process.Kill()
+		processes = append(processes, process)
+	}
+	client.mu.Unlock()
+	for _, process := range processes {
+		_ = process.stop(context.Background())
+		<-process.done
 	}
 }

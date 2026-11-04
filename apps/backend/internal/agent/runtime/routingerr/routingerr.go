@@ -123,6 +123,7 @@ const (
 // Error is the classifier's normalized output. It wraps stderr/stdout in
 // RawExcerpt after sanitization + truncation.
 type Error struct {
+	Keyword          *KeywordDecision
 	Code             Code
 	Class            Class
 	CatalogueVersion string
@@ -168,15 +169,16 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	ACPCode       int // ACP JSON-RPC code, never an HTTP status
-	ErrorKind     string
-	ProviderCode  string // opaque provider code; unknown namespaces are not inferred
-	ResetHint     *time.Time
+	KeywordContext KeywordContext
+	Phase          Phase
+	ProviderID     string
+	ExitCode       *int
+	StructuredErr  error
+	HTTPStatus     int
+	ACPCode        int // ACP JSON-RPC code, never an HTTP status
+	ErrorKind      string
+	ProviderCode   string // opaque provider code; unknown namespaces are not inferred
+	ResetHint      *time.Time
 	// ResetHintDerivationDisabled retains unknown streamed timing without
 	// preventing a caller from supplying a later explicit ResetHint.
 	ResetHintDerivationDisabled bool
@@ -210,14 +212,14 @@ func deriveLimitTiming(e *Error, in Input) {
 	if in.ResetHintDerivationDisabled {
 		return
 	}
+	observedAt := in.OccurredAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
 	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
 		// Providers such as codex state the retry time only in the human
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
-		observedAt := in.OccurredAt
-		if observedAt.IsZero() {
-			observedAt = time.Now()
-		}
 		text := in.Stderr + "\n" + in.Stdout
 		hint := parseResetHintAt(text, observedAt)
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
@@ -230,6 +232,11 @@ func deriveLimitTiming(e *Error, in Input) {
 		if hint != nil {
 			e.ResetHint = hint
 		}
+	}
+	if e.ResetHint == nil && e.ClassifierRule == RuleOpenCodeCapacityAdmission {
+		// A capacity hint is a floor for the host's nominal delay, never a
+		// replacement. Only the line that matched the signature can supply it.
+		e.ResetHint = parseOpenCodeCapacityResetHintAt(in.Stderr+"\n"+in.Stdout, observedAt)
 	}
 }
 
@@ -283,6 +290,9 @@ func classify(in Input) *Error {
 			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e := classifyKeywordContext(in, excerpt); e != nil {
 		return applyInvariants(e)
 	}
 	e := classifyByPhase(in, excerpt)

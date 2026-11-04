@@ -28,8 +28,7 @@ func TestDynamicCleanTurnCompletionResetsCircuitFailures(t *testing.T) {
 		executionID = "execution-circuit-completion-reset"
 	)
 	ctx := context.Background()
-	route := setupMidTurnCircuitRoute(t, taskID, sessionID, executionID, midTurnFailing,
-		dynamicruntime.WithCircuitBackoffEscalation(true))
+	route := setupMidTurnCircuitRoute(t, taskID, sessionID, executionID, midTurnFailing)
 	key := dynamicruntime.ResourceKey(dynamicruntime.ScopeProfile, midTurnFailing)
 
 	route.svc.routeDynamicAgentFailure(ctx,

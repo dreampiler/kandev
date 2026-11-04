@@ -144,6 +144,9 @@ service Host {
   rpc CancelManagedAgentInputExact(CancelManagedAgentInputExactRequest) returns (CancelManagedAgentInputExactResponse);
   rpc DispatchManagedAgentConversationExact(DispatchManagedAgentConversationExactRequest) returns (DispatchManagedAgentConversationExactResponse);
   rpc ListManagedConversationSchedulesExact(ListManagedConversationSchedulesExactRequest) returns (ListManagedConversationSchedulesExactResponse);
+  rpc ListAutomationDefinitionsExact(ListAutomationDefinitionsExactRequest) returns (ListAutomationDefinitionsExactResponse);
+  rpc ListAutomationRunsExact(ListAutomationRunsExactRequest) returns (ListAutomationRunsExactResponse);
+  rpc GetAutomationRunExact(GetAutomationRunExactRequest) returns (GetAutomationRunExactResponse);
   rpc CreateManagedConversationScheduleExact(CreateManagedConversationScheduleExactRequest) returns (ManagedConversationScheduleExactResponse);
   rpc UpdateManagedConversationScheduleExact(UpdateManagedConversationScheduleExactRequest) returns (ManagedConversationScheduleExactResponse);
   rpc SetManagedConversationScheduleEnabledExact(SetManagedConversationScheduleEnabledExactRequest) returns (ManagedConversationScheduleExactResponse);
@@ -401,6 +404,53 @@ running session queues the prompt (`status: "queued"`); an idle/completed one is
 prompted, resuming the agent if its process is gone (`"sent"`); a never-started
 one is launched with the prompt as its first turn (`"started"`). A failed
 dispatch deletes the recorded message so no orphan prompt is left.
+
+**Plugin-reported task change requests.** A code-host plugin can report the
+change request it observes with `ReportTaskChangeRequestExact` and remove it
+with `RemoveTaskChangeRequestExact`. Writes require
+`capabilities.api_write: [task_change_requests]`, the workspace grant
+`host.v2.write:task_change_requests`, the current approval revision, and the
+manifest digest. The reported `provider_id` must be one of the plugin's
+manifest-declared `repository_providers`; the task must exist in the same
+workspace and must not be archived. The identity is the owning installation,
+workspace, provider, immutable repository id, and change-request number. The
+first report fixes the task association; another task cannot take over the row
+and must remove and report it instead. State is `open`, `merged`, or `closed`;
+merged and closed are terminal and their timestamps latch, so a stale report
+cannot reopen or unmerge a row. An open report carries no terminal timestamp, a
+merged report carries only `merged_at`, and a closed report carries only
+`closed_at`. To reopen a change request, remove it and report it again. Every
+command carries an idempotency key and returns the normal `HostCommandResult`. A
+disabled installation is denied. The row change and receipt completion commit
+in one transaction. If that transaction cannot be confirmed, the result is
+`UNCERTAIN`; retrying the same idempotency key resolves the recorded uncertain
+receipt without repeating the write. Use a new idempotency key to retry
+intentionally.
+
+The Host owns the `plugin_task_change_requests` ledger. Disable fences new
+writes while keeping the installation's history, so a re-enable can reuse it;
+uninstall deletes the rows, and workspace deletion removes every row for that
+workspace. An in-place upgrade keeps the installation identity
+but advances the approval revision, so a write approved for the old manifest is
+denied. `ListChangeRequestEvidenceExact` returns the calling
+installation's rows with their real provider id alongside any GitHub evidence
+it is already authorized to read. The ledger does not grant merge, comment,
+CI-rerun, automation-trigger, or statistics authority. Exposing these rows to
+other host consumers, including PR statistics, parent or MCP summaries, and a
+provider-neutral merged trigger, remains a separate opt-in contract.
+
+The native backing store retains its existing 17-column ledger, host-qualified
+identity and legacy reporting API. The exact wire request adds no required host
+field: a valid reported URL can establish it under the existing normalization,
+and a host-less lookup must resolve one native identity or return an ambiguity
+conflict. It never removes an arbitrary row from multiple hosts. Legacy
+`TaskChangeRequests`, `HostTaskChangeRequests` and string-timestamp DTOs remain
+available; the additive exact Go convenience names are
+`ExactTaskChangeRequests`, `HostExactTaskChangeRequests` and
+`ExactTaskChangeRequest`. The exact RPC names and field numbers above are
+unchanged. Command receipts and the ledger remain separate logical owners in
+the existing shared application database; their atomic settlement uses its
+existing transaction boundary.
 
 **Pending interactions** (`api_read:interactions` / `api_write:interactions`,
 ADR 0052 — `docs/decisions/0052-plugin-host-interaction-api.md`) are the durable
@@ -1104,6 +1154,52 @@ for page.PageInfo.HasMore {
 Browser plugins do not receive this privileged gRPC connection. A plugin may
 project observations from its Go backend to its own UI, but the TypeScript SDK
 does not add a browser path for exact Host queries.
+
+### Host v2 automation history reads
+
+The optional `pluginsdk.HostAutomationHistory(host)` extension adds three
+workspace-authorized reads: `ListAutomations`, `ListRuns`, and `GetRun`. They map
+to `ListAutomationDefinitionsExact`, `ListAutomationRunsExact`, and
+`GetAutomationRunExact`. The base `Host` and exact-query interfaces remain
+unchanged, and a remote wrapper cannot prove that an older server implements the
+new RPCs: consumers handle `Unimplemented` and use capability discovery.
+
+Reads require `api_read: automations` and the workspace grant
+`host.v2.read:automations`. The Host derives installation identity from the
+connection, applies admission on every page and exact refresh, and rechecks
+current authority on cache hits. A foreign or missing automation filter or run
+identity returns `NotFound` with no distinction.
+
+Definition observations contain identity, workspace, name, enabled state,
+creation and update times, a projection resource version, observation time, and
+safe triggers. Only scheduled triggers expose `cron_expression` and the
+configured timezone; `schedule_available=false` marks malformed or unsupported
+schedule data without hiding the definition. Other trigger kinds expose identity,
+kind, and enabled state only.
+
+Run observations contain run, workspace, automation, available trigger, task,
+session, turn, and managed-conversation identities; `source_status`, projected
+`status`, and independent retry and delivery states; retry-group, parent-run, and
+optional attempt identities; creation and available retry timestamps; bounded
+sanitized summary and error excerpts; a projection resource version; and
+observation time. Unknown status strings survive transport. No success boolean is
+inferred from task creation, delivery acceptance, or missing identities.
+
+Both lists accept `created_from` (inclusive) and `created_before` (exclusive) as
+UTC RFC3339 timestamps, plus an optional automation identity. List order is
+creation time then identity: definitions ascend, runs descend. Lists reuse the
+shared exact-read snapshots: at most 200 rows per page, 5,000 rows or 8 MiB per
+snapshot, five-minute lifetime, and cursors bound to installation, workspace,
+method, normalized filters, and approval revision. A filtered result above the
+bound fails with `ResourceExhausted` before returning a partial page.
+`GetAutomationRunExact` is not snapshot-bound and always reads current source
+state.
+
+`GetCapabilityContext` registers all three methods. `Supported` reflects the
+presence of the backing automation reader, and `Authorized` reflects current
+workspace approval. A missing dependency fails closed as unsupported and returns
+`Unavailable` at call time. These reads never mutate automation, retry, task,
+session, execution, or delivery state and do not publish execution events.
 
 ### Host v2 exact workspace administration
 

@@ -67,7 +67,7 @@ type Engine struct {
 	states        map[string]RouteState
 	persistence   Persistence
 	loader        StateLoader
-	probes        map[string]ProbeLease
+	probes        map[string][]ProbeLease
 	logger        *zap.Logger
 	limits        LimitChecker
 	limitObserver LimitObserver
@@ -86,7 +86,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		now:         time.Now,
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
-		probes:      make(map[string]ProbeLease),
+		probes:      make(map[string][]ProbeLease),
 		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 	}
@@ -298,44 +298,7 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
 		return false
 	}
-	if e.limits != nil {
-		for _, key := range limitSuspensionKeys(candidate) {
-			if !e.circuits.IsOpen(key, now) {
-				continue
-			}
-			lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
-			if !ok {
-				return false
-			}
-			if otherOpen := otherSuspensionKeyOpen(e.circuits, limitSuspensionKeys(candidate), key, now); otherOpen {
-				// Another narrow scope is still open. Close the expired probe
-				// so the next selection can probe that scope instead of
-				// admitting the candidate through the first key alone.
-				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
-				return false
-			}
-			if candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now) {
-				// The narrow suspension expired, but the credential binding is
-				// still open. Close the exhausted narrow probe and let the
-				// binding probe path decide.
-				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
-				return false
-			}
-			e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-			return true
-		}
-	}
-	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
-		return true
-	}
-	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
-	if !ok {
-		return false
-	}
-	// The caller owns the generation fencing. The conductor releases this
-	// lease after the concrete launch result is known.
-	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-	return true
+	return e.acquireCandidateProbes(candidate, sessionID, generation, now)
 }
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
@@ -502,6 +465,9 @@ func (e *Engine) ApplyFailureContext(
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
 	}
 	action := e.ActionFor(profile, currentCandidateID, failure.Code)
+	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
+		action = keywordDefaultAction(candidate, failure, action)
+	}
 	switch action {
 	case ActionRetrySame:
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
@@ -1487,13 +1453,15 @@ func (e *Engine) ReleaseProbe(decision RouteDecision, success bool) {
 	}
 	e.mu.Lock()
 	key := probeKey(decision.SessionID, decision.Generation, decision.ExecutionProfileID)
-	lease, ok := e.probes[key]
+	leases, ok := e.probes[key]
 	if ok {
 		delete(e.probes, key)
 	}
 	e.mu.Unlock()
 	if ok {
-		e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		for _, lease := range leases {
+			e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		}
 	}
 }
 
@@ -1520,22 +1488,30 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		open := FailureOpen{
-			Code: failure.Code, Now: e.now(),
-			ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
-		}
-		scope := SuspensionBinding
-		if len(scopes) > 0 {
-			scope = scopes[0]
-		}
-		longReset := failure.ResetHint != nil && failure.ResetHint.After(open.Now.Add(circuitBackoff))
-		if e.limits != nil && (longReset || shortQuotaSuspension(candidate, failure, scope)) && candidate.ModelID != "" &&
-			e.openNarrowCircuit(candidate, scope, open) {
-			return
-		}
-		e.circuits.OpenFailure(candidate.BindingKey, open)
+		e.openCandidateCircuitForFailure(candidate, failure, scopes...)
 		return
 	}
+}
+
+func (e *Engine) openCandidateCircuitForFailure(candidate Candidate, failure *routingerr.Error, scopes ...LimitSuspension) {
+	failure = keywordFailureForCandidate(candidate, failure)
+	if e.openKeywordCircuit(candidate, failure) {
+		return
+	}
+	open := FailureOpen{
+		Code: failure.Code, Now: e.now(),
+		ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
+	}
+	scope := SuspensionBinding
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	longReset := failure.ResetHint != nil && failure.ResetHint.After(open.Now.Add(circuitBackoff))
+	if e.limits != nil && (longReset || shortQuotaSuspension(candidate, failure, scope)) && candidate.ModelID != "" &&
+		e.openNarrowCircuit(candidate, scope, open) {
+		return
+	}
+	e.circuits.OpenFailure(candidate.BindingKey, open)
 }
 
 // openNarrowCircuit opens the scope established by the limit resolver. A
@@ -1557,17 +1533,6 @@ func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, f
 		}
 		e.circuits.OpenFailure(key, failure)
 		return true
-	}
-	return false
-}
-
-// otherSuspensionKeyOpen reports whether a narrow key other than the probed one
-// is still open.
-func otherSuspensionKeyOpen(registry *CircuitRegistry, keys []string, probed string, now time.Time) bool {
-	for _, key := range keys {
-		if key != probed && registry.IsOpen(key, now) {
-			return true
-		}
 	}
 	return false
 }

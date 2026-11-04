@@ -78,6 +78,8 @@ type Wiring struct {
 	SessionCapacityEnvironment sessioncapacity.Environment
 	TaskSessions               sleepinhibition.SessionReader
 	ToolPayloadChanged         func(context.Context, []string)
+	HistoryCompaction          toolretention.HistoryCompactor
+	HistoryBackup              backups.RetentionSources
 	AgentRuntimeRecovery       AgentRuntimeRecoveryTarget
 }
 
@@ -148,6 +150,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.RetentionSources = wiring.HistoryBackup
 	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
 	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
 	dataRetentionSvc := provideDataRetention(pool, backupsSvc, eventBus, log, wiring)
@@ -371,6 +374,7 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 	return toolretention.New(pool, toolretention.Options{
 		CreateBackup: retentionBackupCreator(snapshots),
 		VerifyBackup: retentionBackupVerifier(snapshots),
+		History:      wiring.HistoryCompaction,
 		Changed:      wiring.ToolPayloadChanged,
 		Report:       func(ctx context.Context, op *toolretention.Operation) { reportToolRetention(ctx, eventBus, log, op) },
 		Log: func(_ context.Context, message string, err error) {

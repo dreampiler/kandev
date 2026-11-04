@@ -1,6 +1,7 @@
 ---
 status: current
 system: agents
+updated: 2026-10-28
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
@@ -78,6 +79,12 @@ Additional bounded signatures:
   shared sanitizer masks its distinguishing token. `RawExcerpt` remains the
   sanitized excerpt, and existing structured, payment, credit, and quota
   precedence is preserved.
+  At the shared ACP message projection, recognized daily reasons that would be
+  redacted are reduced to fixed public labels before credential redaction.
+  Opaque suffixes are discarded; already-safe text and its complete diagnostic
+  identity remain unchanged. The JSON envelope carries the sanitized message
+  through the existing fields, so the routing reader can retain the specific
+  rule without receiving raw error Data or a new wire field.
 - OpenCode Zen's opening `Rate limit exceeded. Please try again later` is a
   generic rate limit; it carries no inferred reset period.
 - A labeled opening JSON envelope containing the exact field
@@ -151,3 +158,35 @@ Do not fabricate recorded protocol provenance or expose raw error Data.
 Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+## OpenCode admission refusal
+
+`AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11` adds
+`opencode.capacity.admission_refused.v1` to `routingerr/rules.go`.
+Match the complete opening upstream diagnostic and exact bracketed token.
+Keep existing structured status precedence and account-limit rules ahead of it.
+Use the sanitized input when its distinguishing token survives sanitization.
+If sanitization masks that token, use the existing raw-rule mechanism and retain a sanitized `RawExcerpt`.
+Do not match a bare `429`, the word `capacity`, or quoted mid-sentence prose.
+
+Extend `routingerr.Classify` and `resethint.go` to derive `ResetHint` only for this matched rule.
+Read the relative suffix only from the line that matched the signature.
+Unrelated stderr or stdout lines cannot supply a hint.
+Use `Input.OccurredAt`; use the existing current-time fallback when it is absent.
+Bound decimal seconds before duration conversion.
+An invalid suffix does not invalidate the capacity classification.
+Explicit structured hints retain their existing precedence.
+
+Native `_meta["opencode/retry"]` describes OpenCode's own active retry.
+Its `provider.rate-limit` label and status `429` do not prove that the ACP prompt ended.
+A null update clears that presentation state; it does not authorize a host retry.
+Never copy its response body into generic diagnostics or a new recovery record.
+
+Platform owns runtime retention and continuation through
+[transient turn continuity](../../platform/system-design/transient-turn-runtime-continuity.md).
+That design consumes the semantic classification without a provider-name branch in orchestration.
+Office and dynamic routing keep their existing consumers and retry policies.
+This addition creates no new classification code, public field, or retry owner.
+
+The [implementation package](../../../plans/opencode-capacity-retry/plan.md)
+delivers the positive fixture, collision negatives, and reset-hint bounds.

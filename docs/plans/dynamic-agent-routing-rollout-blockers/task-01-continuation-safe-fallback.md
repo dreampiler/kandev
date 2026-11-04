@@ -51,7 +51,7 @@ The existing `provider_interruption_queue_test.go` exercises the two actual
 consumers with real SQLite transcript and queue storage, including pending,
 reserved, restored, accepted, foreign-session, unrecorded and retained entries,
 plus queue/claim read failure and stores without the optional capability.
-The upstream PR #4848 current-main baseline fails with duplicated queue-owned rows and treats
+The current-main baseline fails with duplicated queue-owned rows and treats
 queue/claim read errors as empty (1.512s). After the fix, these existing-file
 cases and the selected ownership, unknown-delivery, restart and continuation
 controls pass with `go test -trimpath -tags fts5 -race -count=1` (10.802s).
@@ -80,3 +80,16 @@ controls, pass with `-trimpath -tags fts5 -race -count=1` (11.113s).
 These follow-up race figures are historical upstream source results. Native
 combined-source verification is recorded separately; Send All remains outside
 this correction.
+### Concurrent restore correction
+
+The complete queue snapshot and ordinary dispatch claims are now read under one
+existing session admission gate. A restore cannot move ownership between the
+two reads and make an undelivered transcript appear eligible for either recovery
+consumer. This uses the existing reentrant admitted context and does not mutate
+queued work.
+
+The maintainer's two deterministic concurrency cases were integrated into the
+existing `dynamic_launch_plan_injection_test.go`. Both consumers failed on the
+published helper (2.500s). After the admission correction, the concurrency cases
+and related continuation, transcript and relaunch controls passed with
+`-trimpath -tags fts5 -race -count=1` (6.215s). Hosted CI remains separate.

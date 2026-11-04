@@ -20,6 +20,7 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
+	"ParentTaskID":                     {exported: false}, // Installation-local task binding; not portable.
 	"CreatedByUserID":                  {exported: false}, // Trusted execution authority is rebound to the importer.
 	"Name":                             {exported: true, yamlKey: "name"},
 	"Description":                      {exported: true, yamlKey: "description"},
@@ -47,6 +48,8 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"Repositories":                     {exported: false},
 	"RetryPolicy":                      {exported: true, yamlKey: "retry_policy"},
 	"RetryPolicyJSON":                  {exported: false}, // persisted JSON representation
+	"PluginTools":                      {exported: false}, // approval authority is never portable
+	"PluginToolsJSON":                  {exported: false}, // persisted JSON representation of the approval
 	"AutomationRevision":               {exported: false}, // configuration revision
 	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
 

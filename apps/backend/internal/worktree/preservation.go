@@ -191,8 +191,8 @@ func worktreeRegistrationMatches(ctx context.Context, repositoryPath, worktreePa
 		if len(fields) < 3 {
 			continue
 		}
-		registered, err := canonicalDirectory(strings.TrimPrefix(fields[0], "worktree "))
-		if err != nil || registered != worktreePath {
+		registeredPath, pathErr := canonicalDirectory(strings.TrimPrefix(fields[0], "worktree "))
+		if pathErr != nil || registeredPath != worktreePath {
 			continue
 		}
 		return strings.TrimPrefix(fields[1], "HEAD ") == headOID && strings.TrimPrefix(fields[2], "branch ") == refName

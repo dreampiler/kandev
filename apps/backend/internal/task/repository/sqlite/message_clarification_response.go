@@ -326,40 +326,75 @@ func (r *Repository) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*models.Message, bool, error) {
+	messages, claimed, _, err := r.completeActiveClarificationBundle(ctx, pendingID, status, responses, nil)
+	return messages, claimed, err
+}
+
+// CompleteActiveClarificationBundleWithAttachments claims the response and
+// adopts the complete answer-file set inside the same transaction. Removed
+// retry claims are returned for best-effort byte release after commit.
+func (r *Repository) CompleteActiveClarificationBundleWithAttachments(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	claims []models.ClarificationAttachmentClaim,
+	scope models.ClarificationAttachmentScope,
+) ([]*models.Message, bool, []string, error) {
+	plan := &clarificationAttachmentPlan{scope: scope, claims: claims}
+	return r.completeActiveClarificationBundle(ctx, pendingID, status, responses, plan)
+}
+
+func (r *Repository) completeActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	plan *clarificationAttachmentPlan,
+) ([]*models.Message, bool, []string, error) {
 	if status != clarificationStatusAnswered && status != clarificationStatusRejected {
-		return nil, false, fmt.Errorf("invalid clarification terminal status %q", status)
+		return nil, false, nil, fmt.Errorf("invalid clarification terminal status %q", status)
+	}
+	queueTablePresent, err := r.clarificationAttachmentQueueTablePresent(ctx, plan)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	drv := r.db.DriverName()
 	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
+	if err := r.lockClarificationAnswerTask(ctx, tx, plan); err != nil {
+		return nil, false, nil, err
+	}
+
 	claimedRows, err := r.claimActiveClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if claimedRows == 0 {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	messages, err := r.loadClaimedClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if int64(len(messages)) != claimedRows {
-		return nil, false, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
+		return nil, false, nil, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
 	}
-	if err := r.completeClaimedClarificationMessages(ctx, tx, drv, messages, status, responses); err != nil {
-		return nil, false, err
+	released, err := r.completeClarificationClaim(
+		ctx, tx, drv, messages, status, responses, plan, queueTablePresent,
+	)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("commit clarification bundle completion: %w", err)
+		return nil, false, nil, fmt.Errorf("commit clarification bundle completion: %w", err)
 	}
-	return messages, true, nil
+	return messages, true, released, nil
 }
 
 // RestoreActiveClarificationBundle reopens a current-turn terminal bundle when
@@ -715,83 +750,4 @@ func (r *Repository) loadClaimedClarificationBundle(
 		return nil, fmt.Errorf("scan claimed clarification bundle: %w", scanErr)
 	}
 	return messages, nil
-}
-
-func (r *Repository) completeClaimedClarificationMessages(
-	ctx context.Context,
-	tx *sqlx.Tx,
-	drv string,
-	messages []*models.Message,
-	status string,
-	responses map[string]interface{},
-) error {
-	updatedAt := r.nowUTC()
-	claimedStatusExpr := dialect.JSONExtract(drv, "metadata", "status")
-	updateQuery := r.db.Rebind(fmt.Sprintf(`
-		UPDATE task_session_messages
-		SET metadata = ?, updated_at = ?
-		WHERE id = ? AND %s = ?
-	`, claimedStatusExpr))
-	completedMetadataByMessage := make([]map[string]interface{}, len(messages))
-	answeredBy := clarificationAnsweredByFromResponses(responses)
-	for i, message := range messages {
-		questionID, _ := message.Metadata["question_id"].(string)
-		if questionID == "" {
-			return fmt.Errorf("clarification message %s is missing question_id", message.ID)
-		}
-		completedMetadata := maps.Clone(message.Metadata)
-		completedMetadata["status"] = status
-		completedMetadata[clarificationResponseDeliveryPendingKey] = true
-		if answeredBy != nil {
-			completedMetadata[clarificationAnsweredByMetadataKey] = answeredBy
-		}
-		if status == clarificationStatusAnswered {
-			response, ok := responses[questionID]
-			if !ok {
-				return fmt.Errorf("missing response for clarification question %s", questionID)
-			}
-			completedMetadata["response"] = response
-		}
-		metadataJSON, marshalErr := json.Marshal(completedMetadata)
-		if marshalErr != nil {
-			return fmt.Errorf("marshal clarification message %s: %w", message.ID, marshalErr)
-		}
-		updateResult, updateErr := tx.ExecContext(
-			ctx,
-			updateQuery,
-			string(metadataJSON), updatedAt, message.ID, clarificationStatusResponding,
-		)
-		if updateErr != nil {
-			return fmt.Errorf("complete clarification message %s: %w", message.ID, updateErr)
-		}
-		updatedRows, rowsErr := updateResult.RowsAffected()
-		if rowsErr != nil {
-			return fmt.Errorf("count completed clarification message %s: %w", message.ID, rowsErr)
-		}
-		if updatedRows != 1 {
-			return fmt.Errorf("clarification message %s lost its claim", message.ID)
-		}
-		completedMetadataByMessage[i] = completedMetadata
-	}
-	for i, message := range messages {
-		message.Metadata = completedMetadataByMessage[i]
-		message.UpdatedAt = updatedAt
-	}
-	return nil
-}
-
-// clarificationAnsweredByFromResponses extracts the bundle-wide answer-channel
-// marker the resolver passes through the reserved responses-map key, the same
-// way per-question answers are passed. A missing or empty marker yields nil,
-// leaving the durable rows without an "answered_by" metadata key.
-func clarificationAnsweredByFromResponses(responses map[string]interface{}) map[string]string {
-	raw, present := responses[models.ClarificationAnsweredByResponseKey]
-	if !present {
-		return nil
-	}
-	by, ok := raw.(models.ClarificationAnsweredBy)
-	if !ok || (by.Channel == "" && by.Ref == "") {
-		return nil
-	}
-	return map[string]string{"channel": by.Channel, "ref": by.Ref}
 }

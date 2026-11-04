@@ -10,6 +10,7 @@ import (
 )
 
 const turnChangeTerminalCaptureTimeout = 20 * time.Second
+const turnChangeSummaryTimeout = 90 * time.Second
 const turnChangeTerminalCompletionBudget = time.Second
 const turnChangeCancelRequestTimeout = 2 * time.Second
 const turnChangeRetryInitialDelay = 250 * time.Millisecond
@@ -145,7 +146,7 @@ func (m *Manager) processTurnChangeSummaryBeforeTeardown(execution *AgentExecuti
 	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
-	ctx, cancel := m.turnChangeAttemptContext(turnChangeTerminalCaptureTimeout)
+	ctx, cancel := m.turnChangeAttemptContext(turnChangeSummaryTimeout)
 	defer cancel()
 	if err := processor.ProcessTurnChanges(ctx, terminal, client); err != nil {
 		m.logger.Warn("failed to process turn-change summary before executor teardown",
@@ -226,7 +227,7 @@ func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal 
 	m.startTurnChangeRetry(func() {
 		err := m.retryTurnChangeOperation(execution, terminal, completed, turnChangeTerminalCaptureTimeout, processor.ProcessTurnChanges)
 		if err != nil {
-			m.abandonTurnChange(execution, terminal, err)
+			m.settleTurnChangeSummary(execution, terminal, err)
 		}
 	})
 }

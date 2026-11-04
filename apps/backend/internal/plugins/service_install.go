@@ -134,11 +134,20 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	if rec.InstallationID == "" {
 		rec.InstallationID = uuid.NewString()
 	}
+	// Every admitted installation replacement starts a new policy version,
+	// including replacement by the same package version. Automation tool
+	// approvals from the previous record therefore require review. The policy
+	// write lease spans the record save and registry swap so an automation
+	// selection save cannot validate against the superseded record.
+	s.agentToolPolicyMu.Lock()
+	rec.AgentToolPolicyVersion = uuid.NewString()
 	if err := s.store.Save(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	if err := s.reviewInstalledApprovals(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		if hadOldRec {
 			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
 				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
@@ -156,6 +165,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return nil, err
 	}
 	s.registry.Add(rec)
+	s.agentToolPolicyMu.Unlock()
 	s.agentToolInstallMu.Unlock()
 	catalogLocked = false
 
@@ -365,7 +375,7 @@ func validateInstallURL(raw string) error {
 		return fmt.Errorf("invalid install URL: %w", err)
 	}
 	switch parsed.Scheme {
-	case "http", "https":
+	case changeRequestHTTPScheme, changeRequestSecureHTTPScheme:
 	default:
 		return fmt.Errorf("invalid install URL: unsupported scheme %q (must be http or https)", parsed.Scheme)
 	}
@@ -550,4 +560,23 @@ func (s *Service) deletePluginAgentConversations(ctx context.Context, id string)
 	}
 	_, err := svc.DeleteAllForPlugin(ctx, id)
 	return err
+}
+
+// deletePluginChangeRequests removes every task change-request row the
+// plugin's installation reported, across every workspace. Fail-visible like
+// deletePluginAgentConversations: a retry is safe because nothing
+// destructive to the package or record has happened yet. A nil ledger (the
+// change-request store was never wired) is a no-op - a plugin that never
+// reported has nothing to clean up.
+func (s *Service) deletePluginChangeRequests(ctx context.Context, installationID string) error {
+	s.approvalEffectMu.Lock()
+	defer s.approvalEffectMu.Unlock()
+	ledger := s.changeRequestStoreDep()
+	if ledger == nil && s.StateStore() != nil {
+		ledger = s.StateStore().ChangeRequests()
+	}
+	if ledger == nil {
+		return nil
+	}
+	return ledger.DeleteByInstallation(ctx, installationID)
 }

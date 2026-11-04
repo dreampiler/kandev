@@ -67,8 +67,10 @@ Concurrency determines what a fire does when matching routine work is already ac
 | Policy | When to use it |
 | --- | --- |
 | **Skip if active** | The current check is enough; another fire can be dropped. |
-| **Coalesce if active** | Reuse active routine work instead of creating another task for every tick. |
+| **Coalesce if active** | Reuse active work from the same routine instead of creating another task for every tick. |
 | **Always create** | Each fire needs independent work; account for overlap and additional spend. |
+
+With **Coalesce if active**, Kandev reuses a run only when that run belongs to the same routine. A different routine starts a separate run.
 
 These policies govern routine work. Agent session limits, workspace admission limits, pause state, provider availability, and budgets can still delay or prevent execution.
 

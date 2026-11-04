@@ -28,6 +28,7 @@ func (a *Adapter) restoreSessionStateOnce(
 		SessionId:  req.SessionId,
 		Cwd:        req.Cwd,
 		McpServers: req.McpServers,
+		Meta:       req.Meta,
 	})
 	if err != nil {
 		span.RecordError(err)

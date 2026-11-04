@@ -10,9 +10,8 @@ requirements:
 
 ## Purpose and boundaries
 
-The replacement baseline and structured evidence extension are implemented.
-The 2026-10-10 evidence package adds Table, StatusList and Callout while
-preserving existing component and historical contracts.
+The implemented evidence extension adds Table, StatusList and Callout and
+preserves existing component and historical contracts.
 
 Replace the fixed rich-output composition engine with json-render and expose
 catalog composition to agents through `show_rich_output_kandev`. Agents owns
@@ -332,17 +331,17 @@ expanded-file preview may scroll locally. File open and preview controls, and
 interactive legend buttons, use 48px nominal phone/coarse-pointer targets so
 pressed scaling still leaves at least 44px, without enlarging ordinary
 fine-pointer desktop controls. Do not add viewport
-fixed overlays or additional safe-area ownership. Keyboard focus, semantic
+fixed overlays for successful cards. Failed-call disclosure follows the
+[failure design](agent-rich-output-failures.md). Keyboard focus, semantic
 headings, plain-text chart summaries, and translated host states remain available.
 
 ## Failure and recovery
 
-Validation errors fail the tool before CSV access. Pending arguments never
-render a partial spec. Failed tools retain normal errors. Unknown envelope or
-catalog versions, malformed stored inputs/results, and invalid compatibility
-payloads produce the outer localized unavailable state with no side effects.
-Individual file-read failure remains local and retryable by explicit expansion.
-No automatic re-generation, remote import, or migration repairs historical data.
+Validation fails before CSV access. Pending calls never render partial specs.
+The [failure design](agent-rich-output-failures.md) owns failed-call disclosure
+and enum discovery. Malformed completed presentations remain unavailable.
+File-read errors remain local and explicitly retryable. History is never repaired
+or regenerated automatically.
 
 ## Verification and delivery
 
@@ -512,6 +511,8 @@ an assertive live-alert role. Agent strings render as text; color is additional
 information. These components have no controls, external links, callbacks,
 animations, polling, or agent-selected styles. Local interactions in existing
 components retain their authorization and identity semantics.
+
+Guidance requires the [Rich Output binding](builtin-mcp-management.md).
 
 Schema examples in `lib/rich-output/examples.ts` cover inline and CSV Table,
 StatusList and Callout, including a composed report. Descriptions tell agents:

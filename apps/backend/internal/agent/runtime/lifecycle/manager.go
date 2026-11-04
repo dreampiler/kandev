@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -60,6 +61,8 @@ type Manager struct {
 	logger                       *logger.Logger
 	mcpResolver                  MCPResolutionProvider
 	mcpStateRepo                 mcpconfig.SessionMCPSelectionStateRepository
+	copilotPlugins               copilotplugins.Runner
+	passthroughRunnerOverride    executionPassthroughRunner
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -128,6 +131,10 @@ type Manager struct {
 	// is contacted, and consulted by Launch to refuse a concurrent request
 	// for a session that might still be re-tracking. Always non-nil.
 	recoveryGuard *RecoveryGuard
+
+	// runtimeStorage holds the latest owner-verified advisory capacity per
+	// session. It is runtime-only and never persisted.
+	runtimeStorage *runtimeStorageProbeState
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex
@@ -264,6 +271,9 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
+	promptSuggestionsPreference PromptSuggestionsPreference
+
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
 	comparisonTargetProvider ComparisonTargetProvider
@@ -348,6 +358,12 @@ type Manager struct {
 // tests inject a fake so they never mutate a developer's Cursor account.
 func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
 	m.cursorNativeMCPRunner = runner
+}
+
+// SetCopilotPluginRunner installs the bounded runner used to resolve Copilot
+// plugin directories for new local processes. Production uses the exec runner.
+func (m *Manager) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	m.copilotPlugins = runner
 }
 
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
@@ -532,6 +548,7 @@ func NewManager(
 		skillDeployer:                  NoopSkillDeployer(),
 		remediateNpxCache:              routingerr.RemediateNpxCache,
 		recoveryGuard:                  NewRecoveryGuard(),
+		runtimeStorage:                 newRuntimeStorageProbeState(),
 		retrackedSessions:              make(map[string]struct{}),
 		standaloneOwnSessions:          make(map[string]struct{}),
 		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
@@ -560,6 +577,9 @@ func NewManager(
 		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
 	}
 	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
+	mgr.streamManager.onRuntimeStorageProbe = mgr.applyRuntimeStorageProbe
+	mgr.streamManager.onRuntimeStoragePressure = mgr.applyRuntimeStoragePressure
+	mgr.streamManager.onRuntimeStorageDetached = mgr.retireRuntimeStorageObservation
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
@@ -592,6 +612,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 			zap.Uint64("prompt_generation", failure.PromptGeneration))
 		return
 	}
+	storage, _ := agentctl.StorageDiagnosticFromError(failure.Err)
 	settled := m.handlePromptErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
@@ -599,6 +620,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		// fallback is permitted; replacing it with a generic label makes a 529
 		// indistinguishable from a local delivery failure.
 		Error:            routingerr.Sanitize(failure.Err.Error()),
+		Storage:          storage,
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,

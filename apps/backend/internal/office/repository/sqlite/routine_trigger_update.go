@@ -20,7 +20,8 @@ func (r *Repository) GetRoutineTrigger(ctx context.Context, id string) (*models.
 
 // UpdateRoutineTriggerIfCurrent only changes editable schedule fields. The
 // scheduler's claim clears next_run_at, causing this comparison to lose without
-// changing the claimed fire or its eventual re-arm.
+// changing the claimed fire or its eventual re-arm. Comparing updated_at as
+// well catches a competing edit that has since restored the same values.
 func (r *Repository) UpdateRoutineTriggerIfCurrent(
 	ctx context.Context, before, after *models.RoutineTrigger,
 ) (bool, error) {
@@ -30,9 +31,9 @@ func (r *Repository) UpdateRoutineTriggerIfCurrent(
 	query := `UPDATE office_routine_triggers
 		SET cron_expression = ?, timezone = ?, enabled = ?, next_run_at = ?, updated_at = ?
 		WHERE id = ? AND routine_id = ? AND kind = ?
-		  AND cron_expression = ? AND timezone = ? AND enabled = ?`
+		  AND cron_expression = ? AND timezone = ? AND enabled = ? AND updated_at = ?`
 	args := []any{after.CronExpression, after.Timezone, boolToInt(after.Enabled), after.NextRunAt, after.UpdatedAt,
-		before.ID, before.RoutineID, before.Kind, before.CronExpression, before.Timezone, boolToInt(before.Enabled)}
+		before.ID, before.RoutineID, before.Kind, before.CronExpression, before.Timezone, boolToInt(before.Enabled), before.UpdatedAt}
 	if before.NextRunAt == nil {
 		query += ` AND next_run_at IS NULL`
 	} else {

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
@@ -25,8 +27,19 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, taskID)
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
 	if err != nil {
+		return err
+	}
+	if !found {
+		return tx.Commit()
+	}
+	var currentState v1.TaskState
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), taskID).Scan(&currentState); err != nil {
+		return err
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, currentState,
+		fromWorkflowID, fromStepID, workflowID, workflowStepID); err != nil {
 		return err
 	}
 
@@ -363,6 +376,13 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 			return 0, err
 		}
 	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockQuery := `SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + ` ORDER BY id FOR UPDATE`
+		var lockedIDs []string
+		if err := tx.SelectContext(ctx, &lockedIDs, tx.Rebind(lockQuery), args...); err != nil {
+			return 0, err
+		}
+	}
 	cleanupQuery := `
 		DELETE FROM task_workflow_session_bindings
 		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
@@ -401,6 +421,18 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 	defer func() { _ = tx.Rollback() }()
 	if err := r.ensurePromptSourceMutable(ctx, tx, id); err != nil {
 		return err
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedID string
+		err := tx.QueryRowxContext(ctx, tx.Rebind(`
+			SELECT id FROM workflows WHERE id = ? FOR UPDATE
+		`), id).Scan(&lockedID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow not found: %s", id)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?

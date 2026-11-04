@@ -45,10 +45,11 @@ const (
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
 	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
+	RouteAttemptOutcomeDeferredCircuit       = models.RouteAttemptOutcomeDeferredCircuit
 )
 
-// MaxAttemptsPerRun caps provider attempts for a run. Unstarted taskless
-// admission waits reuse their existing row and do not consume this budget. A pathological cycle (provider flapping, post-start
+// MaxAttemptsPerRun caps provider attempts. Capacity admission and circuit
+// deferrals do not spend the provider budget. A pathological cycle (post-start
 // fallback racing with re-park) could otherwise append rows forever.
 // Once the cap is reached the dispatcher parks the run as
 // blocked_provider_action_required so a human notices.
@@ -282,6 +283,15 @@ func (ss *SchedulerService) tryCandidates(
 		if errors.Is(launchErr, service.ErrRunSessionAdmissionDeferred) {
 			return ss.deferRunSessionAdmission(ctx, run, seq)
 		}
+		var circuitWait interface{ CircuitSuspendedUntil() time.Time }
+		if errors.As(launchErr, &circuitWait) {
+			now := time.Now().UTC()
+			attempt := models.RouteAttempt{RunID: run.ID, Seq: seq, Outcome: RouteAttemptOutcomeDeferredCircuit, FinishedAt: &now}
+			if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
+				return false, nil, err
+			}
+			return false, nil, launchErr
+		}
 		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
 			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
 		}
@@ -511,11 +521,9 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // the ceiling's own replay into a double launch. Parking under
 // blocked_provider_action_required (the same status parkRunMaxAttempts
 // uses) keeps LiftParkedRuns from ever picking the run back up on its own.
-// There is no reconciliation path back from the orchestrator's ceiling
-// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism),
-// so the run stays parked until an operator finds it and clears the
-// routing block by hand.
+// The orchestrator's ceiling replay owns reconciliation: it settles the
+// exact run when the launch is admitted, and ready or terminal events recover
+// failed settlement writes. A terminal drop fails the parked run.
 func (ss *SchedulerService) handleLaunchDeferred(
 	ctx context.Context, run *runsmodels.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {

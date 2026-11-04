@@ -44,7 +44,7 @@ export type KanbanStepEvents = {
  *
  * `status` is the resolution verdict and is only meaningful on `dependsOn`
  * entries: "resolved" (finished successfully), "failed" (FAILED/CANCELLED —
- * halts the chain), or "pending" (anything else, including archived).
+ * halts the chain), or "pending" (unfinished work, whether archived or not).
  */
 export type TaskDependencyRef = {
   id: string;
@@ -287,6 +287,8 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
+    source?: string;
+    source_path?: string;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
@@ -442,6 +444,13 @@ export type KanbanSliceActions = {
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
   removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
+  /** Retains one live task summary for consumers whose task is not a board row
+   * (for example an ephemeral Quick Chat task). */
+  recordSidebarStatusSummary: (
+    workspaceId: string,
+    taskId: string,
+    summary: TaskStatusSummary,
+  ) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

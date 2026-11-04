@@ -5,6 +5,7 @@ import {
   CIRCUIT_SCOPE_KEYS,
   CIRCUIT_STATE_KEYS,
   blockingCircuitCount,
+  isCircuitBlocking,
   shortCircuitId,
   sortCircuits,
   type RoutingCircuit,
@@ -15,15 +16,17 @@ import { ControlReadState } from "./control-read-state";
 import { SectionCard } from "./overview-section-card";
 
 /**
- * The dynamic router's own circuits, separate from the workspace routing health
+ * Shared provider resource circuits, separate from the workspace routing health
  * (`office_provider_health`) shown above: this table is installation-wide
  * because a credential circuit is shared by every workspace that uses it.
  */
-export function ControlProviderCircuits({ workspaceId }: { workspaceId?: string }) {
+export function ControlProviderCircuits(_props: { workspaceId?: string } = {}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  const result = useControlRoutingCircuits(workspaceId ? control?.data : undefined);
-  if (!workspaceId) return null;
+  const result = useControlRoutingCircuits(
+    control?.data?.workspaces.length ? control.data : undefined,
+  );
+  if (!control?.data || control.data.workspaces.length === 0) return null;
   const circuits = sortCircuits(result.data ?? []);
   const blocking = blockingCircuitCount(circuits);
   return (
@@ -62,23 +65,30 @@ export function ControlProviderCircuits({ workspaceId }: { workspaceId?: string 
 function CircuitRow({ circuit }: { circuit: RoutingCircuit }) {
   const { t } = useTranslation();
   const scope = CIRCUIT_SCOPE_KEYS[circuit.scope];
-  const code = circuit.code ? CIRCUIT_CODE_KEYS[circuit.code] : undefined;
-  const due = circuit.state === "half_open" ? circuit.probe_until : circuit.until;
+  const code =
+    circuit.code && Object.hasOwn(CIRCUIT_CODE_KEYS, circuit.code)
+      ? CIRCUIT_CODE_KEYS[circuit.code]
+      : "common:unknownError";
+  const blocking = isCircuitBlocking(circuit);
+  const stateKey =
+    circuit.state === "open" && !blocking
+      ? "sidebar:controlCircuits.state.available"
+      : CIRCUIT_STATE_KEYS[circuit.state];
+  const candidateDue = circuit.state === "half_open" ? circuit.probe_until : circuit.until;
+  const due = blocking ? candidateDue : undefined;
   return (
     <li
       className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm"
       data-testid="control-provider-circuit"
     >
-      <span className="rounded border px-1.5 py-0.5 text-[11px]">
-        {t(CIRCUIT_STATE_KEYS[circuit.state])}
-      </span>
+      <span className="rounded border px-1.5 py-0.5 text-[11px]">{t(stateKey)}</span>
       <span className="font-medium">
         {scope ? t(scope) : circuit.scope || t("sidebar:controlCircuits.scope.unknown")}
       </span>
       <span className="font-mono text-xs text-muted-foreground">
         {shortCircuitId(circuit.scope_value)}
       </span>
-      {code && <span>{t(code)}</span>}
+      <span>{t(code)}</span>
       {due && (
         <span className="text-xs text-muted-foreground">
           {t("sidebar:controlCircuits.until", { time: formatDateTime(due) })}

@@ -423,7 +423,7 @@
   "tasks": "Tasks",
   "taskReadRefreshFailureNotice": "Task details could not be refreshed. Your current view is still available.",
   "taskReadTemporarilyUnavailable": "Task temporarily unavailable",
-  "taskReadTemporarilyUnavailableDescription": "We could not load this task. Check your connection and try again.",
+  "taskReadTemporarilyUnavailableDescription": "Kandev could not load this task right now. Try again in a moment.",
   "taskStateBlocked": "Blocked",
   "taskStateCancelled": "Cancelled",
   "taskStateCompleted": "Completed",
@@ -565,5 +565,12 @@
   "conversationSearch_query_too_broad": "Use at least 3 consecutive letters or digits.",
   "conversationSearch_title": "Command Palette",
   "notificationChildStallBody": "A child task stalled and its parent task cannot receive the alert.",
-  "notificationChildStallTitle": "Child task needs attention"
+  "notificationChildStallTitle": "Child task needs attention",
+  "notificationPermissionBody": "The agent is waiting for your approval.",
+  "notificationPermissionTitle": "Agent needs permission",
+  "notificationSessionFailedBody": "The agent session ended with an error.",
+  "notificationSessionFailedTitle": "Agent session failed",
+  "offlineTitle": "You are offline",
+  "offlineDescription": "Kandev needs a connection to your server. Check your network, then try again.",
+  "offlineRetry": "Try again"
 }

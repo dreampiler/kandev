@@ -99,7 +99,7 @@
   "failedToSaveWorkflowChanges": "Failed to save workflow changes",
   "failedToUpdateWorkflowStep": "Failed to update workflow step",
   "holdStep": "Hold step",
-  "holdStepHelp": "Count and list tasks parked in this step as on hold in the workspace overview. The step's name does not matter.",
+  "holdStepHelp": "Marks this step as a hold step. The classification is stored on the step, and it does not start, stop, or move a task.",
   "hopNumber": "Hop {{index}}",
   "import": "Import",
   "importCompleteTitle": "Import complete",

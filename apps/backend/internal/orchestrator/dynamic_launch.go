@@ -130,7 +130,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID, d.service.config.ProviderKeywordContext)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
@@ -660,12 +660,12 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 	if err != nil {
 		return fmt.Errorf("load conversation for dynamic continuation: %w", err)
 	}
-	conversation := make([]string, 0, len(messages))
-	toolSummary := make([]string, 0)
 	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("load held transcript ids for dynamic continuation: %w", err)
+		return fmt.Errorf("load queue ownership for dynamic continuation: %w", err)
 	}
+	conversation := make([]string, 0, len(messages))
+	toolSummary := make([]string, 0)
 	for _, message := range messages {
 		if message == nil || strings.TrimSpace(message.Content) == "" {
 			continue
@@ -954,6 +954,8 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		}
 		return dynamicFailureRouteResult{}
 	}
+	data.ExecutionProfileID = session.ExecutionProfileID
+	classified = s.refineKeywordFailure(ctx, data, classified)
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
@@ -1056,6 +1058,9 @@ func (s *Service) prepareDynamicFailureEvidence(
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
 	if unclassified {
 		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
+	}
+	if classifiedStartupModelFailureSafe(classified, startupEvidence) {
+		return *startupEvidence, true
 	}
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
@@ -1900,7 +1905,10 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			prompt.attachments,
 			true,
 			origin,
-			promptTaskOptions{allowRouteActionPrompt: true},
+			promptTaskOptions{
+				capacityIntent:         turnCapacityOverride,
+				allowRouteActionPrompt: true,
+			},
 		)
 		if err != nil {
 			return dynamicRelaunchFailed, err
@@ -2013,11 +2021,9 @@ func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (
 	if err != nil {
 		return capturedPrompt{}, false
 	}
-	held, heldErr := s.queuedTranscriptMessageIDs(ctx, sessionID)
-	if heldErr != nil {
-		s.logger.Warn("skip dynamic relaunch prompt; held transcript ids are unreadable",
-			zap.String("session_id", sessionID),
-			zap.Error(heldErr))
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("cannot reconstruct dynamic relaunch prompt from unreadable queue", zap.String("session_id", sessionID), zap.Error(err))
 		return capturedPrompt{}, false
 	}
 	for index := len(messages) - 1; index >= 0; index-- {

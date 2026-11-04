@@ -639,11 +639,13 @@
     "plugin-state",
     "plugin-instance-state",
     "plugin-user-state",
+    "plugin-task-change-requests",
     "canvas",
     "github",
     "gitlab",
     "jira",
     "linear",
+    "notification",
     "sentry",
     "azure-devops",
     "workflow-sync",
@@ -661,6 +663,7 @@
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
       "dynamic_provider_limits",
+      "harness_native_session_rebinds",
       "harness_session_generations",
       "provider_turn_allowances",
       "provider_turn_claims",
@@ -669,6 +672,7 @@
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
+      "task_builtin_mcp_preferences",
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
@@ -682,7 +686,8 @@
       "turn_change_contents",
       "turn_change_sets",
       "turn_file_changes",
-      "turn_repository_changes"
+      "turn_repository_changes",
+      "workspace_collaboration_grants"
     ]
   }
 }

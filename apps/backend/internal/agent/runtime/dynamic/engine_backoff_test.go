@@ -10,7 +10,7 @@ import (
 )
 
 func engineBackoffFixture(clock *backoffClock, escalation bool) (*Engine, *CircuitRegistry, Profile) {
-	registry := newBackoffRegistry(clock, escalation, nil)
+	registry := newBackoffRegistry(clock, nil)
 	engine := NewEngine(WithCircuitRegistry(registry), WithClock(clock.Now))
 	profile := Profile{
 		ID: "dynamic", Version: 1,
@@ -41,8 +41,7 @@ func midTurnCycle(t *testing.T, engine *Engine, registry *CircuitRegistry, profi
 }
 
 // A candidate whose launch succeeds and whose turn then fails mid-turn
-// escalates across cycles while the flag is enabled; a clean turn completion
-// resets the ladder. Disabled, every cycle uses the fixed minute.
+// escalates across cycles; a clean turn completion resets the ladder.
 //
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
 func TestEngineMidTurnFailuresEscalateAcrossSuccessfulLaunches(t *testing.T) {
@@ -50,7 +49,6 @@ func TestEngineMidTurnFailuresEscalateAcrossSuccessfulLaunches(t *testing.T) {
 		escalation bool
 		want       []time.Duration
 	}{
-		{escalation: false, want: []time.Duration{time.Minute, time.Minute, time.Minute}},
 		{escalation: true, want: []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}},
 	} {
 		clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}
@@ -87,16 +85,14 @@ func TestEngineMidTurnFailuresEscalateAcrossSuccessfulLaunches(t *testing.T) {
 	}
 }
 
-// A failed probe launch advances the ladder through the engine only while
-// escalation is enabled.
+// A failed probe launch advances the ladder through the engine.
 //
 // @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20
-func TestEngineFailedProbeBackoffFollowsTheFlag(t *testing.T) {
+func TestEngineFailedProbeBackoffFollowsTheLadder(t *testing.T) {
 	for _, tc := range []struct {
 		escalation bool
 		probe      time.Duration
 	}{
-		{escalation: false, probe: time.Minute},
 		{escalation: true, probe: 5 * time.Minute},
 	} {
 		clock := &backoffClock{now: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)}

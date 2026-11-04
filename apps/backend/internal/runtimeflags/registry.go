@@ -65,9 +65,26 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
+	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.providerKeywordContext",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT",
+			Kind:            KindFeature,
+			Label:           "Provider keyword and context classification",
+			Description:     "Classifies unmatched provider diagnostics using structural signals, keyword groups, and invocation context.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "May change recovery classification for new provider diagnostics. Existing candidate policies and invocation safety checks still apply.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderKeywordContext },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderKeywordContext = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key: "features.autoStartPendingWork", EnvVar: "KANDEV_FEATURES_AUTO_START_PENDING_WORK", Kind: KindFeature,
@@ -110,16 +127,6 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
-			Key: "features.workspaceCollaboration", EnvVar: "KANDEV_FEATURES_WORKSPACE_COLLABORATION", Kind: KindFeature,
-			Label: "Workspace collaboration", Description: "Enables explicit conversation grants for workspace read, report, prompt and control actions.",
-			Stability: StabilityExperimental, RiskLevel: RiskMedium,
-			RiskDescription: "Cross-workspace calls require native rights and a matching conversation grant. This does not add inherited or taskless authority.", RestartRequired: true, Mutable: true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
 			Key: "features.integratedControl", EnvVar: "KANDEV_FEATURES_INTEGRATED_CONTROL", Kind: KindFeature,
 			Label: "Integrated control", Description: "Enables a separate control view for permitted dashboards, coordinators and individual conversations.",
 			Stability: StabilityExperimental, RiskLevel: RiskMedium,
@@ -139,6 +146,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicProfileTiers },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicProfileTiers = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.workspaceCollaboration",
+			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
+			Kind:            KindFeature,
+			Label:           "Workspace collaboration",
+			Description:     "Applies workspace grants to native conversation APIs and verified plugin Host callbacks. Disabling restores native permissions and retains saved grants.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Plugin domain callbacks require the current SDK handler context. Unidentified or expired callbacks and grant lookup errors fail closed. Disabling explicitly restores native permissions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -253,35 +276,16 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles, using the default circuit backoff ladder.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+				"Shared resource circuits use a 1-minute to 4-hour backoff ladder, which can delay fixed profiles and dynamic candidates; a later provider reset time can extend it. Account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:    "features.dynamicCircuitBackoffEscalation",
-			EnvVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION",
-			Kind:   KindFeature,
-			Label:  "Dynamic circuit backoff escalation",
-			Description: "Lengthens the dynamic routing backoff for a candidate that keeps failing, " +
-				"from one minute up to four hours, instead of re-probing it every minute.",
-			Stability: StabilityExperimental,
-			RiskLevel: RiskMedium,
-			RiskDescription: "A candidate that failed several times in a row can stay skipped for up to four hours, " +
-				"or until a later provider reset time, even after its provider recovers. Sessions then use the next " +
-				"configured candidate or wait. A turn that completes without a provider error clears the failure count. Requires Dynamic agent routing.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicCircuitBackoffEscalation },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicCircuitBackoffEscalation = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -395,6 +399,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeAgentErrorSessionVerdict },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeAgentErrorSessionVerdict = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.opencodePlugin",
+			EnvVar:          "KANDEV_FEATURES_OPENCODE_PLUGIN",
+			Kind:            KindFeature,
+			Label:           "OpenCode integration plugin",
+			Description:     "Supplies the Kandev integration plugin to supported OpenCode v2 task launches so native background shell outcomes can settle existing jobs.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "The plugin observes native shell terminal facts through a private loopback callback. Enable it only for OpenCode v2 2.2.0 sessions; unsupported versions keep ordinary ACP behavior.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OpenCodePlugin },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OpenCodePlugin = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

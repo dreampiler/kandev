@@ -43,14 +43,16 @@ var (
 )
 
 type Candidate struct {
-	UsagePolicy   *usage.ExecutionUsagePolicy `json:"-"`
-	ID            string
-	Enabled       bool
-	BindingKey    string
-	Rules         map[string]Action
-	Policies      routingpolicy.Document
-	Usage         CandidateUsage `json:"-"`
-	SelectionJSON json.RawMessage
+	KeywordContextEnabled bool
+	KeywordAccountID      string
+	UsagePolicy           *usage.ExecutionUsagePolicy `json:"-"`
+	ID                    string
+	Enabled               bool
+	BindingKey            string
+	Rules                 map[string]Action
+	Policies              routingpolicy.Document
+	Usage                 CandidateUsage `json:"-"`
+	SelectionJSON         json.RawMessage
 	// ModelID is the concrete provider model this candidate launches.
 	ModelID string
 	// SuspendedUntil is an operator-entered provider block.

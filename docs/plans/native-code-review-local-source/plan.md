@@ -1,32 +1,65 @@
-# Native Code Review Local Sources Delivery
+---
+created: 2026-10-29
+status: done
+requirements:
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001
+system_design:
+  - ../../specs/agents/system-design/native-code-review-recovery.md
+legacy_specs: []
+---
 
-**Status:** done
+# Implementation Plan: Native code review local source fallback
 
-## Outcome and scope
+## Overview
 
-Deliver the operator's 2026-10-13 work order: independently review gate-slot
-changes through the existing task review subsystem, retain writer-model
-exclusion, and read local changes when agentctl is unavailable.
+A native code review reads a session's changed files through agentctl. When that
+runtime is unavailable (stopped, restarted, or a local executor without a live
+agentctl), the review fails with `workspace_unavailable` even though the task's
+own checkout is still on disk on the backend host. This plan adds a bounded
+local Git reader and a task-bound fallback so a review can still run for a local
+or worktree executor.
 
-Requirements: [REQ-AGENTS-NATIVE-CODE-REVIEW-003](../../specs/agents/requirements/native-code-review-local-source.md),
-with the existing [reviewer exclusion contract](../../specs/agents/requirements/native-code-review-reviewer-exclusion.md).
-Design: [Local Review Sources](../../specs/agents/system-design/native-code-review-local-source.md).
+## Scope
 
-## Delivery order
+In scope: `internal/review/local_git.go`, `internal/review/local_source.go`, the
+reader in `internal/backendapp/review_local_source.go`, the fallback branch in
+`internal/agent/handlers/review_change_source.go`, the shared untracked patch
+formatter in `internal/common/unidiff`, and their regression tests.
 
-| Work order | Status | Dependencies |
-| --- | --- | --- |
-| [Task 01: Local sources and fallback](task-01-local-sources.md) | done | Fork PR #257 merged before branch creation |
+Excluded: the caller-supplied filesystem path API (an explicit operator/admin
+path), grant framework changes, schema changes, and the runtime review/utility
+integration owned by its own design.
 
-The primary conversation implements and integrates this single vertical slice.
-Production databases and logs remain read-only. No runtime process control,
-deployment, writes to the upstream repository, or changes to other lanes are
-included. The operator owns later production deployment and AIWS prompt updates.
+## Technical approach
 
-## Verification and risks
+`CollectLocalChanges` reads a local worktree's working tree (including staged
+changes the working tree reverted, and untracked files) or a committed
+`base..head` range. It enforces the same per-file, per-output, and total byte
+limits as agentctl, including the staged index blob, and rejects a worktree
+path that has a `..` segment, is a UNC path, or is not absolute. The backend
+session reader resolves the session's persisted `Worktrees`/`WorkspacePath`
+and admits only `local`, `worktree`, and `local_pc` executors. The local
+fallback repeats the existing `session.exec` check before reading disk. An
+explicit repository-qualified comparison target uses its exact validated ref
+and fails closed when that ref is unavailable. Both readers use the shared
+bounded untracked-patch formatter so the diff text and hash stay equal.
 
-Use the changed package tests in the work order and preserve failing-before
-evidence. Git reads keep the existing collection and prompt budgets; source
-paths and refs are checked before a run is created. Saved sources must be
-updated when the writer's gate slot changes. Local fallback admits only durable
-local/worktree executors; an unknown writer still prevents review.
+## Work orders
+
+- [x] [Task 01: Task-bound local Git source fallback](task-01-local-source-fallback.md)
+
+## Changed-path coverage
+
+The work order owns the review collector, the backend session reader, the
+`ReviewChangeSource` fallback, the shared untracked formatter, their regression
+tests, the local-source acceptance criteria, and the matching review recovery
+system design note.
+
+## Integrated explicit-source extension
+
+The existing local work order [Task 01: Local sources and fallback](task-01-local-sources.md)
+remains available with REQ-AGENTS-NATIVE-CODE-REVIEW-003 and its existing
+writer-model exclusion, explicit/saved-source authority and task-scoped results.
+The upstream task-bound fallback above does not grant caller-supplied path
+authority; the integrated explicit-source API keeps its own existing checks.
+The original local system design remains [Local Review Sources](../../specs/agents/system-design/native-code-review-local-source.md).

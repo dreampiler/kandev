@@ -30,19 +30,23 @@ var ownWindowsJobName struct {
 // of this process. agentctl calls it first at startup, before it starts any
 // process, so agents, scripts and nested agentctl processes do not inherit the
 // outer job name and cannot record the outer job as their own. Only the first
-// call that finds the variable is kept.
-func TakeWindowsJobNameFromEnv() {
+// call that finds the variable is kept. A variable that cannot be removed is
+// reported so startup does not continue while descendants could inherit it.
+func TakeWindowsJobNameFromEnv() error {
 	name, ok := os.LookupEnv(WindowsJobNameEnv)
 	if !ok {
-		return
+		return nil
 	}
-	_ = os.Unsetenv(WindowsJobNameEnv)
+	if err := os.Unsetenv(WindowsJobNameEnv); err != nil {
+		return fmt.Errorf("remove %s from the process environment: %w", WindowsJobNameEnv, err)
+	}
 	ownWindowsJobName.Lock()
 	defer ownWindowsJobName.Unlock()
 	if !ownWindowsJobName.taken {
 		ownWindowsJobName.name = name
 		ownWindowsJobName.taken = true
 	}
+	return nil
 }
 
 // takenWindowsJobName returns the job name taken at startup, or empty.
@@ -64,11 +68,15 @@ const (
 // Identity binds a process ID and its containment group to an OS-specific
 // birth token. Empty birth tokens represent legacy or unsupported evidence.
 type Identity struct {
-	PID            int    `json:"pid"`
-	GroupID        int    `json:"group_id,omitempty"`
-	SessionID      int    `json:"session_id,omitempty"`
-	BirthToken     string `json:"birth_token,omitempty"`
-	WindowsJobName string `json:"windows_job_name,omitempty"`
+	PID        int    `json:"pid"`
+	GroupID    int    `json:"group_id,omitempty"`
+	SessionID  int    `json:"session_id,omitempty"`
+	BirthToken string `json:"birth_token,omitempty"`
+	// AgentGroupID and AgentBirthToken optionally name the agent process group
+	// hosted by this runtime when a durable prompt was bound.
+	AgentGroupID    int    `json:"agent_group_id,omitempty"`
+	AgentBirthToken string `json:"agent_birth_token,omitempty"`
+	WindowsJobName  string `json:"windows_job_name,omitempty"`
 }
 
 func (identity Identity) Validate() error {
@@ -83,4 +91,40 @@ func (identity Identity) String() string {
 		return "unknown"
 	}
 	return fmt.Sprintf("pid=%d group=%d session=%d", identity.PID, identity.GroupID, identity.SessionID)
+}
+
+// WithAgentGroup records the process group of the agent child that this
+// runtime hosted. Only a group leader with a birth token is recorded, so an
+// unverifiable agent leaves the runtime-only identity unchanged.
+func (identity Identity) WithAgentGroup(agent Identity) Identity {
+	if agent.Validate() != nil || agent.GroupID != agent.PID {
+		return identity
+	}
+	identity.AgentGroupID = agent.GroupID
+	identity.AgentBirthToken = agent.BirthToken
+	return identity
+}
+
+// OriginalOwnerTerminated proves that the recorded owner stopped writing: the
+// runtime's owned OS session ended, or every process in the recorded agent
+// group exited. A shared runtime can outlive one session's agent, so either
+// proof is sufficient. Unverifiable group evidence never proves termination.
+func OriginalOwnerTerminated(identity Identity) (bool, error) {
+	terminated, err := OwnedSessionTerminated(identity)
+	if terminated || identity.AgentGroupID <= 0 || identity.AgentBirthToken == "" {
+		return terminated, err
+	}
+	groupTerminated, groupErr := OwnedGroupTerminated(Identity{
+		PID: identity.AgentGroupID, GroupID: identity.AgentGroupID, BirthToken: identity.AgentBirthToken,
+	})
+	if groupErr == nil && groupTerminated {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if errors.Is(groupErr, ErrUnverifiableIdentity) {
+		return false, nil
+	}
+	return false, groupErr
 }

@@ -6,51 +6,67 @@ import (
 	"errors"
 	"fmt"
 
-	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeservice "github.com/kandev/kandev/internal/office/service"
-	"github.com/kandev/kandev/internal/task/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// Reporting is passive and may arrive after the originating run finishes.
-// Its authority is the stored task/session/agent relationship plus the current
-// delivery-task -> source-workspace report grant, never an invented principal.
+// handoffCompletionTaskLookup is the task-owned state the completion report
+// policy reads: the stored tasks and session, plus the directional
+// collaboration grant.
+type handoffCompletionTaskLookup interface {
+	GetTask(context.Context, string) (*taskmodels.Task, error)
+	GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
+	GetWorkspaceCollaborationGrant(context.Context, string, string, string) (*taskmodels.WorkspaceCollaborationGrant, error)
+}
+
+// handoffCompletionOfficeLookup is the Office-owned state the policy reads:
+// the source and assigned agent profiles and their workspace membership.
+type handoffCompletionOfficeLookup interface {
+	GetAgentInstance(context.Context, string) (*officemodels.AgentInstance, error)
+}
+
+// Completion actions use the stored task/session/agent relationship plus the
+// current directional report and prompt grants, never an invented principal.
 func newOfficeHandoffCompletionPolicy(
-	enabled bool, tasks *tasksqlite.Repository, office *officesqlite.Repository,
+	enabled bool, tasks handoffCompletionTaskLookup, office handoffCompletionOfficeLookup,
 ) officeservice.HandoffCompletionPolicy {
 	if !enabled || tasks == nil || office == nil {
 		return nil
 	}
-	return func(ctx context.Context, source officeservice.HandoffCompletionSource) (bool, error) {
+	return func(ctx context.Context, source officeservice.HandoffCompletionSource) (officeservice.HandoffCompletionAuthorization, error) {
 		matches, err := officeHandoffCompletionTasksMatch(ctx, tasks, source)
 		if err != nil || !matches {
-			return false, err
-		}
-		matches, err = office.HasHandoffSourceRun(ctx, source.SourceTaskID, source.SourceSessionID, source.SourceAgentProfileID)
-		if err != nil || !matches {
-			return false, err
+			return officeservice.HandoffCompletionAuthorization{}, err
 		}
 		matches, err = officeHandoffAgentWorkspace(ctx, office, source.SourceAgentProfileID, source.SourceWorkspaceID)
 		if err != nil || !matches {
-			return false, err
+			return officeservice.HandoffCompletionAuthorization{}, err
 		}
-		if source.SourceAssigneeAgentProfileID != source.SourceAgentProfileID {
+		if source.SourceAssigneeAgentProfileID != "" && source.SourceAssigneeAgentProfileID != source.SourceAgentProfileID {
 			matches, err = officeHandoffAgentWorkspace(ctx, office, source.SourceAssigneeAgentProfileID, source.SourceWorkspaceID)
 			if err != nil || !matches {
-				return false, err
+				return officeservice.HandoffCompletionAuthorization{}, err
 			}
 		}
 		grant, err := tasks.GetWorkspaceCollaborationGrant(ctx, source.DeliveryTaskID, source.DeliveryWorkspaceID, source.SourceWorkspaceID)
 		if err != nil {
-			return false, fmt.Errorf("read handoff completion report grant: %w", err)
+			return officeservice.HandoffCompletionAuthorization{}, fmt.Errorf("read handoff completion grant: %w", err)
 		}
-		return grant != nil && grant.Allows(models.CollaborationReport), nil
+		if grant == nil {
+			return officeservice.HandoffCompletionAuthorization{}, nil
+		}
+		report := grant.Allows(taskmodels.CollaborationReport)
+		return officeservice.HandoffCompletionAuthorization{
+			Report: report,
+			Prompt: grant.Allows(taskmodels.CollaborationPrompt),
+		}, nil
 	}
 }
 
 func officeHandoffCompletionTasksMatch(
-	ctx context.Context, tasks *tasksqlite.Repository, source officeservice.HandoffCompletionSource,
+	ctx context.Context, tasks handoffCompletionTaskLookup, source officeservice.HandoffCompletionSource,
 ) (bool, error) {
 	origin, err := tasks.GetTask(ctx, source.SourceTaskID)
 	if errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -60,6 +76,18 @@ func officeHandoffCompletionTasksMatch(
 		return false, fmt.Errorf("read handoff completion source task: %w", err)
 	}
 	if origin == nil || !origin.IsFromOffice || origin.WorkspaceID != source.SourceWorkspaceID {
+		return false, nil
+	}
+	return officeHandoffDeliveryAndSessionMatch(ctx, tasks, origin, source)
+}
+
+func officeHandoffDeliveryAndSessionMatch(
+	ctx context.Context,
+	tasks handoffCompletionTaskLookup,
+	origin *taskmodels.Task,
+	source officeservice.HandoffCompletionSource,
+) (bool, error) {
+	if !officeHandoffHasDeliveryLink(origin.Metadata, source.DeliveryTaskID) {
 		return false, nil
 	}
 	delivery, err := tasks.GetTask(ctx, source.DeliveryTaskID)
@@ -74,16 +102,33 @@ func officeHandoffCompletionTasksMatch(
 		return false, nil
 	}
 	session, err := tasks.GetTaskSession(ctx, source.SourceSessionID)
-	if errors.Is(err, models.ErrTaskSessionNotFound) {
+	if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("read originating handoff session: %w", err)
 	}
-	return session != nil && session.TaskID == origin.ID, nil
+	return session != nil && session.TaskID == origin.ID && session.AgentProfileID == source.SourceAgentProfileID, nil
 }
 
-func officeHandoffAgentWorkspace(ctx context.Context, office *officesqlite.Repository, agentID, workspaceID string) (bool, error) {
+func officeHandoffHasDeliveryLink(metadata map[string]interface{}, deliveryTaskID string) bool {
+	links, ok := metadata[taskmodels.MetaKeyHandoffs].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range links {
+		link, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if id, _ := link["task_id"].(string); id == deliveryTaskID {
+			return true
+		}
+	}
+	return false
+}
+
+func officeHandoffAgentWorkspace(ctx context.Context, office handoffCompletionOfficeLookup, agentID, workspaceID string) (bool, error) {
 	if agentID == "" {
 		return false, nil
 	}

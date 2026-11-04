@@ -3,15 +3,19 @@ package plugins
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	changeRequestHTTPScheme       = "http"
+	changeRequestSecureHTTPScheme = "https"
 )
 
 type taskChangeRequestManager struct{ host *pluginHost }
@@ -173,7 +177,7 @@ func validTaskChangeRequestFields(row state.ChangeRequestRecord) bool {
 		return true
 	}
 	parsed, err := url.Parse(row.URL)
-	return err == nil && parsed.Host != "" && parsed.User == nil && (parsed.Scheme == "https" || parsed.Scheme == "http")
+	return err == nil && parsed.Host != "" && parsed.User == nil && (parsed.Scheme == changeRequestSecureHTTPScheme || parsed.Scheme == changeRequestHTTPScheme)
 }
 
 func validTaskChangeRequestState(value string) bool {
@@ -230,12 +234,8 @@ func (s *Service) SetTaskChangeRequestAuthorizer(authorize func(context.Context,
 }
 
 func (s *Service) clearTaskChangeRequests(ctx context.Context, installationID string) error {
-	store := s.StateStore().ChangeRequests()
-	if installationID == "" || store == nil {
+	if installationID == "" {
 		return nil
 	}
-	if err := store.DeleteByInstallation(ctx, installationID); err != nil {
-		return fmt.Errorf("plugins: clear task change request reports: %w", err)
-	}
-	return nil
+	return s.deletePluginChangeRequests(ctx, installationID)
 }

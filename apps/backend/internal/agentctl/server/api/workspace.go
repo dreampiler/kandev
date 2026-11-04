@@ -90,12 +90,8 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	if shell != nil {
 		shellWriter = shell
 	}
-	// inputDone closes when the input loop returns for any reason. A read
-	// error is the only way a departed client shows up while the instance
-	// publishes nothing, so the forwarding loop must watch it: done is closed
-	// only after the forwarding loop returns, and a stopped instance never
-	// publishes again, so without this the handler stays parked and pins the
-	// whole instance (AC-PLATFORM-AGENTCTL-WORKSPACE-STREAM-LIFETIME-001.1).
+	// A quiet instance cannot reveal a departed client through a write failure.
+	// Ending input must also release this connection's forwarding subscriptions.
 	inputDone := make(chan struct{})
 	go func() {
 		defer close(inputDone)

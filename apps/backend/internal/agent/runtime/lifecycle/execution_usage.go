@@ -16,13 +16,13 @@ func (m *Manager) SetProviderUsageLimitsEnabled(enabled bool) {
 	m.sessionManager.providerUsageLimits = enabled
 }
 
-func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, env map[string]string) error {
+func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, agentArgs []string, env map[string]string) error {
 	if !m.providerUsageLimits {
-		return client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, execution.ContinueCommand, execution.ContinueArgs)
+		return client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper)
 	}
 	policy := &usage.ExecutionUsagePolicy{ProfileID: execution.AgentProfileID, AgentID: execution.AgentID, ExecutorType: execution.ExecutorType}
 	usage.ApplySelectedUsage(ctx, policy)
-	return client.ConfigureAgentWithUsage(ctx, execution.AgentCommand, execution.AgentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, execution.LaunchWrapper)
+	return client.ConfigureAgentWithUsage(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, execution.LaunchWrapper)
 }
 
 // ReadProfileExecutionUsage observes existing native actors only. Session

@@ -423,7 +423,7 @@
   "tasks": "タスク",
   "taskReadRefreshFailureNotice": "タスクの詳細を更新できませんでした。現在の表示は引き続き利用できます。",
   "taskReadTemporarilyUnavailable": "タスクを一時的に利用できません",
-  "taskReadTemporarilyUnavailableDescription": "このタスクを読み込めませんでした。ネットワーク接続を確認して、もう一度お試しください。",
+  "taskReadTemporarilyUnavailableDescription": "Kandev は現在このタスクを読み込めませんでした。しばらくしてからもう一度お試しください。",
   "taskStateBlocked": "ブロック中",
   "taskStateCancelled": "キャンセル済み",
   "taskStateCompleted": "完了",
@@ -565,5 +565,12 @@
   "conversationSearch_query_too_broad": "文字または数字を3つ以上連続して入力してください。",
   "conversationSearch_title": "コマンドパレット",
   "notificationChildStallBody": "子タスクが停止しましたが、親タスクが通知を受け取れません。",
-  "notificationChildStallTitle": "子タスクの確認が必要"
+  "notificationChildStallTitle": "子タスクの確認が必要",
+  "notificationPermissionBody": "エージェントがあなたの承認を待っています。",
+  "notificationPermissionTitle": "エージェントが許可を求めています",
+  "notificationSessionFailedBody": "エージェントセッションがエラーで終了しました。",
+  "notificationSessionFailedTitle": "エージェントセッションが失敗",
+  "offlineTitle": "オフラインです",
+  "offlineDescription": "Kandev はサーバーへの接続を必要とします。ネットワークを確認して、もう一度お試しください。",
+  "offlineRetry": "再試行"
 }

@@ -454,6 +454,8 @@ export function primaryTaskRepository(
 
 export type Task = ActiveSubagentCountFields & {
   id: TaskId;
+  /** Caller-supplied create-idempotency identity, absent once released. */
+  external_id?: string;
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
@@ -567,6 +569,14 @@ export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
   agent_profile_id?: AgentProfileId;
+  /**
+   * Native REST creation metadata. Required on a native create response;
+   * absent on custom plugin transports that keep their own contract.
+   * `creation_complete` is false only when the matching task exists but its
+   * required synchronous creation work has not settled.
+   */
+  deduplicated?: boolean;
+  creation_complete?: boolean;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
@@ -698,6 +708,38 @@ export type SessionRecoveryBlockProjection = {
   updated_at: string;
 };
 
+/** Bounded storage evidence shared by live pressure and terminal causes. */
+export type RuntimeStorageFailure = {
+  reason?: string;
+  location?: string;
+  executor_label?: string;
+  observed_at?: string;
+  disk_available_bytes?: number;
+  disk_required_bytes?: number;
+  retained_bytes?: number;
+  limit_bytes?: number;
+  event_bytes?: number;
+};
+
+/** Runtime-only advisory storage state owned by the lifecycle observation. */
+export type RuntimeStorageHealth = {
+  state: "warning" | "normal" | "unavailable";
+  storage_kind?: "journal" | "workspace";
+  location: "local_runtime" | "executor_runtime" | "unknown";
+  executor_label?: string;
+  total_bytes?: number;
+  available_bytes?: number;
+  observed_at?: string;
+  /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
+  age_seconds?: number;
+  write_pressure?: boolean;
+  producer_paused?: boolean;
+  delivery_state?: string;
+  failure_storage?: RuntimeStorageFailure;
+  revision: number;
+  epoch: number;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -749,6 +791,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation used to reject stale snapshots. */
   cancellation_revision?: number;
+  /** Live advisory capacity; omitted by older backends and healthy peers. */
+  runtime_storage_health?: RuntimeStorageHealth | null;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /**
@@ -807,7 +851,7 @@ export type {
   ApproveSessionResponse,
 } from "./http-session-responses";
 
-export type NotificationProviderType = "local" | "apprise" | "system";
+export type NotificationProviderType = "local" | "apprise" | "system" | "webhook" | "webpush";
 
 export type NotificationProvider = {
   id: string;
@@ -1171,6 +1215,8 @@ export type Message = {
    * created_at ascending, ties by id); present only on user messages from an
    * indexed server payload, omitted on older payloads. */
   prompt_index?: number;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 export type Turn = {
@@ -1204,6 +1250,7 @@ export type AgentProfilePortable = {
   agent_name: string;
   model?: string;
   mode?: string;
+  config_options?: Record<string, string>;
 };
 
 export type WorkflowPortable = {

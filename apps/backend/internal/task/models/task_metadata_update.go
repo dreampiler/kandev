@@ -12,7 +12,7 @@ const ReservedMetadataKeyPrefixCoordinator = "kandev.coordinator_"
 
 // MetaKeyRequiredSubtaskCount is a trusted routine's minimum number of durable
 // child assignments. It is a creation requirement, not a child-content verdict.
-const MetaKeyRequiredSubtaskCount = "required_subtask_count"
+const MetaKeyRequiredSubtaskCount = "kandev.office_required_subtask_count"
 
 // ProtectedTaskMetadataUpdate replaces caller-owned metadata while retaining
 // the current server-owned lifecycle, handoff, causation and coordinator
@@ -24,7 +24,10 @@ func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	}
 	StripOfficeCarrierMetadata(updated)
 	RestoreOfficeCarrierMetadata(updated, existing)
-	for _, key := range []string{MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs, MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount} {
+	for _, key := range []string{
+		MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs,
+		MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount, MetaKeyLastTurnError,
+	} {
 		if value, ok := existing[key]; ok {
 			updated[key] = value
 		} else {

@@ -182,6 +182,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["plugin-state"] = ownerBehavior{actions: []apiAction{pluginStateAction()}}
 	behaviors["plugin-instance-state"] = ownerBehavior{actions: []apiAction{pluginInstanceStateAction()}}
 	behaviors["plugin-user-state"] = ownerBehavior{actions: []apiAction{pluginUserStateAction()}}
+	behaviors["plugin-task-change-requests"] = ownerBehavior{actions: []apiAction{pluginTaskChangeRequestAction()}}
 	behaviors["canvas"] = ownerBehavior{actions: []apiAction{canvasAction()}}
 	behaviors["github"] = ownerBehavior{actions: []apiAction{githubAction()}}
 	behaviors["gitlab"] = ownerBehavior{actions: []apiAction{gitlabAction()}}
@@ -332,6 +333,10 @@ func pluginInstanceStateFactory(s testconformance.ScenarioContext) (any, error) 
 
 func pluginUserStateFactory(s testconformance.ScenarioContext) (any, error) {
 	return pluginstate.NewUserStore(ownerPool(s))
+}
+
+func pluginTaskChangeRequestFactory(s testconformance.ScenarioContext) (any, error) {
+	return pluginstate.NewChangeRequestStore(ownerPool(s))
 }
 
 func canvasFactory(s testconformance.ScenarioContext) (any, error) {

@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -123,6 +123,7 @@ type managedConversationServiceFake struct {
 	mu                    sync.Mutex
 	conversations         map[string]pluginsdk.ManagedAgentConversationDescriptor
 	failDeleteAfterCommit bool
+	detachErr             error
 	invalidations         []string
 }
 
@@ -244,6 +245,9 @@ func (f *managedConversationServiceFake) InvalidateManagedForInstallationWorkspa
 func (f *managedConversationServiceFake) DetachManagedForInstallation(_ context.Context, installationID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.detachErr != nil {
+		return f.detachErr
+	}
 	for key, value := range f.conversations {
 		if value.InstallationID == installationID && !value.Detached {
 			value.Detached = true

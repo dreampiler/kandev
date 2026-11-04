@@ -33,6 +33,9 @@ type Answer = protocol.Answer
 // AnsweredBy is the E5 answer-channel marker on clarification responses.
 type AnsweredBy = protocol.AnsweredBy
 
+// AnswerAttachment is the wire type for one file attached to an answer.
+type AnswerAttachment = protocol.AnswerAttachment
+
 // Response is the wire type used by clarification responses.
 type Response = protocol.Response
 

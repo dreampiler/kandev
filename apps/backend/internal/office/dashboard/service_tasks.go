@@ -618,6 +618,9 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
 
 	preStatus := ""
 	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {

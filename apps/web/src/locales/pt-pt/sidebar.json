@@ -253,7 +253,7 @@
   "controlRestore.noModelActivity": "Não foi devolvida atividade de modelos nesta amostra registada.",
   "controlRestore.partialMeasurements": "Algumas medições estão indisponíveis. Motivos da origem: {{reasons}}.",
   "controlRestore.usageReadAt": "Lista de utilização em cache lida às",
-  "controlCircuits.title": "Circuitos de encaminhamento dinâmico",
+  "controlCircuits.title": "Circuitos de recursos dos fornecedores",
   "controlCircuits.installationWide": "Toda a instalação",
   "controlCircuits.empty": "Não há circuitos registados. Isto não prova que todos os fornecedores estejam acessíveis.",
   "controlCircuits.blocking_one": "{{count}} circuito está a bloquear o encaminhamento",
@@ -484,5 +484,9 @@
   "controlSummary.waitReasons.blocked": "Bloqueado",
   "controlSummary.waitReasons.approval": "A aguardar aprovação",
   "controlSummary.waitReasons.hold": "Em espera",
-  "controlSummary.waitReasons.basis": "Contagens de tarefas registadas. A espera de entrada e um motivo de etapa podem contar a mesma tarefa, pelo que não são um total."
+  "controlSummary.waitReasons.basis": "Contagens de tarefas registadas. A espera de entrada e um motivo de etapa podem contar a mesma tarefa, pelo que não são um total.",
+  "controlCircuits.state.available": "Disponível",
+  "controlCircuits.code.missingCredentials": "Faltam credenciais",
+  "controlCircuits.code.providerNotConfigured": "O fornecedor não está configurado",
+  "controlCircuits.code.networkUnavailable": "A rede está indisponível"
 }

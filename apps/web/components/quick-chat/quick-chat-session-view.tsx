@@ -10,6 +10,7 @@ import {
   type TaskArchiveState,
 } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { useQuickChatTaskSummary } from "@/hooks/domains/task/use-quick-chat-task-summary";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
 import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
@@ -177,6 +178,7 @@ function ActiveQuickChatSessionView({
   const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : quickChatTaskId;
   const task = useTask(taskId);
   const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
+  useQuickChatTaskSummary(taskId, Boolean(task), session.workspaceId);
   const taskArchiveState = resolveEffectiveTaskArchiveState(
     taskArchiveStateProp,
     taskId,

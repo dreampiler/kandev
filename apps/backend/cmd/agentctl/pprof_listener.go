@@ -6,6 +6,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -21,14 +22,23 @@ const pprofAddrEnv = "KANDEV_AGENTCTL_PPROF_ADDR"
 // per-session token, which only the backend holds, so an operator cannot
 // profile a running agentctl that hosts many sessions. The listener is opt-in
 // and refuses any address that is not loopback.
-func startPprofListenerIfEnabled(log *logger.Logger) {
+//
+// The returned stop function owns the listener it starts: it closes it and
+// waits for the serving goroutine to exit. It is a no-op when the listener was
+// not started, and it is safe to call more than once.
+func startPprofListenerIfEnabled(log *logger.Logger) func() {
 	addr := strings.TrimSpace(os.Getenv(pprofAddrEnv))
 	if addr == "" {
-		return
+		return func() {}
 	}
 	if !isLoopbackAddr(addr) {
 		log.Warn("pprof listener disabled: address is not loopback", zap.String("address", addr))
-		return
+		return func() {}
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Warn("pprof listener failed to bind", zap.String("address", addr), zap.Error(err))
+		return func() {}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -36,13 +46,22 @@ func startPprofListenerIfEnabled(log *logger.Logger) {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	done := make(chan struct{})
 	go func() {
-		log.Info("pprof listener starting", zap.String("address", addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		defer close(done)
+		log.Info("pprof listener starting", zap.String("address", ln.Addr().String()))
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Warn("pprof listener stopped", zap.String("address", addr), zap.Error(err))
 		}
 	}()
+	var stopOnce sync.Once
+	return func() {
+		stopOnce.Do(func() {
+			_ = srv.Close()
+			<-done
+		})
+	}
 }
 
 func isLoopbackAddr(addr string) bool {

@@ -296,6 +296,7 @@ func (s *Service) startSilentRestoreCandidate(
 		CandidateExecutionID: checkpoint.CandidateExecutionID,
 		OnExecutionAllocated: callback,
 	}
+	restoreCommitted := false
 	commitWhenReady := func(readyCtx context.Context, startup *resumeAttempt, execution *executor.TaskExecution) error {
 		if execution == nil || execution.AgentExecutionID != checkpoint.CandidateExecutionID {
 			return errors.New("silent restart recovery resumed a different execution")
@@ -304,14 +305,16 @@ func (s *Service) startSilentRestoreCandidate(
 		if getErr != nil {
 			return getErr
 		}
-		if err := s.finishLaunchedSilentRestoreCandidateLocked(
+		committed, finishErr := s.finishLaunchedSilentRestoreCandidateLocked(
 			readyCtx, store, attemptID, checkpoint, inputs, running,
-		); err != nil {
-			return err
+		)
+		if finishErr != nil {
+			return finishErr
 		}
 		if !s.resumeAttemptStore().markPromptReady(startup) {
 			return ErrResumeAttemptCancelled
 		}
+		restoreCommitted = committed
 		return nil
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
@@ -324,6 +327,9 @@ func (s *Service) startSilentRestoreCandidate(
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
+	}
+	if restoreCommitted {
+		s.resumeSilentRestoreQueueAfterCommit(ownerCtx, inputs)
 	}
 	return nil
 }
@@ -485,7 +491,8 @@ func (s *Service) proveSilentRestoreSourceDead(
 		state = prober.RowLiveness(running)
 	}
 	dead, err := silentRestoreSourceIsProvenDead(
-		running, recovery, state, processidentity.OwnedSessionTerminated,
+		running, recovery, state,
+		processidentity.OriginalOwnerTerminated, processidentity.OwnedGroupTerminated,
 	)
 	if err != nil {
 		return err
@@ -500,7 +507,8 @@ func silentRestoreSourceIsProvenDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 	liveness models.ProcessLiveness,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if err := validateSilentRestoreSourceIdentity(running, recovery); err != nil {
 		return false, err
@@ -509,12 +517,38 @@ func silentRestoreSourceIsProvenDead(
 	case models.ProcessLivenessDead:
 		return true, nil
 	case models.ProcessLivenessAlive:
-		return false, errors.New("source execution is still alive")
+		return proveLiveStandaloneSilentRestoreSource(running, recovery, agentGroupTerminated)
 	case models.ProcessLivenessUnknown:
-		return proveUnknownStandaloneSilentRestoreSource(running, recovery, ownedSessionTerminated)
+		return proveUnknownStandaloneSilentRestoreSource(running, recovery, originalOwnerTerminated)
 	default:
 		return false, errors.New("source execution liveness is not proven")
 	}
+}
+
+func proveLiveStandaloneSilentRestoreSource(
+	running *models.ExecutorRunning,
+	recovery models.AgentDeliveryRecovery,
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
+) (bool, error) {
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		return false, errors.New("live source execution cannot use local process-group proof")
+	}
+	identity := recovery.OriginalRuntime
+	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID ||
+		identity.AgentGroupID <= 1 || identity.AgentBirthToken == "" || agentGroupTerminated == nil {
+		return false, processidentity.ErrUnverifiableIdentity
+	}
+	group := processidentity.Identity{
+		PID: identity.AgentGroupID, GroupID: identity.AgentGroupID, BirthToken: identity.AgentBirthToken,
+	}
+	terminated, err := agentGroupTerminated(group)
+	if err != nil {
+		return false, err
+	}
+	if !terminated {
+		return false, errors.New("source agent process group is not terminated")
+	}
+	return true, nil
 }
 
 func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recovery models.AgentDeliveryRecovery) error {
@@ -528,7 +562,7 @@ func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recove
 func proveUnknownStandaloneSilentRestoreSource(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if running.Runtime != runtimekind.RuntimeStandalone {
 		return false, errors.New("remote source execution cannot use local process proof")
@@ -537,10 +571,10 @@ func proveUnknownStandaloneSilentRestoreSource(
 	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	if ownedSessionTerminated == nil {
+	if originalOwnerTerminated == nil {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	terminated, err := ownedSessionTerminated(identity)
+	terminated, err := originalOwnerTerminated(identity)
 	if err != nil {
 		return false, err
 	}
@@ -609,11 +643,20 @@ func (s *Service) finishLaunchedSilentRestoreCandidate(
 	inputs *silentRestoreInputs,
 	running *models.ExecutorRunning,
 ) error {
-	releaseRoute := s.acquireSessionRouteOperationLock(inputs.session.ID)
-	defer releaseRoute()
-	releaseLifecycle := s.acquireSessionLifecycleLock(inputs.session.ID)
-	defer releaseLifecycle()
-	return s.finishLaunchedSilentRestoreCandidateLocked(ctx, store, attemptID, checkpoint, inputs, running)
+	committed, err := func() (bool, error) {
+		releaseRoute := s.acquireSessionRouteOperationLock(inputs.session.ID)
+		defer releaseRoute()
+		releaseLifecycle := s.acquireSessionLifecycleLock(inputs.session.ID)
+		defer releaseLifecycle()
+		return s.finishLaunchedSilentRestoreCandidateLocked(ctx, store, attemptID, checkpoint, inputs, running)
+	}()
+	if err != nil {
+		return err
+	}
+	if committed {
+		s.resumeSilentRestoreQueueAfterCommit(ctx, inputs)
+	}
+	return nil
 }
 
 func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
@@ -623,28 +666,28 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 	checkpoint models.SilentRestoreCheckpoint,
 	inputs *silentRestoreInputs,
 	running *models.ExecutorRunning,
-) error {
+) (bool, error) {
 	ownerCtx, ready, err := s.silentRestoreCandidateReady(ctx, inputs, checkpoint, running)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ready {
-		return nil
+		return false, nil
 	}
 	inputs.ownerCtx = ownerCtx
 	attempt, err := store.GetRestoreAttempt(ctx, attemptID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if attempt == nil || attempt.Checkpoint == nil ||
 		attempt.Checkpoint.Stage != models.SilentRestoreStageCandidateLaunching ||
 		attempt.Checkpoint.CandidateExecutionID != checkpoint.CandidateExecutionID {
-		return nil
+		return false, nil
 	}
 	commitCheckpoint := *attempt.Checkpoint
 	ownerCtx, err = s.validateSilentRestoreCommitInputs(ownerCtx, inputs, commitCheckpoint)
 	if err != nil {
-		return err
+		return false, err
 	}
 	now := time.Now().UTC()
 	next := checkpoint.SourceGeneration
@@ -656,18 +699,24 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 		AttemptID: attemptID, Checkpoint: commitCheckpoint, Generation: next, CompletedAt: now,
 	})
 	if err == nil && !committed {
-		return errors.New("silent restart recovery checkpoint changed before commit")
+		return false, errors.New("silent restart recovery checkpoint changed before commit")
 	}
 	if err == nil {
-		s.resumeSilentRestoreQueue(ownerCtx, messagequeue.QueueSessionIdentity{
-			TaskID: inputs.task.ID, SessionID: inputs.session.ID,
-			SessionIncarnationID: inputs.session.QueueIncarnationID,
-		}, inputs.block.ID)
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
 			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}
 	}
-	return err
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) resumeSilentRestoreQueueAfterCommit(ctx context.Context, inputs *silentRestoreInputs) {
+	s.resumeSilentRestoreQueue(ctx, messagequeue.QueueSessionIdentity{
+		TaskID: inputs.task.ID, SessionID: inputs.session.ID,
+		SessionIncarnationID: inputs.session.QueueIncarnationID,
+	}, inputs.block.ID)
 }
 
 func (s *Service) silentRestoreCandidateReady(

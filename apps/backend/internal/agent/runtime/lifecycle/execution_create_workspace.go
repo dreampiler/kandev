@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 type executionCreateWorkspaceInputs struct {
@@ -18,6 +19,8 @@ type executionCreateWorkspaceInputs struct {
 // and control authentication before request assembly reveals the bootstrap nonce.
 func (m *Manager) prepareExecutionWorkspace(ctx context.Context, info *WorkspaceInfo, inputs executionCreateWorkspaceInputs) (*ExecutorCreateRequest, error) {
 	metadata := copyExecutionCreateMetadata(info.Metadata)
+	captureResourceCircuitIdentity(metadata, inputs.executionID, inputs.profileInfo)
+	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
 	m.seedExecutionBaseBranches(ctx, inputs.taskID, inputs.executionID, metadata)
 	if inputs.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = inputs.managedGoCachePath

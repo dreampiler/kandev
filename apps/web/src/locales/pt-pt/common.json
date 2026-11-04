@@ -413,7 +413,7 @@
   "tasks": "Tarefas",
   "taskReadRefreshFailureNotice": "Não foi possível atualizar os detalhes da tarefa. A vista atual continua disponível.",
   "taskReadTemporarilyUnavailable": "Tarefa temporariamente indisponível",
-  "taskReadTemporarilyUnavailableDescription": "Não foi possível carregar esta tarefa. Verifique a sua ligação e tente novamente.",
+  "taskReadTemporarilyUnavailableDescription": "O Kandev não conseguiu carregar esta tarefa de momento. Tente novamente dentro de instantes.",
   "taskStateBlocked": "Bloqueada",
   "taskStateCancelled": "Cancelada",
   "taskStateCompleted": "Concluída",
@@ -565,5 +565,12 @@
   "conversationSearch_query_too_broad": "Use pelo menos 3 letras ou algarismos consecutivos.",
   "conversationSearch_title": "Paleta de comandos",
   "notificationChildStallBody": "Uma subtarefa parou e a tarefa principal não pode receber o alerta.",
-  "notificationChildStallTitle": "Subtarefa precisa de atenção"
+  "notificationChildStallTitle": "Subtarefa precisa de atenção",
+  "notificationPermissionBody": "O agente está à espera da sua aprovação.",
+  "notificationPermissionTitle": "O agente precisa de permissão",
+  "notificationSessionFailedBody": "A sessão do agente terminou com um erro.",
+  "notificationSessionFailedTitle": "A sessão do agente falhou",
+  "offlineTitle": "Está sem ligação",
+  "offlineDescription": "O Kandev precisa de uma ligação ao servidor. Verifique a rede e tente novamente.",
+  "offlineRetry": "Tentar novamente"
 }

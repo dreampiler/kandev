@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { TabsContent } from "@kandev/ui/tabs";
 import { PageShell } from "@/components/page-shell";
@@ -78,18 +78,24 @@ function NeedsYouInboxList({
   hasMore,
   hiddenCount,
   listRevision,
+  allocationRef,
 }: {
   bundles: readonly ClarificationInboxBundle[];
   hasMore: boolean;
   hiddenCount: number;
   listRevision: number;
+  allocationRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
   return (
     <>
       <div className="overflow-hidden rounded-lg border border-border divide-y divide-border">
         {bundles.map((bundle) => (
-          <NeedsYouInboxRowWithLateAnswer key={bundle.pending_id} bundle={bundle} />
+          <NeedsYouInboxRowWithLateAnswer
+            key={bundle.pending_id}
+            bundle={bundle}
+            allocationRef={allocationRef}
+          />
         ))}
       </div>
       {hasMore && (
@@ -104,11 +110,18 @@ function NeedsYouInboxList({
   );
 }
 
-function NeedsYouInboxRowWithLateAnswer({ bundle }: { bundle: ClarificationInboxBundle }) {
+function NeedsYouInboxRowWithLateAnswer({
+  bundle,
+  allocationRef,
+}: {
+  bundle: ClarificationInboxBundle;
+  allocationRef: RefObject<HTMLDivElement | null>;
+}) {
   const lateAnswer = useLateClarificationMessage(bundle.messages[0]);
   return (
     <NeedsYouInboxRow
       bundle={bundle}
+      allocationRef={allocationRef}
       onLateAnswer={lateAnswer.send}
       lateAnswerState={lateAnswer.state}
     />
@@ -117,7 +130,13 @@ function NeedsYouInboxRowWithLateAnswer({ bundle }: { bundle: ClarificationInbox
 
 // "Needs you" is the tab strip's default-selected tab, and this content,
 // count and behavior are unchanged by the strip's presence.
-function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
+function NeedsYouInboxTabContent({
+  retry,
+  allocationRef,
+}: {
+  retry: () => void;
+  allocationRef: RefObject<HTMLDivElement | null>;
+}) {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
   const bundles = useAppStore(selectNeedsYouInboxBundles);
@@ -159,6 +178,7 @@ function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
           hasMore={hasMore}
           hiddenCount={hiddenCount}
           listRevision={listRevision}
+          allocationRef={allocationRef}
         />
       )}
       {viewMode !== "loading" && <NeedsYouInboxUnansweredSection />}
@@ -227,6 +247,7 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
 // carries the phone nav trigger (design-03#D4).
 export function NeedsYouInboxPageClient() {
   const { t } = useTranslation();
+  const contentRef = useRef<HTMLDivElement>(null);
   const requestRetry = useAppStore((s) => s.requestNeedsYouInboxRetry);
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
@@ -257,7 +278,7 @@ export function NeedsYouInboxPageClient() {
   );
 
   return (
-    <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6">
+    <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6" contentRef={contentRef}>
       <InboxTabStrip
         selectedTab={selectedTab}
         onSelectTab={selectTab}
@@ -268,7 +289,7 @@ export function NeedsYouInboxPageClient() {
         historyCount={historyCount}
       >
         <TabsContent value="needs-you">
-          <NeedsYouInboxTabContent retry={retry} />
+          <NeedsYouInboxTabContent retry={retry} allocationRef={contentRef} />
         </TabsContent>
         <TabsContent value="failed">
           <FailedInboxTabPanel />

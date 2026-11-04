@@ -423,7 +423,7 @@
   "tasks": "Ţàśķś",
   "taskReadRefreshFailureNotice": "Ţàśķ ďēţàĩĺś ćōũĺď ńōţ ƀē ŕēƒŕēśĥēď. Ŷōũŕ ćũŕŕēńţ vĩēŵ ĩś śţĩĺĺ àvàĩĺàƀĺē.",
   "taskReadTemporarilyUnavailable": "Ţàśķ ţēḿƥōŕàŕĩĺŷ ũńàvàĩĺàƀĺē",
-  "taskReadTemporarilyUnavailableDescription": "Ŵē ćōũĺď ńōţ ĺōàď ţĥĩś ţàśķ. Ćĥēćķ ŷōũŕ ćōńńēćţĩōń àńď ţŕŷ àĝàĩń.",
+  "taskReadTemporarilyUnavailableDescription": "Ķàńďēv ćōũĺď ńōţ ĺōàď ţĥĩś ţàśķ ŕĩĝĥţ ńōŵ. Ţŕŷ àĝàĩń ĩń à ḿōḿēńţ.",
   "taskStateBlocked": "Ɓĺōćķēď",
   "taskStateCancelled": "Ćàńćēĺĺēď",
   "taskStateCompleted": "Ćōḿƥĺēţēď",
@@ -565,5 +565,12 @@
   "conversationSearch_query_too_broad": "Ũśē àţ ĺēàśţ 3 ćōńśēćũţĩvē ĺēţţēŕś ōŕ ďĩĝĩţś.",
   "conversationSearch_title": "Ćōḿḿàńď Ƥàĺēţţē",
   "notificationChildStallBody": "À ćĥĩĺď ţàśķ śţàĺĺēď àńď ĩţś ƥàŕēńţ ţàśķ ćàńńōţ ŕēćēĩvē ţĥē àĺēŕţ.",
-  "notificationChildStallTitle": "Ćĥĩĺď ţàśķ ńēēďś àţţēńţĩōń"
+  "notificationChildStallTitle": "Ćĥĩĺď ţàśķ ńēēďś àţţēńţĩōń",
+  "notificationPermissionBody": "Ţĥē àĝēńţ ĩś ŵàĩţĩńĝ ƒōŕ ŷōũŕ àƥƥŕōvàĺ.",
+  "notificationPermissionTitle": "Àĝēńţ ńēēďś ƥēŕḿĩśśĩōń",
+  "notificationSessionFailedBody": "Ţĥē àĝēńţ śēśśĩōń ēńďēď ŵĩţĥ àń ēŕŕōŕ.",
+  "notificationSessionFailedTitle": "Àĝēńţ śēśśĩōń ƒàĩĺēď",
+  "offlineTitle": "Ŷōũ àŕē ōƒƒĺĩńē",
+  "offlineDescription": "Ķàńďēv ńēēďś à ćōńńēćţĩōń ţō ŷōũŕ śēŕvēŕ. Ćĥēćķ ŷōũŕ ńēţŵōŕķ, ţĥēń ţŕŷ àĝàĩń.",
+  "offlineRetry": "Ţŕŷ àĝàĩń"
 }

@@ -239,7 +239,7 @@
   "controlRestore.noModelActivity": "Ńō ḿōďēĺ àćţĩvĩţŷ ŵàś ŕēţũŕńēď ŵĩţĥĩń ţĥĩś ŕēćōŕďēď śàḿƥĺē.",
   "controlRestore.partialMeasurements": "Śōḿē ḿēàśũŕēḿēńţś àŕē ũńàvàĩĺàƀĺē. Śōũŕćē ŕēàśōńś: {{reasons}}.",
   "controlRestore.usageReadAt": "Ćàćĥēď ũśàĝē ĺĩśţ ŕēàď àţ",
-  "controlCircuits.title": "Ďŷńàḿĩć ŕōũţĩńĝ ćĩŕćũĩţś",
+  "controlCircuits.title": "Ƥŕōvĩďēŕ ŕēśōũŕćē ćĩŕćũĩţś",
   "controlCircuits.installationWide": "Ĩńśţàĺĺàţĩōń-ŵĩďē",
   "controlCircuits.empty": "Ńō ćĩŕćũĩţ ĩś ŕēćōŕďēď. Ţĥĩś ďōēś ńōţ ƥŕōvē ēvēŕŷ ƥŕōvĩďēŕ ĩś ŕēàćĥàƀĺē.",
   "controlCircuits.blocking_one": "{{count}} ćĩŕćũĩţ ĩś ƀĺōćķĩńĝ ŕōũţĩńĝ",
@@ -484,5 +484,9 @@
   "controlSummary.waitReasons.blocked": "Ɓĺōćķēď",
   "controlSummary.waitReasons.approval": "Ŵàĩţĩńĝ ƒōŕ àƥƥŕōvàĺ",
   "controlSummary.waitReasons.hold": "Ōń ĥōĺď",
-  "controlSummary.waitReasons.basis": "Ŕēćōŕďēď ţàśķ ćōũńţś. Ĩńƥũţ ŵàĩţ àńď à śţàĝē ŕēàśōń ćàń ćōũńţ ţĥē śàḿē ţàśķ, śō ţĥēśē ƒĩĝũŕēś àŕē ńōţ à ţōţàĺ."
+  "controlSummary.waitReasons.basis": "Ŕēćōŕďēď ţàśķ ćōũńţś. Ĩńƥũţ ŵàĩţ àńď à śţàĝē ŕēàśōń ćàń ćōũńţ ţĥē śàḿē ţàśķ, śō ţĥēśē ƒĩĝũŕēś àŕē ńōţ à ţōţàĺ.",
+  "controlCircuits.state.available": "Àvàĩĺàƀĺē",
+  "controlCircuits.code.missingCredentials": "Ćŕēďēńţĩàĺś àŕē ḿĩśśĩńĝ",
+  "controlCircuits.code.providerNotConfigured": "Ƥŕōvĩďēŕ ĩś ńōţ ćōńƒĩĝũŕēď",
+  "controlCircuits.code.networkUnavailable": "Ńēţŵōŕķ ĩś ũńàvàĩĺàƀĺē"
 }

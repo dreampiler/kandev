@@ -12,12 +12,13 @@ import (
 // Capacity waits are not provider attempts. Task-owned ceiling replay retains
 // its existing cap/disposition; Office-owned capacity waits do not spend it.
 func providerAttemptCount(run *runmodels.Run, prior []models.RouteAttempt, commonOwned ...bool) int {
-	if extractRunTaskID(run.Payload) != "" && (len(commonOwned) == 0 || !commonOwned[0]) {
-		return len(prior)
-	}
+	countCapacity := extractRunTaskID(run.Payload) != "" && (len(commonOwned) == 0 || !commonOwned[0])
 	count := 0
 	for _, attempt := range prior {
-		if attempt.Outcome != RouteAttemptOutcomeDeferredCapacity {
+		if attempt.Outcome == RouteAttemptOutcomeDeferredCircuit {
+			continue
+		}
+		if countCapacity || attempt.Outcome != RouteAttemptOutcomeDeferredCapacity {
 			count++
 		}
 	}

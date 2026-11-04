@@ -1,9 +1,11 @@
 package review
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,14 +14,17 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/common/unidiff"
 	"github.com/kandev/kandev/internal/utility/hash"
 )
 
 // These match agentctl's workspace_git_diff.go collection limits.
 const (
+	localStatusAdded       = "added"
 	localMaxDiffFileSize   = 10 * 1024 * 1024
 	localMaxDiffOutputSize = 256 * 1024
 	localMaxTotalDiffBytes = 2 * 1024 * 1024
+	localBinaryCheckSize   = 8 * 1024
 )
 
 type localGitBuffer struct {
@@ -56,11 +61,6 @@ func localGit(ctx context.Context, path string, limit int, args ...string) (stri
 	if output.exceeded {
 		return string(output.data), fmt.Errorf("%w: %d bytes", errLocalGitOutputLimit, limit)
 	}
-	// --no-index reports a textual diff with exit status 1.
-	var exit *exec.ExitError
-	if len(args) > 1 && args[0] == "diff" && args[1] == "--no-index" && errors.As(cmdErr, &exit) && exit.ExitCode() == 1 {
-		cmdErr = nil
-	}
 	return string(output.data), cmdErr
 }
 
@@ -76,7 +76,7 @@ func localChangedFile(ctx context.Context, path, base, head, file, status string
 	if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
 		return ChangedFile{}, fmt.Errorf("%w: read local diff for %q: %v", ErrWorkspaceUnavailable, file, err)
 	}
-	return localFile(file, status, diff, head != "", used), nil
+	return localFile(file, localChangeStatus(status), diff, head != "", used), nil
 }
 
 func localFileTooLarge(ctx context.Context, path, base, head, file string) bool {
@@ -110,15 +110,50 @@ func localFile(path, status, diff string, committed bool, used *int) ChangedFile
 	if committed {
 		file.Source = sourceCommitted
 	}
+	file.Additions, file.Deletions = localHunkLineCounts(diff)
+	return file
+}
+
+// localHunkLineCounts counts added and removed lines inside hunks only. Diff
+// header lines (`+++`/`---`) sit before the first `@@ `, so a code line whose
+// content begins with `+` or `-` is still counted correctly.
+func localHunkLineCounts(diff string) (additions, deletions int) {
+	inHunk := false
 	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			file.Additions++
+		if strings.HasPrefix(line, "diff --git ") {
+			inHunk = false
+			continue
 		}
-		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			file.Deletions++
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			additions++
+		} else if strings.HasPrefix(line, "-") {
+			deletions++
 		}
 	}
-	return file
+	return additions, deletions
+}
+
+// localChangeStatus maps a `git --name-status` code to the file status
+// vocabulary agentctl stamps (added, modified, deleted, renamed). Unknown
+// codes, including a type change, read as modified.
+func localChangeStatus(code string) string {
+	switch {
+	case strings.HasPrefix(code, "A"):
+		return localStatusAdded
+	case strings.HasPrefix(code, "D"):
+		return "deleted"
+	case strings.HasPrefix(code, "R"):
+		return "renamed"
+	default:
+		return "modified"
+	}
 }
 
 func localUntrackedFiles(ctx context.Context, path string, used *int) ([]ChangedFile, error) {
@@ -133,19 +168,61 @@ func localUntrackedFiles(ctx context.Context, path string, used *int) ([]Changed
 		}
 		info, err := os.Lstat(filepath.Join(path, filepath.FromSlash(name)))
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// The file can disappear between `ls-files` and this stat.
+				continue
+			}
 			return nil, fmt.Errorf("%w: read untracked file %q", ErrWorkspaceUnavailable, name)
 		}
 		if !info.Mode().IsRegular() || info.Size() > localMaxDiffFileSize {
 			continue
 		}
-		diff, err := localGit(ctx, path, localMaxDiffOutputSize, "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", os.DevNull, name)
-		if err != nil && !errors.Is(err, errLocalGitOutputLimit) {
-			return nil, fmt.Errorf("%w: read untracked diff %q: %v", ErrWorkspaceUnavailable, name, err)
+		content, binary, err := localUntrackedContent(ctx, path, name)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read untracked file %q: %v", ErrWorkspaceUnavailable, name, err)
+		}
+		if binary {
+			continue
+		}
+		diff, additions, _, err := unidiff.BuildUntrackedDiff(ctx, name, content, localMaxDiffOutputSize)
+		if err != nil {
+			return nil, fmt.Errorf("%w: format untracked diff %q: %v", ErrWorkspaceUnavailable, name, err)
 		}
 		file := localFile(name, "untracked", diff, false, used)
 		if file.Diff != "" {
+			file.Additions = additions
 			files = append(files, file)
 		}
 	}
 	return files, nil
+}
+
+func localUntrackedContent(ctx context.Context, path, name string) ([]byte, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	file, err := os.Open(filepath.Join(path, filepath.FromSlash(name)))
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > localMaxDiffFileSize {
+		return nil, true, nil
+	}
+	content, err := io.ReadAll(io.LimitReader(file, localMaxDiffOutputSize))
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	header := content
+	if len(header) > localBinaryCheckSize {
+		header = header[:localBinaryCheckSize]
+	}
+	return content, bytes.IndexByte(header, 0) >= 0, nil
 }

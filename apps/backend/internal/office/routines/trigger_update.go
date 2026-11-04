@@ -42,6 +42,12 @@ func (s *RoutineService) UpdateRoutineTrigger(
 	if err := applyTriggerScheduleUpdate(&after, request, time.Now().UTC()); err != nil {
 		return nil, err
 	}
+	if triggerScheduleUnchanged(before, &after) {
+		// The request matches the stored schedule, so the row is left alone.
+		// Rewriting it would recompute next_run_at and skip a fire that is
+		// already due but not yet claimed by the scheduler.
+		return before, nil
+	}
 	updated, err := store.UpdateRoutineTriggerIfCurrent(ctx, before, &after)
 	if err != nil {
 		return nil, err
@@ -50,6 +56,12 @@ func (s *RoutineService) UpdateRoutineTrigger(
 		return nil, ErrTriggerUpdateConflict
 	}
 	return &after, nil
+}
+
+func triggerScheduleUnchanged(before, after *RoutineTrigger) bool {
+	return before.CronExpression == after.CronExpression &&
+		before.Timezone == after.Timezone &&
+		before.Enabled == after.Enabled
 }
 
 func applyTriggerScheduleUpdate(trigger *RoutineTrigger, request UpdateTriggerRequest, now time.Time) error {

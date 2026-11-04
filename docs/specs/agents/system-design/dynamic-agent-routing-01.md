@@ -8,17 +8,18 @@ updated: 2026-10-20
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing System Design Part 1
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` during migration.
+This preserves source detail for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` during migration.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| Requirement                                                                      | Design section                                                                |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                                           | [Migrated source detail](#migrated-source-detail)                             |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9`) | [Standalone settings save publication](#standalone-settings-save-publication) |
 
 ## Standalone settings save publication
@@ -47,11 +48,10 @@ uses `compareTimestamps` and the established editable-snapshot equality rule
 for equal timestamps. Do not substitute lexical timestamp ordering or a new
 dynamic-version arbitration rule. An identical response needs no replacement.
 
-Map only existing rows. If the owner or matching profile is absent at response
-time, do not synthesize it from captured props or append the response. This is
-a bounded absence behavior, not a cross-owner movement or resurrection policy.
-If a same-profile option survives without a Settings row, preserve the current
-option through existing option reconciliation; do not reconstruct its owner.
+Map existing rows only. If the owner or matching profile vanished, neither
+synthesize it from captured props nor append the response. Preserve surviving
+same-profile options through option reconciliation without reconstructing their
+missing Settings owner or moving ownership.
 
 Publish the next list and reconcile flattened options against the current
 `agentProfiles.items` using `reconcileAgentProfileOptions` from
@@ -382,9 +382,9 @@ parameters.
 The frontend applies route and capability changes by generation. It discards
 late events from a previous downstream session, inserts a localized system row
 for the structured reason, and replaces rather than merges provider-specific
-  controls. The tab and message composer remain mounted. Route-change rows are
-  durable and appear after reload. The current controls describe the active
-  concrete route. They do not change the logical author shown on earlier turns.
+controls. The tab and message composer remain mounted. Route-change rows are
+durable and appear after reload. The current controls describe the active
+concrete route. They do not change the logical author shown on earlier turns.
 
 ### Shared health and probing
 
@@ -421,9 +421,9 @@ for the structured reason, and replaces rather than merges provider-specific
 - At the deadline, one worker acquires a half-open probe lease. Other tasks keep
   using alternatives or wait. Probe success closes the circuit, failure extends
   its backoff.
-- The backoff is a fixed minute, extended only by a later provider reset hint.
-  The opt-in escalation ladder is described in
-  [dynamic circuit backoff](dynamic-circuit-backoff.md).
+- Shared circuits use the default ladder and retained failure count described
+  in [dynamic circuit backoff](dynamic-circuit-backoff.md). The dynamic-agent
+  feature gate controls execution; there is no separate backoff toggle.
 - Recovery affects future route selection. A healthy active fallback session is
   not interrupted when an earlier candidate recovers.
 

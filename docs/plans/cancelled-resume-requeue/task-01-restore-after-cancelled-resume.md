@@ -6,11 +6,11 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-RESUME-PROMPT-QUEUE-003
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-004
 acceptance_criteria:
-  - AC-TASKS-RESUME-PROMPT-QUEUE-003.1
-  - AC-TASKS-RESUME-PROMPT-QUEUE-003.2
-  - AC-TASKS-RESUME-PROMPT-QUEUE-003.3
+  - AC-TASKS-RESUME-PROMPT-QUEUE-004.1
+  - AC-TASKS-RESUME-PROMPT-QUEUE-004.2
+  - AC-TASKS-RESUME-PROMPT-QUEUE-004.3
 system_design:
   - ../../specs/tasks/system-design/resume-prompt-queue.md
 ---

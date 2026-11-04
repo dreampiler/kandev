@@ -46,6 +46,8 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
+	keywordBindingResolver     func(context.Context, string, *agentsettingsmodels.AgentProfile, string) dynamic.CredentialBindingDescriptor
+	keywordContextEnabled      atomic.Bool
 	profiles                   store.Repository
 	dynamic                    store.DynamicProfileRepository
 	engine                     *dynamic.Engine
@@ -68,6 +70,10 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 }
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
+
+func (r *ProfileExecutionResolver) SetKeywordContextEnabled(enabled bool) {
+	r.keywordContextEnabled.Store(enabled)
+}
 
 // Enabled reports the effective dynamic-agent-routing flag value this
 // resolver was constructed or last set with. Callers outside this package
@@ -113,7 +119,7 @@ func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
 	if r == nil || r.engine == nil {
 		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
 	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -313,7 +319,7 @@ func (r *ProfileExecutionResolver) RecordFailureCircuit(
 	if r == nil || r.engine == nil || sessionID == "" || profileID == "" {
 		return false, nil
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -328,11 +334,10 @@ func (r *ProfileExecutionResolver) ResetCircuitFailures(
 	sessionID, profileID, candidateID string,
 	generation int64,
 ) (bool, error) {
-	if r == nil || r.engine == nil || sessionID == "" || profileID == "" ||
-		!r.engine.Circuits().EscalationEnabled() {
+	if r == nil || !r.Enabled() || r.engine == nil || sessionID == "" || profileID == "" {
 		return false, nil
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -374,7 +379,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -617,7 +622,7 @@ func (r *ProfileExecutionResolver) reselectWaitingRoute(
 	expectedGeneration int64,
 	reason string,
 ) (ProfileExecution, error) {
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -666,7 +671,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -937,7 +942,7 @@ func keepModelWhileRunning(value *bool) bool {
 	return *value
 }
 
-func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
+func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string, sessionIDs ...string) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
 	}
@@ -952,19 +957,24 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}
-	profile, err := r.dynamicProfileFromRoutes(ctx, profileID, config.Version, routes)
+	profile, err := r.dynamicProfileFromRoutes(ctx, profileID, config.Version, routes, sessionIDs...)
 	profile.KeepModelWhileRunning = keepModelWhileRunning(config.KeepModelWhileRunning)
 	return profile, err
 }
 
-func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context, profileID string, version int64, routes []agentsettingsmodels.DynamicAgentRoute) (dynamic.Profile, error) {
+func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context, profileID string, version int64, routes []agentsettingsmodels.DynamicAgentRoute, sessionIDs ...string) (dynamic.Profile, error) {
+	sessionID := ""
+	if len(sessionIDs) > 0 {
+		sessionID = sessionIDs[0]
+	}
 	profile := dynamic.Profile{
 		ID: profileID, Version: version,
 		Candidates: make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
 		candidate := dynamic.Candidate{
-			ID: route.ExecutionProfileID, Enabled: route.Enabled,
+			KeywordContextEnabled: r.keywordContextEnabled.Load(),
+			ID:                    route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
 		if err := populateDynamicCandidatePolicy(&candidate, route); err != nil {
@@ -983,13 +993,8 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 		default:
 			candidate.ModelID = concrete.Model
 		}
-		if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
-			binding := profileCredentialBindingDescriptor(concrete)
-			candidate.BindingKey = dynamic.ResourceKey(
-				dynamic.ScopeCredential,
-				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
-			)
-		}
+		r.populateDynamicCandidateBinding(concrete, route.ExecutionProfileID, &candidate)
+		r.populateKeywordCandidate(ctx, sessionID, concrete, &candidate)
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	if err := r.filterExecutionCandidates(ctx, &profile); err != nil {
@@ -997,6 +1002,16 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 	}
 	r.applyResourceLimits(ctx, profile.Candidates)
 	return profile, nil
+}
+
+func (r *ProfileExecutionResolver) populateDynamicCandidateBinding(concrete *agentsettingsmodels.AgentProfile, profileID string, candidate *dynamic.Candidate) {
+	if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
+		binding := profileCredentialBindingDescriptor(concrete)
+		candidate.BindingKey = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(binding, profileID),
+		)
+	}
 }
 
 func populateDynamicCandidatePolicy(candidate *dynamic.Candidate, route agentsettingsmodels.DynamicAgentRoute) error {
@@ -1099,6 +1114,11 @@ func profileCredentialBindingDescriptor(profile *agentsettingsmodels.AgentProfil
 		sort.Strings(secretIDs)
 		descriptor.CredentialSourceKind = "profile_secret"
 		descriptor.CredentialLocator = strings.Join(secretIDs, ",")
+		// BillingType is a controller-only projection, absent on store reads.
+		// An explicit secret binding already supplies its authentication scope.
+		if descriptor.AuthenticationMethod == "" {
+			descriptor.AuthenticationMethod = "profile_secret"
+		}
 	} else if descriptor.AuthenticationMethod != "" {
 		descriptor.CredentialSourceKind = "agent_credentials"
 		descriptor.CredentialLocator = profile.AgentID + ":" + descriptor.AuthenticationMethod
