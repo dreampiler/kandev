@@ -10,17 +10,19 @@ owners:
 
 ## Overview
 
-Preserve the observable behavior documented for Agent Resume and Runtime Recovery.
+Preserve agent resume and runtime recovery behavior.
+
+[MCP profile continuity](mcp-profile-continuity.md) defines tool delivery when recovery starts a replacement process.
 
 ## Requirements
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001: Agent Resume and Runtime Recovery
 
-**Intent:** Preserve the observable behavior documented for Agent Resume and Runtime Recovery.
+**Intent:** Preserve agent resume and runtime recovery behavior.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.1:** A process startup, ACP initialize, or transport failure does not discard the stored resume token. Resume retries the same provider-native session.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.1:** Process startup, ACP initialize, or transport failure does not discard the stored resume token. Resume retries the same provider-native session.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.2:** The stored token is cleared only when the user explicitly chooses **Start fresh**, or is replaced after the agent successfully creates a new provider-native session.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.3:** An authorized resume moves the task session to `STARTING` under the existing per-session resume lock before request assembly reaches scoped GitHub credential issuance. This makes the session eligible for a lease without weakening the credential broker's terminal-session rejection.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.4:** A successful resume persists the non-secret Git credential routing snapshot while the session is still guarded `STARTING`, so the task detail view does not retain an earlier workspace/executor credential policy.
@@ -36,9 +38,9 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 
 #### Acceptance criteria
 
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.1:** A failed `session.recover` request shows the backend error near the recovery controls. The error remains visible after the request ends and after repeated attempts.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.1:** A failed `session.recover` shows the backend error near the recovery controls. The error remains visible after the request and repeated attempts.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.2:** A failed automatic resume that restores the workspace in read-only mode shows a nonblocking notice. The notice includes the resume failure cause and states that the restored workspace is read-only.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.3:** If resume and read-only workspace restore both fail, the recovery surface shows both causes. It does not replace them with only a generic message.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.3:** If resume and read-only restore both fail, the recovery surface shows both causes, not just a generic message.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.4:** A user can select read-only workspace restore after a manual resume failure. Kandev does not silently replace a manual Resume request with read-only restore.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.5:** Desktop, narrow desktop, and mobile task views use the existing inline alert and chat recovery patterns. Recovery actions remain reachable by keyboard and touch without horizontal overflow.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.6:** A Retry recovery control is disabled while its recovery request is in flight on every recovery surface. A repeated attempt cannot create overlapping `session.recover` requests.
