@@ -203,6 +203,9 @@ type UnclassifiedFailureEvidence struct {
 	EvidenceKnown      bool
 	OutputObserved     bool
 	EffectObserved     bool
+	// StrictStartupModelRejection is set only after the typed pre-prompt
+	// requested-model rejection has been verified by the launch owner.
+	StrictStartupModelRejection bool
 }
 
 func (e UnclassifiedFailureEvidence) currentFor(

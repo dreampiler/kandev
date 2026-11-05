@@ -4574,11 +4574,13 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	}
 	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
 	if strictModelFailure {
+		*failureData = s.withStartupAttemptObservations(*failureData)
 		evidence = s.unclassifiedFailureEvidence(
 			ctx, *failureData, session, attempt.SessionID == sessionID,
 			dynamicruntime.UnclassifiedOriginAgentStartup, routingerr.PhaseSessionInit,
-			attempt.ID, "", "", false, true, false, false,
+			attempt.ID, "", "", false, failureData.EvidenceKnown, failureData.OutputObserved, failureData.EffectObserved,
 		)
+		evidence.StrictStartupModelRejection = true
 	}
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return false
@@ -4600,7 +4602,7 @@ func (s *Service) handleDynamicAgentStartupFailure(
 }
 
 func startupAttemptOwnsSession(session *models.TaskSession, executionID string, attempt dynamicStartupAttempt) bool {
-	return session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
+	return executionID != "" && session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
 		session.AgentProfileID == attempt.LogicalProfileID && session.ExecutionProfileID == attempt.ExecutionProfileID
 }
 

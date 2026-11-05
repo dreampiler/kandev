@@ -240,9 +240,6 @@ func (r *Repository) commitHarnessSessionGeneration(
 	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}
-	if err := r.resolveContinuedNativeMissingFencesTx(ctx, tx, generation, expectedGeneration); err != nil {
-		return false, err
-	}
 	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}

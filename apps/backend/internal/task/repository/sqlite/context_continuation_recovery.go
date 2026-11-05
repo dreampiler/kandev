@@ -72,23 +72,6 @@ func contextContinuationNoticeMatches(recovery models.AgentDeliveryRecovery, ses
 			recovery.Phase == models.AgentDeliveryRecoveryContinued)
 }
 
-// The committed replacement addresses only unbound interactive native-state loss
-// from its source generation. Delivery and independent recovery fences remain.
-func (r *Repository) resolveContinuedNativeMissingFencesTx(ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64) error {
-	if expectedGeneration < 1 || generation.CreationReason != contextContinuationOutcome || generation.Generation != expectedGeneration+1 ||
-		generation.PredecessorGeneration != expectedGeneration || generation.NativeSessionID == "" {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks
- SET state = 'resolved', authorized_action = 'continue_from_history', updated_at = ?, resolved_at = ?
- WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = 'open'
- AND reason = 'native_state_missing' AND consumer_reference = 'interactive'
- AND delivery_submission_id = '' AND delivery_stream_id = '' AND delivery_sequence = 0
- AND delivery_turn_id = '' AND delivery_outcome = ''`), generation.CommittedAt, generation.CommittedAt,
-		generation.SessionID, generation.IncarnationID, expectedGeneration)
-	return err
-}
-
 // Authenticated native retirement needs an exact resolved source fence or a
 // complete authorized continuation ancestry before crossing historical generations.
 func (r *Repository) hasResolvedContextContinuationNoticeTx(ctx context.Context, tx *sql.Tx, recovery models.AgentDeliveryRecovery, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
