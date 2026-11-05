@@ -38,6 +38,14 @@ func (f *fakeInboxTasks) AuthorizeWorkspaceScope(ctx context.Context, _ string, 
 	return f.authzErr
 }
 
+func (f *fakeInboxTasks) AuthorizeTaskScope(context.Context, string, authz.Scope) error {
+	return f.authzErr
+}
+
+func (f *fakeInboxTasks) AuthorizeTaskSessionPromptAccess(context.Context, string, string) error {
+	return f.authzErr
+}
+
 func (f *fakeInboxTasks) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
 	if t, ok := f.tasks[id]; ok {
 		return t, nil

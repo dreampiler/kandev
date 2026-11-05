@@ -28,6 +28,12 @@ const clarificationRequestTypeLiteral = "'clarification_request'"
 // a terminal session's current-turn bundle is expired by the lifecycle, not
 // unanswered, while an older turn's bundle stays unanswered after the session
 // ends because a late answer can still reach the task.
+//
+// The design's Selection states each rejection clause over the bundle's rows,
+// so the parent-question exclusion is aggregated over the bundle like the
+// resolvable-question-id and closed/merged clauses: a bundle carrying any
+// autopilot parent-question row is excluded whole, not merely stripped of that
+// row.
 func unansweredBundlesExpr(drv string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
@@ -51,18 +57,19 @@ func unansweredBundlesExpr(drv string) string {
 				MIN(COALESCE(m.turn_id, '')) AS turn_id,
 				MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
 				MAX(CASE WHEN %[3]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id,
+				MAX(CASE WHEN NOT (%[6]s) THEN 1 ELSE 0 END) AS has_parent_question,
 				MAX(CASE WHEN COALESCE(%[4]s, '') <> '' OR COALESCE(%[5]s, '') <> '' THEN 1 ELSE 0 END) AS is_closed
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = %[8]s
 			  AND COALESCE(%[1]s, '') <> ''
-			  AND %[6]s
 			GROUP BY %[1]s, m.task_session_id
 		) g
 		JOIN tasks t ON t.id = g.task_id
 		JOIN workspaces w ON w.id = t.workspace_id
 		WHERE g.has_pending = 1
 		  AND g.has_missing_question_id = 0
+		  AND g.has_parent_question = 0
 		  AND g.is_closed = 0
 		  AND t.archived_at IS NULL
 		  AND w.clarification_unanswered_inbox_enabled = TRUE
@@ -224,6 +231,9 @@ func (r *Repository) CloseUnansweredClarificationBundle(
 	patch, err := unansweredClosePatch(closeReq)
 	if err != nil {
 		return nil, err
+	}
+	if closeReq.Reason == models.ClarificationClosedAnsweredLate {
+		return r.closeUnansweredWithAdmission(ctx, pendingID, closeReq, patch)
 	}
 	return r.patchUnansweredBundle(ctx, pendingID, patch)
 }

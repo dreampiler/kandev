@@ -157,6 +157,13 @@ func TestUnansweredLateAnswerClosesOnlyThatQuestion(t *testing.T) {
 	seedUnansweredWorkspace(t, repo, "ws-1", true, 14)
 	seedSupersededQuestion(t, repo, "ws-1", "task-a", "pending-a", unansweredBase)
 	seedSupersededQuestion(t, repo, "ws-1", "task-b", "pending-b", unansweredBase.Add(time.Second))
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "late-message-1", TaskID: "task-a", TaskSessionID: "session-task-a",
+		TurnID: "task-a-turn-090100", AuthorType: models.MessageAuthorUser,
+		Type: models.MessageTypeMessage, Content: "A late answer",
+	}); err != nil {
+		t.Fatalf("CreateMessage(late answer): %v", err)
+	}
 
 	answeredAt := unansweredBase.Add(30 * time.Minute)
 	closed, err := repo.CloseUnansweredClarificationBundle(ctx, "pending-a", models.CloseUnansweredClarification{

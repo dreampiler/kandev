@@ -1,10 +1,15 @@
 package models
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// ErrUnansweredAdmissionUnknown means no existing receipt proves the named
+// late-answer message was admitted for the requested task and session.
+var ErrUnansweredAdmissionUnknown = errors.New("late answer admission could not be confirmed")
 
 // Workspace defaults and bounds for the unanswered-clarification inbox.
 const (

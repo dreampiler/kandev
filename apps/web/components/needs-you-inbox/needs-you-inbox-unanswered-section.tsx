@@ -22,6 +22,7 @@ export function selectActiveWorkspaceUnansweredInboxEnabled(state: AppState): bo
 function useUnansweredList(workspaceId: string | null, enabled: boolean, listRevision: number) {
   const [status, setStatus] = useState<UnansweredStatus>("idle");
   const [bundles, setBundles] = useState<ClarificationInboxUnansweredBundle[]>([]);
+  const [bundlesWorkspaceId, setBundlesWorkspaceId] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const generationRef = useRef(0);
 
@@ -29,6 +30,7 @@ function useUnansweredList(workspaceId: string | null, enabled: boolean, listRev
     const generation = ++generationRef.current;
     if (!workspaceId || !enabled) {
       setBundles([]);
+      setBundlesWorkspaceId(null);
       setHasMore(false);
       setStatus("idle");
       return;
@@ -38,6 +40,7 @@ function useUnansweredList(workspaceId: string | null, enabled: boolean, listRev
       const page = await listUnansweredClarificationInbox(workspaceId, { cache: "no-store" });
       if (generationRef.current !== generation) return;
       setBundles(page.enabled ? page.bundles : []);
+      setBundlesWorkspaceId(workspaceId);
       setHasMore(Boolean(page.enabled && page.next_cursor));
       setStatus("ready");
     } catch {
@@ -52,7 +55,12 @@ function useUnansweredList(workspaceId: string | null, enabled: boolean, listRev
     void load();
   }, [load, listRevision]);
 
-  return { status, bundles, hasMore, load };
+  // Only the current workspace's rows are ever shown. The active workspace can
+  // change between a fetch and its result, so a bundle is rendered only while
+  // the workspace it was read for is still the active one; otherwise a switch
+  // would briefly surface the previous workspace's questions and their actions.
+  const scoped = bundlesWorkspaceId === workspaceId;
+  return { status, bundles: scoped ? bundles : [], hasMore: scoped && hasMore, load };
 }
 
 /**

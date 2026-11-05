@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/authz"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
 
@@ -20,6 +22,13 @@ type unansweredInboxStore interface {
 	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 	ListUnansweredClarificationBundles(ctx context.Context, opts taskmodels.ListUnansweredClarificationsOptions) (*taskmodels.ClarificationBundlePage, error)
 	CloseUnansweredClarificationBundle(ctx context.Context, pendingID string, closeReq taskmodels.CloseUnansweredClarification) ([]*taskmodels.Message, error)
+}
+
+// Shared question metadata is not a per-user inbox sidecar: changing it
+// requires the existing task-write or session-prompt authority for the action.
+type unansweredActionAuthorizer interface {
+	AuthorizeTaskScope(context.Context, string, authz.Scope) error
+	AuthorizeTaskSessionPromptAccess(context.Context, string, string) error
 }
 
 const (
@@ -195,7 +204,8 @@ func isTerminalSessionState(state taskmodels.TaskSessionState) bool {
 // closes the question without sending an answer.
 func (h *Handlers) httpCloseInboxUnanswered(c *gin.Context) {
 	pendingID := c.Param("pendingID")
-	if _, _, ok := h.authorizeUnansweredBundle(c, pendingID); !ok {
+	_, taskID, ok := h.authorizeUnansweredBundle(c, pendingID)
+	if !ok || !h.authorizeUnansweredAction(c, taskID, "") {
 		return
 	}
 	h.closeInboxUnanswered(c, pendingID, taskmodels.CloseUnansweredClarification{
@@ -230,10 +240,40 @@ func (h *Handlers) httpLateAnswerInboxUnanswered(c *gin.Context) {
 	if body.SessionID != sessionID && !h.validateSendToTaskTarget(c, sessionID, taskID, body.SessionID) {
 		return
 	}
+	if !h.authorizeUnansweredAction(c, taskID, body.SessionID) {
+		return
+	}
 	h.closeInboxUnanswered(c, pendingID, taskmodels.CloseUnansweredClarification{
 		Reason: taskmodels.ClarificationClosedAnsweredLate, At: h.now(),
 		MessageID: body.MessageID, SessionID: body.SessionID,
 	})
+}
+
+func (h *Handlers) authorizeUnansweredAction(c *gin.Context, taskID, sessionID string) bool {
+	authorizer, ok := h.inboxTasks.(unansweredActionAuthorizer)
+	if !ok {
+		respondInboxError(c, http.StatusServiceUnavailable, errUnansweredNotAvailable)
+		return false
+	}
+	var err error
+	if sessionID == "" {
+		err = authorizer.AuthorizeTaskScope(c.Request.Context(), taskID, authz.ScopeTaskWrite)
+	} else {
+		err = authorizer.AuthorizeTaskSessionPromptAccess(c.Request.Context(), taskID, sessionID)
+	}
+	if err == nil {
+		return true
+	}
+	switch {
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		respondInboxError(c, http.StatusNotFound, errClarificationRequestNotFound)
+	case errors.Is(err, service.ErrForbidden):
+		respondInboxError(c, http.StatusForbidden, "insufficient permissions")
+	default:
+		h.logger.Error("failed to authorize unanswered question action", zap.Error(err))
+		respondInboxError(c, http.StatusInternalServerError, errClarificationInternal)
+	}
+	return false
 }
 
 // validateSendToTaskTarget admits a late answer delivered to a session other
@@ -282,6 +322,10 @@ func (h *Handlers) authorizeUnansweredBundle(c *gin.Context, pendingID string) (
 func (h *Handlers) closeInboxUnanswered(c *gin.Context, pendingID string, closeReq taskmodels.CloseUnansweredClarification) {
 	closed, err := h.unanswered.CloseUnansweredClarificationBundle(c.Request.Context(), pendingID, closeReq)
 	if err != nil {
+		if errors.Is(err, taskmodels.ErrUnansweredAdmissionUnknown) {
+			c.JSON(http.StatusConflict, inboxConflictBody{Error: "late answer admission could not be confirmed", Code: "late_answer_not_admitted"})
+			return
+		}
 		h.logger.Error(errUnansweredWrite, zap.String("pending_id", pendingID), zap.Error(err))
 		respondInboxError(c, http.StatusInternalServerError, errUnansweredWrite)
 		return

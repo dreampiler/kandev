@@ -142,10 +142,11 @@ function unansweredInboxEnabled(storeApi: StoreApi): boolean {
 // already closed) is rejected server-side without side effects.
 async function recordLateAnswer(
   storeApi: StoreApi,
+  enabled: boolean,
   pendingId: string | null,
   admission: { messageId: string; sessionId: string },
 ) {
-  if (!pendingId || !unansweredInboxEnabled(storeApi)) return;
+  if (!enabled || !pendingId) return;
   try {
     await markClarificationInboxLateAnswer(pendingId, admission);
     storeApi.getState().bumpNeedsYouInboxRefreshTick();
@@ -216,6 +217,16 @@ function snapshotAttachments(snapshot: LateClarificationSnapshot) {
   );
 }
 
+function clearInFlightWhenSettled(
+  record: LateAdmissionRecord,
+  delivery: Promise<MessageAdmissionOutcome>,
+) {
+  const clear = () => {
+    if (record.inFlight === delivery) record.inFlight = null;
+  };
+  void delivery.then(clear, clear);
+}
+
 /**
  * Sends a late answer as an ordinary message. The target defaults to the
  * question's own session; `targetSessionId` is an explicit alternative the
@@ -278,6 +289,8 @@ export function useLateClarificationMessage(
         answers: snapshot.answers.slice(),
       };
       updateRecordState(admissionKey, { status: "sending", snapshot: admissionSnapshot });
+      // Capture workspace enablement before asynchronous admission.
+      const closeUnanswered = unansweredInboxEnabled(storeApi);
       const delivery = (async () => {
         try {
           await hydrateSourceSession({
@@ -295,7 +308,7 @@ export function useLateClarificationMessage(
             throw new MessageSendError("late-answer-admission-failed", t("task:lateAnswerFailed"));
           }
           updateRecordState(admissionKey, { status: outcome, snapshot: admissionSnapshot });
-          await recordLateAnswer(storeApi, pendingId, {
+          await recordLateAnswer(storeApi, closeUnanswered, pendingId, {
             messageId: record.clientMessageId,
             sessionId,
           });
@@ -310,14 +323,7 @@ export function useLateClarificationMessage(
         }
       })();
       record.inFlight = delivery;
-      void delivery.then(
-        () => {
-          if (record.inFlight === delivery) record.inFlight = null;
-        },
-        () => {
-          if (record.inFlight === delivery) record.inFlight = null;
-        },
-      );
+      clearInFlightWhenSettled(record, delivery);
       return delivery;
     },
     [handleSendMessageWithOutcome, sessionId, storeApi, t, taskId],
