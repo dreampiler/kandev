@@ -24,7 +24,7 @@ func (h *Handler) handleUsagePreview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid usage preview"})
 		return
 	}
-	c.JSON(http.StatusOK, h.acpExecutor.PreviewExecutionUsage(c.Request.Context(), &request))
+	c.JSON(http.StatusOK, h.usageExecutor.PreviewExecutionUsage(c.Request.Context(), &request))
 }
 
 func (e *ACPInferenceExecutor) PreviewExecutionUsage(ctx context.Context, request *UsagePreviewRequest) *usage.ExecutionUsageReport {
