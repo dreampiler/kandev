@@ -159,6 +159,20 @@ Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
 
+## OpenCode period reset
+
+When the existing OpenCode period usage-limit rule matches, a relative duration
+on its sole matching line can supply a missing reset time only when the
+diagnostic observation time is known. The result is marked inferred; explicit
+structured or dated reset times keep precedence. Unrelated lines, multiple
+matching lines or resets, incomplete or unsupported units, and overflow leave
+the relative reset unknown without changing the failure classification.
+
+OpenCode stderr records whether the original diagnostic was a single line
+before sanitization. Routing retains the observation time and suppresses only
+OpenCode relative-reset derivation when that evidence is absent. Other provider
+timing, candidate order, and prompt replay behavior remain unchanged.
+
 ## OpenCode admission refusal
 
 `AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11` adds

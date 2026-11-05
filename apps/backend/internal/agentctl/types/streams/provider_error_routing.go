@@ -7,9 +7,15 @@ import "github.com/kandev/kandev/internal/agent/runtime/routingerr"
 // Legacy message-only errors remain valid inputs; incomplete diagnostics never
 // lend their metadata authority to an unrelated terminal message.
 func (e *ProviderError) RoutingInput(phase routingerr.Phase, agentID, message string) routingerr.Input {
-	in := routingerr.Input{Phase: phase, ProviderID: agentID, Stderr: message}
+	in := routingerr.Input{
+		Phase: phase, ProviderID: agentID, Stderr: message,
+		OpenCodeRelativeResetUntrusted: agentID == "opencode-acp",
+	}
 	if e == nil {
 		return in
+	}
+	if agentID == "opencode-acp" && e.DiagnosticSingleLine {
+		in.OpenCodeRelativeResetUntrusted = false
 	}
 	if e.Message != "" {
 		in.Stderr = e.Message

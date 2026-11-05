@@ -182,10 +182,13 @@ type Input struct {
 	// ResetHintDerivationDisabled retains unknown streamed timing without
 	// preventing a caller from supplying a later explicit ResetHint.
 	ResetHintDerivationDisabled bool
-	OccurredAt                  time.Time // observation time for this provider diagnostic
-	Stderr                      string
-	Stdout                      string
-	ManagedRuntimePackageSpec   string // trusted exact package from the managed runtime command
+	// OpenCodeRelativeResetUntrusted marks a sanitized diagnostic without
+	// evidence that its original message occupied a single line.
+	OpenCodeRelativeResetUntrusted bool
+	OccurredAt                     time.Time // observation time for this provider diagnostic
+	Stderr                         string
+	Stdout                         string
+	ManagedRuntimePackageSpec      string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -227,7 +230,7 @@ func deriveLimitTiming(e *Error, in Input) {
 			e.ResetHintInferred = hint != nil
 		}
 		if hint == nil {
-			hint = parseRelativeResetHintAt(text, observedAt)
+			hint = relativeResetHintForInput(e, in, text, observedAt)
 		}
 		if hint != nil {
 			e.ResetHint = hint
@@ -238,6 +241,18 @@ func deriveLimitTiming(e *Error, in Input) {
 		// replacement. Only the line that matched the signature can supply it.
 		e.ResetHint = parseOpenCodeCapacityResetHintAt(in.Stderr+"\n"+in.Stdout, observedAt)
 	}
+}
+
+func relativeResetHintForInput(e *Error, in Input, text string, observedAt time.Time) *time.Time {
+	if in.ProviderID != "opencode-acp" {
+		return parseRelativeResetHintAt(text, observedAt)
+	}
+	if e.ClassifierRule != openCodePeriodUsageRule || in.OpenCodeRelativeResetUntrusted {
+		return nil
+	}
+	hint := openCodePeriodResetAt(text, in.OccurredAt)
+	e.ResetHintInferred = hint != nil
+	return hint
 }
 
 func classify(in Input) *Error {
