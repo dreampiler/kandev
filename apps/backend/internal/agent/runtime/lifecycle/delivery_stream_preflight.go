@@ -74,7 +74,7 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 // processor waits for committed authority before writing receipts or acknowledgments.
 func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
 	stream := status.Stream
-	if !execution.deliveryBootstrap.Load() || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
+	if execution.ForceContextContinuation || !execution.deliveryBootstrap.Load() || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
 		execution.DeliveryHarnessGeneration != 1 || stream == nil || stream.FirstRetained != 1 ||
 		stream.Acknowledged != 0 || status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
 		return false
