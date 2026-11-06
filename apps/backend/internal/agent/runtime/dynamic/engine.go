@@ -76,9 +76,10 @@ type Engine struct {
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
 	// same generation.
-	retryClaims  map[string]int64
-	orderedTiers bool
-	tierPick     func(int) int
+	retryClaims     map[string]int64
+	orderedTiers    bool
+	tierPick        func(int) int
+	tierPreviewPick func(int) int
 }
 
 func NewEngine(options ...EngineOption) *Engine {

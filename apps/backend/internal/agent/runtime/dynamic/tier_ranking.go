@@ -19,6 +19,11 @@ func WithTierRandomPick(pick func(int) int) EngineOption {
 	return func(e *Engine) { e.tierPick = pick }
 }
 
+// WithTierPreviewPick supplies an independent picker for read-only previews.
+func WithTierPreviewPick(pick func(int) int) EngineOption {
+	return func(e *Engine) { e.tierPreviewPick = pick }
+}
+
 type rankedTierRow struct {
 	candidate Candidate
 	entry     TierPreviewEntry
@@ -198,6 +203,11 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 		return preview, err
 	}
 	unavailable := e.tierAvailability(profile, preview.ObservedAt)
+	pick := e.tierPreviewPick
+	if pick == nil {
+		seed := uint64(preview.ObservedAt.UnixNano())
+		pick = rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)).IntN
+	}
 	var history map[string]int64
 	var loaded bool
 	for index, tier := range tiers {
@@ -212,7 +222,7 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 		}
 		rows := rankTierRows(tier, index+1, nil, "", unavailable, history, preview.ObservedAt)
 		if tier.mode == tierModeRandom {
-			promoteRandomTierRow(rows, e.tierPick)
+			promoteRandomTierRow(rows, pick)
 		}
 		preview.appendTierRows(rows, unreached)
 	}
