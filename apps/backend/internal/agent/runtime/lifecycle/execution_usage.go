@@ -7,6 +7,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/usage"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // SetProviderUsageLimitsEnabled is installed before the manager starts. OFF
@@ -16,13 +17,13 @@ func (m *Manager) SetProviderUsageLimitsEnabled(enabled bool) {
 	m.sessionManager.providerUsageLimits = enabled
 }
 
-func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, agentArgs []string, env map[string]string) error {
+func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Client, execution *AgentExecution, agentArgs []string, env map[string]string, delivery *agentctltypes.ProjectMCPDelivery) error {
 	if !m.providerUsageLimits {
-		return client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper)
+		return client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper)
 	}
 	policy := &usage.ExecutionUsagePolicy{ProfileID: execution.AgentProfileID, AgentID: execution.AgentID, ExecutorType: execution.ExecutorType}
 	usage.ApplySelectedUsage(ctx, policy)
-	return client.ConfigureAgentWithUsage(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, execution.LaunchWrapper)
+	return client.ConfigureAgentWithUsageAndProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, delivery, execution.LaunchWrapper)
 }
 
 // ReadProfileExecutionUsage observes existing native actors only. Session

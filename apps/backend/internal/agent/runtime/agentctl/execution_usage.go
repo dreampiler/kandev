@@ -14,7 +14,7 @@ import (
 )
 
 func (c *Client) ConfigureAgentWithUsage(ctx context.Context, command string, args []string, env map[string]string, continueCommand string, continueArgs []string, policy *usage.ExecutionUsagePolicy, wrapper ...launchwrapper.Spec) error {
-	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, policy, wrapper...)
+	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, policy, nil, wrapper...)
 }
 
 func (c *Client) ReadExecutionUsage(ctx context.Context, model string) (*usage.ExecutionUsageReport, error) {
