@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -30,8 +31,9 @@ import (
 
 // Client communicates with agentctl via HTTP and WebSocket
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	updateStage atomic.Pointer[updateStreamStage]
+	baseURL     string
+	httpClient  *http.Client
 	// longRunningHTTPClient is used for long-running operations like inference prompts.
 	// It has a much longer timeout (5 minutes) to accommodate LLM API calls.
 	longRunningHTTPClient *http.Client
