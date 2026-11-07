@@ -1455,6 +1455,7 @@ type RecoverSessionOptions struct {
 	IdempotencyKey              string
 	SettingsPolicy              executor.ResumeSettingsPolicy
 	ErrorStamp                  string
+	WorkspaceOnly               bool
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1505,6 +1506,9 @@ func (s *Service) RecoverSessionWithOptions(
 		if busy, busyErr := s.automaticTaskHasOtherExecution(ctx, taskID, sessionID); busy || busyErr != nil {
 			return nil, errors.New("automatic history recovery cannot replace another active task execution")
 		}
+	}
+	if options.WorkspaceOnly {
+		return s.recoverInventoryMetadataOnly(ctx, taskID, sessionID, action, options.IdempotencyKey)
 	}
 	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain

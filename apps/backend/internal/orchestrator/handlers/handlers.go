@@ -335,6 +335,7 @@ type wsRecoverSessionRequest struct {
 	IdempotencyKey              string                        `json:"idempotency_key,omitempty"`
 	ErrorStamp                  string                        `json:"error_stamp,omitempty"`
 	SettingsPolicy              executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	WorkspaceOnly               bool                          `json:"workspace_only,omitempty"`
 }
 
 type wsGetWorkspaceRecoveryStatusRequest struct {
@@ -511,6 +512,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		IdempotencyKey:              strings.TrimSpace(req.IdempotencyKey),
 		SettingsPolicy:              req.SettingsPolicy,
 		ErrorStamp:                  req.ErrorStamp,
+		WorkspaceOnly:               req.WorkspaceOnly,
 	})
 	if err != nil {
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
