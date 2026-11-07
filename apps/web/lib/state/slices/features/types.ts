@@ -33,6 +33,7 @@ export const defaultFeatureFlags = {
   replacedSessionReclaim: false,
   sessionMemoryGuard: false,
   agentBackgroundWork: false,
+  childStallAlerts: false,
   opencodePlugin: false,
   officeAgentErrorSessionVerdict: false,
 } as const;
