@@ -90,6 +90,10 @@ type ServiceConfig struct {
 	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
 	// the session that takes over the primary role.
 	TerminalPrimaryQueueHandoff bool
+
+	// ResumeQueueAfterSilentRestore re-enables Auto-run that a successful
+	// silent restart restore paused.
+	ResumeQueueAfterSilentRestore bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int

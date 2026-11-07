@@ -632,6 +632,10 @@ type FeaturesConfig struct {
 	// explicit session target.
 	TerminalPrimaryQueueHandoff bool `mapstructure:"terminal_primary_queue_handoff" json:"terminalPrimaryQueueHandoff"`
 
+	// ResumeQueueAfterSilentRestore turns Auto-run back on after a successful
+	// silent restart restore that paused it. Off in every shipped profile.
+	ResumeQueueAfterSilentRestore bool `mapstructure:"resume_queue_after_silent_restore" json:"resumeQueueAfterSilentRestore"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

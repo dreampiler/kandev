@@ -111,6 +111,7 @@ func provideOrchestrator(
 	serviceCfg.ReplacedSessionReclaim = cfg != nil && cfg.Features.ReplacedSessionReclaim
 	serviceCfg.SessionMemoryGuardEnabled = cfg != nil && cfg.Features.SessionMemoryGuard
 	serviceCfg.TerminalPrimaryQueueHandoff = cfg != nil && cfg.Features.TerminalPrimaryQueueHandoff
+	serviceCfg.ResumeQueueAfterSilentRestore = cfg != nil && cfg.Features.ResumeQueueAfterSilentRestore
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)

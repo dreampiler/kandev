@@ -32,6 +32,7 @@ export const defaultFeatureFlags = {
   autoRetryUnsentRequests: false,
   replacedSessionReclaim: false,
   sessionMemoryGuard: false,
+  resumeQueueAfterSilentRestore: false,
   agentBackgroundWork: false,
   childStallAlerts: false,
   opencodePlugin: false,
