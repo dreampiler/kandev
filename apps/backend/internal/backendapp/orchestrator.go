@@ -109,6 +109,7 @@ func provideOrchestrator(
 	serviceCfg.AutoContinueFromHistory = cfg != nil && cfg.Features.AutoContinueFromHistory
 	serviceCfg.AutoRetryUnsentRequests = cfg != nil && cfg.Features.AutoRetryUnsentRequests
 	serviceCfg.ReplacedSessionReclaim = cfg != nil && cfg.Features.ReplacedSessionReclaim
+	serviceCfg.SessionMemoryGuardEnabled = cfg != nil && cfg.Features.SessionMemoryGuard
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)

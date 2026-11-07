@@ -31,6 +31,7 @@ export const defaultFeatureFlags = {
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
   replacedSessionReclaim: false,
+  sessionMemoryGuard: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
   officeAgentErrorSessionVerdict: false,

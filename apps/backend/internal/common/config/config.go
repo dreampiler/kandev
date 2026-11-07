@@ -636,6 +636,11 @@ type FeaturesConfig struct {
 	// sessions otherwise keep running.
 	ReplacedSessionReclaim bool `mapstructure:"replaced_session_reclaim" json:"replacedSessionReclaim"`
 
+	// SessionMemoryGuard holds launches that would add an agent process while
+	// the host is low on available memory or above its commit ceiling. Off in
+	// every shipped profile; launches otherwise follow only the session ceiling.
+	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
+
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
