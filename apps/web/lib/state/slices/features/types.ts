@@ -30,6 +30,7 @@ export const defaultFeatureFlags = {
   autoStartPendingWork: false,
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
+  replacedSessionReclaim: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
   officeAgentErrorSessionVerdict: false,
