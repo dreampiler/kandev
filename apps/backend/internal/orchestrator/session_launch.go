@@ -204,6 +204,10 @@ type LaunchSessionRequest struct {
 	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
 	AutoStart         bool     `json:"auto_start,omitempty"`
 	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
+	// Automatic is server-owned provenance for unattended capacity admission,
+	// including launches an agent requested through Kandev MCP tools. It is
+	// set only by server-side handlers and is not part of the wire request.
+	Automatic bool `json:"-"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -282,11 +286,6 @@ type LaunchSessionRequest struct {
 	// ActivationSource distinguishes passive task opening from an explicit
 	// launch action. An omitted value preserves the existing behavior.
 	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
-	// Automatic marks a launch an agent requested through Kandev MCP tools
-	// rather than a direct user action, so the session ceiling admits it as
-	// automatic instead of as a manual override. It is set only by server-side
-	// handlers and is not part of the wire request.
-	Automatic bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -650,6 +649,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if automaticHistoryAttempt(ctx) != "" {
+		return nil
+	}
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
@@ -1447,6 +1449,8 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
+	// Automatic is server-owned and preserves automatic capacity admission.
+	Automatic                   bool
 	InferenceClosureOperationID string
 	IdempotencyKey              string
 	SettingsPolicy              executor.ResumeSettingsPolicy
@@ -1487,9 +1491,20 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
+	if options.Automatic && ((action != recoveryActionContinueHistory && action != recoveryActionResume) || !s.config.AutoContinueFromHistory || automaticHistoryAttempt(ctx) == "") {
+		return nil, errors.New("automatic history continuation is not authorized by the runtime policy")
+	}
 	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
+	}
+	if options.Automatic && (!session.IsPrimary || session.State == models.TaskSessionStateCompleted || session.State == models.TaskSessionStateCancelled) {
+		return nil, errors.New("automatic history recovery no longer owns the current primary conversation")
+	}
+	if options.Automatic {
+		if busy, busyErr := s.automaticTaskHasOtherExecution(ctx, taskID, sessionID); busy || busyErr != nil {
+			return nil, errors.New("automatic history recovery cannot replace another active task execution")
+		}
 	}
 	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
@@ -1595,6 +1610,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		Automatic:                        options.Automatic,
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
 		Intent:                           IntentResume,
@@ -1609,6 +1625,12 @@ func (s *Service) RecoverSessionWithOptions(
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
 	})
+	if err == nil && action == recoveryActionResume && resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// Capacity admission accepted the request, not the native resume. The
+		// durable replay owns acknowledgement after an execution is ready.
+		resp.InProgress = true
+		return resp, nil
+	}
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
@@ -1643,8 +1665,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationOrigin := launchOriginManual
+	if options.Automatic {
+		continuationOrigin = launchOriginAutomatic
+	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, continuationOrigin,
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,
@@ -2234,6 +2260,9 @@ func (s *Service) persistContinuationCheckpoint(
 	}
 	now := time.Now().UTC()
 	attemptID := uuid.NewString()
+	if automaticID := automaticHistoryAttempt(ctx); automaticID != "" {
+		attemptID = automaticID
+	}
 	if err := store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{
 		ID:                 attemptID,
 		SessionID:          session.ID,
