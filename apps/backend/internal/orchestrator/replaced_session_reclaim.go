@@ -32,11 +32,15 @@ func (s *Service) PromotePrimarySession(ctx context.Context, sessionID string) e
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
 	_, _, err := s.setSessionPrimaryRecordingPrevious(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	if previous != nil {
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
+	}
 	return nil
 }
 
@@ -243,6 +247,8 @@ func (s *Service) setSessionPrimaryRecordingPrevious(ctx context.Context, sessio
 	}
 	unlock := s.lockPrimarySessionReclaimTask(session.TaskID)
 	defer unlock()
+	s.primarySwitchMu.Lock()
+	defer s.primarySwitchMu.Unlock()
 	taskID, previousPrimaryID := s.previousPrimaryForReplacement(ctx, sessionID)
 	claim := s.captureReplacedSessionReclaim(ctx, taskID, previousPrimaryID, sessionID)
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
@@ -260,6 +266,8 @@ func (s *Service) setSessionPrimaryRecordingPrevious(ctx context.Context, sessio
 // stop of the session it promotes.
 func (s *Service) setSessionPrimary(ctx context.Context, sessionID string) error {
 	if !s.config.ReplacedSessionReclaim {
+		s.primarySwitchMu.Lock()
+		defer s.primarySwitchMu.Unlock()
 		return s.repo.SetSessionPrimary(ctx, sessionID)
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -271,6 +279,8 @@ func (s *Service) setSessionPrimary(ctx context.Context, sessionID string) error
 	}
 	unlock := s.lockPrimarySessionReclaimTask(session.TaskID)
 	defer unlock()
+	s.primarySwitchMu.Lock()
+	defer s.primarySwitchMu.Unlock()
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		return err
 	}

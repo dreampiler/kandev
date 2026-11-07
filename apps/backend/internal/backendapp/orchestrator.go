@@ -110,6 +110,7 @@ func provideOrchestrator(
 	serviceCfg.AutoRetryUnsentRequests = cfg != nil && cfg.Features.AutoRetryUnsentRequests
 	serviceCfg.ReplacedSessionReclaim = cfg != nil && cfg.Features.ReplacedSessionReclaim
 	serviceCfg.SessionMemoryGuardEnabled = cfg != nil && cfg.Features.SessionMemoryGuard
+	serviceCfg.TerminalPrimaryQueueHandoff = cfg != nil && cfg.Features.TerminalPrimaryQueueHandoff
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
