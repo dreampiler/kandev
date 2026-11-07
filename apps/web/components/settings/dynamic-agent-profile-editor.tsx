@@ -158,6 +158,8 @@ export function DynamicAgentProfileEditor({
         toggleJoin={state.toggleJoin}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
+        updateCandidateUnclassified={state.updateCandidateUnclassified}
+        applyUnclassifiedToAllCandidates={state.applyUnclassifiedToAllCandidates}
       />
       <DynamicTierPreview
         profileId={isCreating ? undefined : profile.id}

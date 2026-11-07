@@ -9,12 +9,18 @@ import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { AgentProfilePicker } from "@/components/settings/agent-profile-picker";
 import { DynamicPolicyEditor } from "@/components/settings/dynamic-agent-policy-editor";
+import {
+  DynamicUnclassifiedPolicyEditor,
+  DynamicUnclassifiedPolicySummary,
+} from "./dynamic-agent-unclassified-policy-editor";
+import { DynamicUnclassifiedBulkApply } from "./dynamic-agent-unclassified-bulk-apply";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicUnclassifiedPolicy,
 } from "@/lib/types/agent-profile";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 import { DynamicTierSelectionControls } from "./dynamic-tier-selection-controls";
@@ -34,6 +40,8 @@ type DynamicAgentCandidateListProps = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
 };
 
 function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile[]): string {
@@ -55,6 +63,8 @@ export function DynamicAgentCandidateList({
   toggleJoin,
   updateCandidate,
   updateCandidatePolicy,
+  updateCandidateUnclassified,
+  applyUnclassifiedToAllCandidates,
 }: DynamicAgentCandidateListProps) {
   const { t } = useTranslation();
   const tiersEnabled = useAppStore((state) => state.features?.dynamicProfileTiers ?? false);
@@ -73,19 +83,24 @@ export function DynamicAgentCandidateList({
             )}
           </p>
         </div>
-        <AgentProfilePicker
-          profiles={availableProfileOptions}
-          value=""
-          onValueChange={(value) => {
-            if (value) addCandidate(value);
-          }}
-          testId="add-dynamic-candidate"
-          placeholder={t("agents:addDynamicCandidate")}
-          searchPlaceholder={t("agents:searchDynamicCandidates")}
-          emptyMessage={t("agents:noDynamicCandidatesFound")}
-          ariaLabel={t("agents:addDynamicCandidate")}
-          triggerClassName={settingsControlClassName("w-full sm:w-auto")}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <AgentProfilePicker
+            profiles={availableProfileOptions}
+            value=""
+            onValueChange={(value) => {
+              if (value) addCandidate(value);
+            }}
+            testId="add-dynamic-candidate"
+            placeholder={t("agents:addDynamicCandidate")}
+            searchPlaceholder={t("agents:searchDynamicCandidates")}
+            emptyMessage={t("agents:noDynamicCandidatesFound")}
+            ariaLabel={t("agents:addDynamicCandidate")}
+            triggerClassName={settingsControlClassName("w-full sm:w-auto")}
+          />
+          {candidates.length > 0 && (
+            <DynamicUnclassifiedBulkApply onApply={applyUnclassifiedToAllCandidates} />
+          )}
+        </div>
       </div>
 
       {candidates.length === 0 ? (
@@ -171,6 +186,7 @@ export function DynamicAgentCandidateList({
                   onChange={(next) => updateCandidate(index, next)}
                 />
               )}
+              <DynamicUnclassifiedPolicySummary policy={candidate.policies.unclassified} />
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
                 <DynamicPolicyEditor
                   errorClass="transient"
@@ -183,6 +199,10 @@ export function DynamicAgentCandidateList({
                   onChange={(patch) => updateCandidatePolicy(index, "hard", patch)}
                 />
               </div>
+              <DynamicUnclassifiedPolicyEditor
+                policy={candidate.policies.unclassified}
+                onChange={(patch) => updateCandidateUnclassified(index, patch)}
+              />
             </li>
           ))}
         </ol>
