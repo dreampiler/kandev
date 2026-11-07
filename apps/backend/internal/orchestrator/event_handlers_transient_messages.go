@@ -308,7 +308,10 @@ func isUnknownPostStartClassification(classified *routingerr.Error) bool {
 			classified.ClassifierRule == "keyword_context.ambiguous.v1" ||
 			classified.ClassifierRule == "keyword_context.request.v1" ||
 			classified.ClassifierRule == "keyword_context.http.400.context.v1" ||
-			classified.ClassifierRule == "keyword_context.http.400.request.v1")
+			classified.ClassifierRule == "keyword_context.http.400.request.v1" ||
+			((classified.ClassifierRule == "provider.context_length_exceeded.v1" ||
+				classified.ClassifierRule == "provider.catalog.request_rejected.v1") &&
+				classified.Phase == routingerr.PhasePromptSend))
 }
 
 func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {
