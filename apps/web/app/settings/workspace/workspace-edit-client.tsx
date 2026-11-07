@@ -48,6 +48,7 @@ import {
 } from "./workspace-edit-auto-retry-draft";
 import { WorkspaceDynamicRoutingSection } from "@/components/settings/workspaces/workspace-dynamic-routing-card";
 import { WorkspaceUnansweredInboxSettings } from "./workspace-unanswered-inbox-settings";
+import { WorkspaceRuntimeFootprintSection } from "./workspace-runtime-footprint-section";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -587,6 +588,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         form mounts, and a snapshot would freeze the owner out of their own
         workspace.
       */}
+      <WorkspaceRuntimeFootprintSection workspaceId={workspace.id} />
       <WorkspacePlacementCard
         workspaceId={workspace.id}
         unitId={workspace.unit_id}

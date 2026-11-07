@@ -482,6 +482,7 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	runtimeFootprintProvider        RuntimeFootprintProvider
 	workspaceCollaboration          WorkspaceCollaborationBoundary
 	workspaceCollaborationStore     WorkspaceCollaborationStore
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
