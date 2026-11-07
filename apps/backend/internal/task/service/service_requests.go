@@ -255,6 +255,8 @@ type UpdateWorkflowRequest struct {
 	// RequireExplicitAgentProfile opts this workflow into rejecting task
 	// creation when the caller supplies no explicit agent profile selection.
 	RequireExplicitAgentProfile *bool `json:"require_explicit_agent_profile,omitempty"`
+	// Hidden archives (true) or restores (false) the workflow; nil keeps it.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace

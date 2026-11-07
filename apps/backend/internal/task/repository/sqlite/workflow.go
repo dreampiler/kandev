@@ -220,7 +220,7 @@ func normalizeWorkflowStyle(style string) string {
 const workflowSelectColumns = `
 	created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, require_explicit_agent_profile,
 	workflow_template_id, sort_order, hidden, style, source, source_path,
-	created_at, updated_at
+	created_at, updated_at, is_system
 `
 
 type workflowScanner interface {
@@ -231,6 +231,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
 	var workflowTemplateID, agentProfileID, style, source, sourcePath sql.NullString
 	var hidden, requireExplicitAgentProfile int
+	var isSystem sql.NullInt64
 	if err := scanner.Scan(
 		&workflow.CreatedByUserID,
 		&workflow.ID,
@@ -248,11 +249,13 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		&sourcePath,
 		&workflow.CreatedAt,
 		&workflow.UpdatedAt,
+		&isSystem,
 	); err != nil {
 		return nil, err
 	}
 	workflow.Hidden = hidden != 0
 	workflow.RequireExplicitAgentProfile = requireExplicitAgentProfile != 0
+	workflow.IsSystem = isSystem.Valid && isSystem.Int64 != 0
 	if agentProfileID.Valid {
 		workflow.AgentProfileID = agentProfileID.String
 	}
