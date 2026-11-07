@@ -254,7 +254,7 @@ func allowanceProviderFamilies(req agentruntime.ProviderTurnRequest, b snapshotB
 
 func localAllowanceExecution(executor string) bool {
 	switch executor {
-	case hostSourceLocal, legacyLocalPCExecutor, "worktree", "standalone":
+	case hostSourceLocal, legacyLocalPCExecutor, hostSourceWorktree, "standalone":
 		return true
 	}
 	return false
@@ -302,7 +302,7 @@ func allowanceCredentialEnvKey(key string) bool {
 		return true
 	}
 	switch key {
-	case "HOME", "USERPROFILE", "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT",
+	case envHome, envUserProfile, "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT",
 		"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "USAGE_PROXY_VENDOR":
 		return true
 	}

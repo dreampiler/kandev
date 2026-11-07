@@ -24,7 +24,12 @@ import (
 var ErrRemoteRepositoryLocatorUnavailable = errors.New("remote repository locator unavailable")
 
 const legacyLocalPCExecutor = "local_pc"
-const hostSourceLocal = "local"
+const (
+	hostSourceLocal    = "local"
+	hostSourceWorktree = "worktree"
+	envHome            = "HOME"
+	envUserProfile     = "USERPROFILE"
+)
 const hostSourceProvider = "provider"
 
 // workspaceSourceMaterializerRepo is intentionally limited to the durable

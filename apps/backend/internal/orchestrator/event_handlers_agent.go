@@ -14,6 +14,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
@@ -3142,7 +3143,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {
 		routeResult := s.routeDynamicAgentFailureWithEvidence(
-			ctx, data, classifyKanbanFailure(data), nil, true,
+			ctx, data, s.classifyKanbanFailure(data), nil, true,
 		)
 		if routeResult.handled && !routeResult.manualRecovery {
 			return nil
@@ -4125,7 +4126,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if data.Phase == models.LaunchErrorPhaseBootstrap {
 		statusMsg = fmt.Sprintf("Agent startup failed: %s", displayMsg)
@@ -4266,26 +4267,19 @@ func (s *Service) persistRecoveryStatusMessage(
 	return nil
 }
 
-// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
-// diagnostic to the specialized recovery surface. Generic prose and provider
-// diagnostics from other agents retain the existing error card.
+// applyProviderQuotaMetadata promotes validated quota diagnostics to the
+// specialized recovery surface. Generic prose keeps the ordinary error card.
 func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
-	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
-		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
-		!data.ProviderError.Valid() {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
 		return false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: data.AgentID,
-		Stderr:     data.ProviderError.Message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
 	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
 		return false
 	}
 
 	meta["failure_kind"] = "provider_quota_limited"
-	meta["provider_name"] = "OpenCode"
+	meta["provider_name"] = quotaProviderDisplayName(data.AgentID)
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
@@ -4296,6 +4290,27 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+func quotaProviderDisplayName(agentID string) string {
+	switch agentID {
+	case "opencode-acp":
+		return "OpenCode"
+	case "antigravity-acp":
+		return "Antigravity"
+	case "claude-acp":
+		return "Claude"
+	case "codex-acp":
+		return "Codex"
+	case acpcompat.CursorAgentID:
+		return "Cursor"
+	case "copilot-acp":
+		return "Copilot"
+	case "grok-acp":
+		return "Grok"
+	default:
+		return ""
+	}
 }
 
 // applyRecoverableFailureDetail populates the collapsed technical-details
