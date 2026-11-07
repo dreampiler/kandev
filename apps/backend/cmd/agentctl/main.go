@@ -210,6 +210,9 @@ func run(cfg *config.Config, log *logger.Logger) {
 	acpJanitor := shared.NewACPJanitor()
 	acpJanitor.Start(context.Background())
 
+	stopPprof := startPprofListenerIfEnabled(log)
+	defer stopPprof()
+
 	// Create instance manager
 	nativeUsage := usage.NewUsageService()
 	instMgr := instance.NewManager(cfg, log)
