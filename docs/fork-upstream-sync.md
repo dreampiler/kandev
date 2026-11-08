@@ -65,14 +65,26 @@ being opened as separate drafts.
    round.
 6. Replacing the installed build is a separate, approved change.
 
-## Open gap (2026-11-08)
+## Operating gap check (2026-11-09)
 
-The PRs re-implement operating code for upstream review, so `integration`
-does not yet equal the operating line. Against `production` merged onto the
-same `main`, 1,029 files differ: 510 code files with different content, 71
-code files that exist only in the operating line (integrated control UI
-pieces, change-request ledger internals, orchestrator recovery and deferral
-helpers), 85 operating-only test files and 26 operating-only documents.
-Porting each operating-only feature into its line's PR (or deciding to drop
-it) is tracked separately; until then `production-next` is a candidate, not
-a replacement for `production`.
+Every line that the operating line (`production`, c95ee310) added over its
+upstream base and that `production-next` lacks has a recorded class:
+re-implemented by a PR, covered elsewhere, retired upstream, obsolete,
+formatting only, or fork-only. Operating behavior that was missing was ported
+into the PR of its area (or `production-next` for fork-only items), so the
+check finds no missing operating behavior. Lines introduced inside merge
+commits are included. What remains different is listed by class in the
+session notes for 2026-11-08/09.
+
+Deliberate behavior differences from the operating line:
+
+- Inference reconciliation fails closed when an agentctl cannot be read
+  (#5065).
+- Ordered tier retries resume at the furthest tier already tried (#5152); an
+  unlocated chain still restarts at the first tier as before.
+- Provider keyword context stays behind its flag (off, as in the operating
+  line); stream failures keep the operating transport-type attribution through
+  a fork-only change.
+
+`production-next` is the candidate operating line. Replacing the installed
+build is a separate, approved change.
