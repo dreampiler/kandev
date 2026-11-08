@@ -160,6 +160,8 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 
 		DynamicFailedRouteAutoRetryMax:       models.DefaultDynamicFailedRouteAutoRetryMax,
 		ClarificationUnansweredRetentionDays: models.DefaultClarificationUnansweredRetentionDays,
+		WIPSessionlessReleaseEnabled:         false,
+		WIPSessionlessReleaseGraceMinutes:    models.DefaultWIPSessionlessReleaseGraceMinutes,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -233,6 +235,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	if err := validateClarificationUnansweredRetention(req.ClarificationUnansweredRetentionDays); err != nil {
 		return nil, err
+	}
+	if req.WIPSessionlessReleaseGraceMinutes != nil && *req.WIPSessionlessReleaseGraceMinutes <= 0 {
+		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceWIPReleaseGraceInvalid)
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
