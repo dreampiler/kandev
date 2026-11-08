@@ -33,6 +33,7 @@ export const defaultFeatureFlags = {
   replacedSessionReclaim: false,
   sessionMemoryGuard: false,
   resumeQueueAfterSilentRestore: false,
+  terminalPrimaryQueueHandoff: false,
   agentBackgroundWork: false,
   childStallAlerts: false,
   opencodePlugin: false,

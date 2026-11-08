@@ -1961,6 +1961,9 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 ) error {
+	if env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
 		return nil
 	}
@@ -2131,13 +2134,21 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if running != nil && running.ExecutionProfileID != "" &&
 			running.ExecutionProfileID != agentProfileID {
 			if running.AgentExecutionID != "" {
+				// Do not stop the old runtime unless the replacement owns the
+				// exact teardown and can preserve the incoming turn.
+				if !e.registerReplacementStopOwner(ctx, sessionID, running.AgentExecutionID) {
+					return nil, fmt.Errorf("%w: replacement stop ownership is unavailable", ErrExecutionAlreadyRunning)
+				}
 				if err := e.agentManager.StopAgentWithReason(
 					ctx, running.AgentExecutionID, "execution profile changed", true,
 				); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {
 					return nil, fmt.Errorf("stop previous execution profile: %w", err)
 				}
 			}
-			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			// Stopping the agent can already have removed the row; the profile
+			// binding is cleared either way.
+			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil &&
+				!errors.Is(err, models.ErrExecutorRunningNotFound) {
 				return nil, fmt.Errorf("clear previous execution profile: %w", err)
 			}
 			running = nil
