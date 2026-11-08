@@ -59,6 +59,12 @@ func TestPluginAutomationHistoryAdapter(t *testing.T) {
 	if err := service.Store().CreateTrigger(ctx, webhook); err != nil {
 		t.Fatal(err)
 	}
+	for index, trigger := range []*automation.AutomationTrigger{scheduled, webhook} {
+		if _, err := database.Exec(`UPDATE automation_triggers SET created_at = ? WHERE id = ?`,
+			base.Add(time.Duration(index)*time.Minute), trigger.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	definitions, err := adapter.ListAutomationHistoryDefinitions(ctx, "ws-1", "", nil, nil, 10)
 	if err != nil || len(definitions.Items) != 1 {

@@ -20,6 +20,11 @@ func TestListRunPageReturnsOlderStandaloneRunsByStableCursor(t *testing.T) {
 			Status: RunStatusSucceeded, CreatedAt: base.Add(time.Duration(index) * time.Minute),
 		}
 		require.NoError(t, store.CreateRun(ctx, run))
+		// CreateRun owns its creation timestamp; explicitly seed the cursor
+		// fixture instead of relying on wall-clock resolution between inserts.
+		_, err := store.db.Exec(`UPDATE automation_runs SET created_at = ? WHERE id = ?`,
+			base.Add(time.Duration(index)*time.Minute), id)
+		require.NoError(t, err)
 	}
 
 	first, err := store.ListRunPage(ctx, automation.ID, "", 2)
