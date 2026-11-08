@@ -99,7 +99,7 @@ func (r *Repository) lockAgentDeliveryRecoveryOwnerTx(
 	sessionQuery := `SELECT COALESCE(er.agent_execution_id, ''), ts.queue_incarnation_id, ts.metadata
 		FROM task_sessions ts LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		sessionQuery += " FOR UPDATE OF ts"
+		sessionQuery += forUpdateOfTaskSessions
 	}
 	var executionID string
 	owner := &agentDeliveryRecoveryTxOwner{}
@@ -252,7 +252,7 @@ func agentDeliveryRecoveryMayAdvance(current, incoming models.AgentDeliveryRecov
 }
 
 func recoveryPhaseRank(phase string) int {
-	if phase == models.AgentDeliveryRecoverySettled {
+	if phase == models.AgentDeliveryRecoverySettled || phase == models.AgentDeliveryRecoveryContinued || phase == models.AgentDeliveryRecoveryRestored {
 		return 4
 	}
 	if phase == models.AgentDeliveryRecoveryRecovered {

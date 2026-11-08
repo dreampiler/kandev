@@ -1483,7 +1483,8 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // the backend route-action handler has claimed the successor generation. It
 // owns the predecessor shutdown, continuation persistence, successor launch,
 // and final launch error surface so the UI never has to issue a second launch
-// request.
+// request. An unresolved recovery fence retains the selected generation for
+// explicit session recovery instead of replaying the predecessor prompt.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
 	if automaticRouteActionFromContext(ctx) {
 		return s.launchDynamicRouteAction(ctx, sessionID, launchOriginAutomatic)
@@ -1521,6 +1522,18 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	if origin == launchOriginManual && isPendingRecoveryRouteClaim(session) {
+		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if block != nil {
+			// Selection is accepted, but the fence still owns prompt admission.
+			// Keep the claim for explicit recovery without replaying old work.
+			succeeded = true
+			return nil
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
@@ -1830,7 +1843,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	launchMode := dynamicRelaunchLaunchModeCreated
 	if officeErr != nil || isOfficeTask {
 		launchMode = dynamicRelaunchLaunchModePrepared
-	} else if origin == launchOriginManual {
+	} else if origin == launchOriginManual && s.dynamicRelaunchHasResumeSource(ctx, data.SessionID) {
 		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
@@ -1849,7 +1862,17 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	return task, session, prompt, launchMode, true
 }
 
+// stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
+// reports whether the successor may launch. An absent predecessor counts as
+// stopped: an empty execution ID (the restart orphan sweep can leave a route
+// with no recorded execution) or a runtime that confirms the execution is gone.
+// Every other stop error keeps the relaunch from launching over an unresolved
+// teardown.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if agentExecutionID == "" {
+		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
+		return true
+	}
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
 	}

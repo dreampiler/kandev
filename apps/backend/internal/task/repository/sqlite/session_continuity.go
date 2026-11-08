@@ -237,6 +237,9 @@ func (r *Repository) commitHarnessSessionGeneration(
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
 	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}
@@ -330,6 +333,9 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
+	if outcome == contextContinuationOutcome {
+		return r.completeContextContinuationAttempt(ctx, id, completedAt)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_restore_attempts SET outcome = ?, completed_at = ? WHERE id = ?`), outcome, completedAt, id)
 	if err != nil {
