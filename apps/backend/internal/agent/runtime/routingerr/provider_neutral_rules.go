@@ -46,7 +46,7 @@ var providerNeutralRules = append(providerCatalogRules, []rule{
 	// Context rejection is a prompt result; startup and later phases retain
 	// their existing classification rather than gaining a new recovery route.
 	mustRule(
-		"provider.context_length_exceeded.v1",
+		providerContextLengthRule,
 		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
 		CodeAgentRuntime,
 		ConfHigh,
@@ -73,12 +73,15 @@ var providerNeutralRules = append(providerCatalogRules, []rule{
 	),
 }...)
 
+// providerContextLengthRule is the provider-neutral context-length rule id.
+const providerContextLengthRule = "provider.context_length_exceeded.v1"
+
 func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
-		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
+		if r.id == providerContextLengthRule && phase != PhasePromptSend {
 			continue
 		}
 		if r.pattern.MatchString(text) {

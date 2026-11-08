@@ -65,7 +65,6 @@ func InstallKillOnCloseJobForSuspendedProcess(pid int) (KillOnCloseJob, error) {
 
 // InstallNamedKillOnCloseJobForSuspendedProcess retains the job's kernel name
 // so a saved runtime owner can inspect containment after its launcher exits.
-// An empty name creates an anonymous job.
 func InstallNamedKillOnCloseJobForSuspendedProcess(pid int, name string) (KillOnCloseJob, error) {
 	job, err := createNamedKillOnCloseJob(name)
 	if err != nil {

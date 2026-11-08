@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
@@ -177,14 +176,6 @@ func windowsOriginalOwnerGone(state State) bool {
 	return state == StateExited || state == StateReused
 }
 
-func validWindowsJobName(name string) bool {
-	if !strings.HasPrefix(name, WindowsJobNamePrefix) {
-		return false
-	}
-	_, err := uuid.Parse(strings.TrimPrefix(name, WindowsJobNamePrefix))
-	return err == nil
-}
-
 func openWindowsOwnedJob(name string, access uint32) (windows.Handle, error) {
 	if !validWindowsJobName(name) {
 		return 0, ErrUnverifiableIdentity
@@ -223,13 +214,6 @@ func processInWindowsOwnedJob(process windows.Handle, name string) bool {
 	var member int32
 	ok, _, _ := isProcessInJob.Call(uintptr(process), uintptr(job), uintptr(unsafe.Pointer(&member)))
 	return ok != 0 && member != 0
-}
-
-// takenWindowsJobName returns the job name taken at startup, or empty.
-func takenWindowsJobName() string {
-	ownWindowsJobName.Lock()
-	defer ownWindowsJobName.Unlock()
-	return ownWindowsJobName.name
 }
 
 // OwnedGroupTerminated is unverifiable on Windows, which has no POSIX process groups.

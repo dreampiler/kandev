@@ -31,13 +31,11 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 		return fmt.Errorf("installChildLifecycle: process not started")
 	}
 
-	// The named job lets a later owner prove or contain this agentctl tree
-	// after this launcher has exited.
-	job, err := winproc.InstallNamedKillOnCloseJobForSuspendedProcess(cmd.Process.Pid, l.processIdentity.WindowsJobName)
+	jobName := l.processIdentity.WindowsJobName
+	job, err := winproc.InstallNamedKillOnCloseJobForSuspendedProcess(cmd.Process.Pid, jobName)
 	if err != nil {
 		return err
 	}
-
 	// Defensive: if a previous lifecycle was somehow installed without a
 	// matching release (unexpected restart, future code change), close the
 	// stale handle instead of silently leaking it. Doing the swap *after* the

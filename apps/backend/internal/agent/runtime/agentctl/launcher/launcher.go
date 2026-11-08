@@ -375,6 +375,9 @@ func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
 	return overrides, nil
 }
 
+// captureProcessIdentity is replaced by tests of the capture-failure path.
+var captureProcessIdentity = processidentity.Capture
+
 // newWindowsJobName returns the name of the launcher-owned Job Object for one
 // Windows launch, and empty on other platforms, where no job is created.
 func newWindowsJobName(goos string) string {
@@ -405,7 +408,7 @@ func withWindowsJobName(env []string, jobName string) []string {
 // fails the record keeps no PID or birth token, so cleanup fails closed, but
 // it keeps the job name so containment still installs the named job.
 func startedProcessIdentity(pid int, jobName string) (processidentity.Identity, error) {
-	identity, err := processidentity.Capture(pid)
+	identity, err := captureProcessIdentity(pid)
 	if err != nil {
 		identity = processidentity.Identity{}
 	}
