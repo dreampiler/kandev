@@ -41,16 +41,9 @@ func TestAutomationHistoryDefinitions(t *testing.T) {
 	first := createHistoryAutomation(t, store, "ws-1", "first", base)
 	second := createHistoryAutomation(t, store, "ws-1", "second", base.Add(time.Minute))
 	foreign := createHistoryAutomation(t, store, "ws-2", "foreign", base)
-	scheduledTrigger := createHistoryTrigger(t, store, first.ID, TriggerTypeScheduled, `{"cron_expression":"0 9 * * *","timezone":"Europe/Berlin"}`)
+	createHistoryTrigger(t, store, first.ID, TriggerTypeScheduled, `{"cron_expression":"0 9 * * *","timezone":"Europe/Berlin"}`)
 	createHistoryTrigger(t, store, first.ID, TriggerTypeWebhook, `{"dedup_key":"body.id"}`)
 	createHistoryTrigger(t, store, second.ID, TriggerTypeScheduled, `{"cron_expression":`)
-	// The definition contract sorts triggers by creation time and ID. Give
-	// the fixture distinct times rather than ordering equal-time random UUIDs.
-	if _, err := store.db.Exec(`UPDATE automation_triggers
-		SET created_at = CASE WHEN id = ? THEN ? ELSE ? END WHERE automation_id = ?`,
-		scheduledTrigger.ID, base, base.Add(time.Minute), first.ID); err != nil {
-		t.Fatal(err)
-	}
 
 	service := NewService(store, nil, nil)
 	list, err := service.ListHistoryAutomations(ctx, HistoryDefinitionFilter{WorkspaceID: "ws-1", Limit: 10})
