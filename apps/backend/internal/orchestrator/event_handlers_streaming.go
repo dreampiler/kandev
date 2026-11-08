@@ -537,10 +537,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
-		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
-		agentType := payload.AgentID
-		if s.config.ProviderKeywordContext && payload.AgentType != "" {
-			agentType = payload.AgentType
+		// Stream AgentID is an execution identity; classification uses the transport type.
+		agentType := payload.AgentType
+		if agentType == "" {
+			agentType = payload.AgentID
 		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
