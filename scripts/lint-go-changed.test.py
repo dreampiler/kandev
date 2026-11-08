@@ -26,6 +26,8 @@ class ChangedGoLintTest(unittest.TestCase):
             self.env.pop(key, None)
         self.env["GO_LINT_TEST_CALLS"] = str(self.calls)
         self.env["PATH"] = f"{self.repo / 'bin'}{os.pathsep}{self.env['PATH']}"
+        self.bash = shutil.which("bash", path=self.env["PATH"])
+        self.assertIsNotNone(self.bash, "Bash must be available for the lint hook")
         self.write(
             "bin/golangci-lint",
             textwrap.dedent("""\
@@ -94,7 +96,7 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.lint_calls(), [{
             "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=15m", "--allow-serial-runners",
                      "--concurrency=2"],
             "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
         }])
@@ -117,7 +119,7 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertCountEqual(calls[0]["args"], [
             "run", ".", "./internal/first", "./internal/first/child", "./internal/second",
-            f"--new-from-rev={self.base}", "--timeout=5m", "--concurrency=2",
+            f"--new-from-rev={self.base}", "--timeout=15m", "--allow-serial-runners", "--concurrency=2",
         ])
 
     def test_preserves_explicit_resource_overrides(self):
@@ -156,7 +158,7 @@ class ChangedGoLintTest(unittest.TestCase):
         for args in ([], ["README.md", "apps/web/example.ts", "other/example.go"]):
             with self.subTest(args=args):
                 result = subprocess.run(
-                    ["bash", "scripts/lint-go-changed", *args],
+                    [self.bash, "scripts/lint-go-changed", *args],
                     cwd=self.repo, env=self.env, text=True, capture_output=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -192,14 +194,14 @@ class ChangedGoLintTest(unittest.TestCase):
         }
 
         result = subprocess.run(
-            ["bash", "scripts/lint-go-changed", "apps/backend/internal/first/one.go"],
+            [self.bash, "scripts/lint-go-changed", "apps/backend/internal/first/one.go"],
             cwd=self.repo, env=env, text=True, capture_output=True,
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.lint_calls(), [{
             "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=15m", "--allow-serial-runners",
                      "--concurrency=2"],
             "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
         }])
