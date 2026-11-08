@@ -12,7 +12,7 @@ func (m *Manager) automaticHistoryEnvironment(env map[string]string) map[string]
 	}
 	const key = "KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY"
 	if m.autoContinueFromHistoryEnabled {
-		env[key] = "true"
+		env[key] = boolStringTrue
 	} else {
 		delete(env, key)
 	}
