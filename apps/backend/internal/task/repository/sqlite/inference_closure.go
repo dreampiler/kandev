@@ -13,6 +13,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// forUpdateOfTaskSessions locks the task_sessions rows (alias ts) on PostgreSQL.
+const forUpdateOfTaskSessions = " FOR UPDATE OF ts"
+
 // GetInferenceClosureBlock reads the writer connection: a generation change
 // cannot hide an unfinished closure from admission.
 func (r *Repository) GetInferenceClosureBlock(ctx context.Context, sessionID string) (*models.SessionRecoveryBlock, error) {
@@ -146,7 +149,7 @@ func (r *Repository) lockInferenceClosureSession(ctx context.Context, tx *sqlx.T
 	}
 	query := "SELECT COALESCE(er.agent_execution_id, ''), ts.queue_incarnation_id, ts.metadata FROM task_sessions ts LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.id = ?"
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += " FOR UPDATE OF ts"
+		query += forUpdateOfTaskSessions
 	}
 	var execution, incarnation string
 	var metadataJSON sql.NullString
