@@ -1539,15 +1539,11 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 
 // openCandidateCircuitForFailure opens exactly one circuit for a qualifying
 // failure: a keyword-scoped circuit when the keyword context classified it,
-// otherwise a limit-created narrow circuit, otherwise the binding circuit.
+// otherwise a limit-created narrow circuit when its scope applies, otherwise
+// the binding circuit.
 func (e *Engine) openCandidateCircuitForFailure(candidate Candidate, failure *routingerr.Error, scope LimitSuspension) {
 	failure = keywordFailureForCandidate(candidate, failure)
-	if failure.Keyword != nil {
-		if failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
-			return
-		}
-		until := keywordCircuitUntil(candidate, failure, e.now())
-		e.circuits.Open(keywordCircuitKey(candidate, failure), until, failure.Code)
+	if e.openKeywordCircuit(candidate, failure) {
 		return
 	}
 	until := e.now().Add(circuitBackoff)
@@ -1557,10 +1553,43 @@ func (e *Engine) openCandidateCircuitForFailure(candidate Candidate, failure *ro
 		e.openNarrowCircuit(candidate, scope, *failure.ResetHint, failure.Code) {
 		return
 	}
-	e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
+	open := FailureOpen{
 		Code: failure.Code, Now: e.now(),
 		ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
-	})
+	}
+	if e.openShortQuotaCircuit(candidate, failure, scope, open) {
+		return
+	}
+	e.circuits.OpenFailure(candidate.BindingKey, open)
+}
+
+// openKeywordCircuit opens the keyword-scoped circuit when the keyword context
+// classified the failure. It reports whether the failure was handled.
+func (e *Engine) openKeywordCircuit(candidate Candidate, failure *routingerr.Error) bool {
+	if failure.Keyword == nil {
+		return false
+	}
+	if failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
+		return true
+	}
+	until := keywordCircuitUntil(candidate, failure, e.now())
+	e.circuits.Open(keywordCircuitKey(candidate, failure), until, failure.Code)
+	return true
+}
+
+// openShortQuotaCircuit narrows the short backoff to a known quota scope when
+// the provider reported no reset; no reset is invented for it.
+func (e *Engine) openShortQuotaCircuit(candidate Candidate, failure *routingerr.Error, scope LimitSuspension, open FailureOpen) bool {
+	if e.limits == nil || failure.ResetHint != nil || candidate.ModelID == "" ||
+		!shortQuotaSuspension(candidate, failure, scope) {
+		return false
+	}
+	key := narrowSuspensionKey(candidate, scope)
+	if key == "" {
+		return false
+	}
+	e.circuits.OpenFailure(key, open)
+	return true
 }
 
 // keywordCircuitOpen reports whether a keyword-scoped circuit currently blocks
@@ -1582,23 +1611,24 @@ func (e *Engine) keywordCircuitOpen(candidate Candidate, now time.Time) bool {
 // limit feature created the reset hint. It returns false for the upstream
 // binding-wide scope.
 func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, until time.Time, code routingerr.Code) bool {
+	key := narrowSuspensionKey(candidate, scope)
+	if key == "" {
+		return false
+	}
+	e.circuits.Open(key, until, code)
+	return true
+}
+
+// narrowSuspensionKey returns the provider- or model-scoped circuit key of a
+// limit scope, or "" for the binding-wide scope.
+func narrowSuspensionKey(candidate Candidate, scope LimitSuspension) string {
 	switch scope {
 	case SuspensionProvider:
-		key := ResourceKey(ScopeProvider, candidate.BindingKey+"|"+ProviderOf(candidate.ModelID))
-		if key == "" {
-			return false
-		}
-		e.circuits.Open(key, until, code)
-		return true
+		return ResourceKey(ScopeProvider, candidate.BindingKey+"|"+ProviderOf(candidate.ModelID))
 	case SuspensionModel:
-		key := ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
-		if key == "" {
-			return false
-		}
-		e.circuits.Open(key, until, code)
-		return true
+		return ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
 	}
-	return false
+	return ""
 }
 
 // otherSuspensionKeyOpen reports whether a narrow key other than the probed one
@@ -1612,14 +1642,17 @@ func otherSuspensionKeyOpen(registry *CircuitRegistry, keys []string, probed str
 	return false
 }
 
-// limitSuspensionKeys returns the narrow circuit keys a limit-created long
-// reset may have opened. They are only consulted when provider limits are on.
+// limitSuspensionKeys returns the narrow circuit keys a limit scope may have
+// opened. They are only consulted when provider limits are on.
 func limitSuspensionKeys(candidate Candidate) []string {
 	if candidate.ModelID == "" {
 		return nil
 	}
 	keys := make([]string, 0, 2)
-	if provider := ProviderOf(candidate.ModelID); provider != "" {
+	// Known free Go models keep their separate allowances and do not share the
+	// Go subscription suspension.
+	if provider := ProviderOf(candidate.ModelID); provider != "" &&
+		(provider != providerOpenCodeGo || (!candidate.CatalogFree && !IsFreeModel(candidate.ModelID))) {
 		keys = append(keys, ResourceKey(ScopeProvider, candidate.BindingKey+"|"+provider))
 	}
 	keys = append(keys, ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID))
