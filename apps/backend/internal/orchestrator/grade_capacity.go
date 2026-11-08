@@ -155,6 +155,12 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
 	}
 	d.reasonCode = c.allCapacityLimitReason(p, maximum)
+	// The all-mode policy returns before admitLocked's host memory check, so
+	// it applies the same hold before reserving a seat.
+	if d.reasonCode == "" && c.memoryPressuredLocked(ctx, req.origin, req) {
+		d.reasonCode = ceilingReasonMemoryPressure
+		d.populationKnown = false
+	}
 	if d.reasonCode == "" {
 		d.admitted = true
 		d.reservationKey = c.reserveGradeLocked(req)
