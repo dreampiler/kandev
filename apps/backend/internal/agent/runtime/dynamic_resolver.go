@@ -131,7 +131,7 @@ func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
 	if r == nil || r.engine == nil {
 		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
 	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -632,7 +632,7 @@ func (r *ProfileExecutionResolver) reselectWaitingRoute(
 	expectedGeneration int64,
 	reason string,
 ) (ProfileExecution, error) {
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
