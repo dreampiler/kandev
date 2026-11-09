@@ -1,6 +1,7 @@
 ---
 created: 2026-10-08
 status: in_progress
+updated: 2026-11-08
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
@@ -28,12 +29,18 @@ topic-word patterns with provider error signatures. A bounded follow-up now
 text forms and one labeled JSON error envelope; it
 does not reopen task 01's completed prose-safety change.
 
+The prefixed OpenCode free-usage form has a separate
+([task 03](task-03-prefixed-free-usage-followup.md)) work order. It adds
+regression coverage for established error labels and records the signature's
+provider scope, prose boundary, precedence, and reset-hint behavior.
+
 ## Scope
 
 ### In scope
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
 - Table tests for prose that must not classify and signatures that must.
+- The sanitized provider-message projection in `apps/backend/internal/agentctl/types/streams/provider_error.go`.
 - Narrow coverage of the remaining signatures, using existing tests and
   disposable overlays outside the repository's automatic test collection.
 - The shared provider catalogue in
@@ -67,7 +74,7 @@ does not reopen task 01's completed prose-safety change.
 
 ## Opt-in keyword/context follow-up
 
-[Task 02](task-02-keyword-context.md) implements requirement 002 as a separate
+[Task 02, keyword context](task-02-keyword-context.md) implements requirement 002 as a separate
 default-off unmatched diagnostic classifier on the current base. Existing typed
 and known rules retain priority. It includes trusted context and existing
 consumer/circuit integration; it does not import the pending literal catalog.
@@ -100,19 +107,32 @@ whole-build requirement or operating mutation is added.
 
 ## Bounded catalogue follow-up
 
-Add only the remaining OpenCode signatures: unlabelled `free usage limit
+[Task 02, provider catalogue follow-up](task-02-provider-catalogue-followup.md)
+adds only the remaining OpenCode signatures: unlabelled `free usage limit
 reached`, raw-text daily reasons `free-models-per-day` and `limit_rpd/<model>`,
 and the generic Zen retry-later rate-limit wording. Add the shared labeled JSON
 `error_type=provider_unavailable` opening signature. Keep provider-specific
 scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
 and existing credit/payment/quota ordering. Do not duplicate the already
 submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
-in task 02; hosted CI and combined unmerged-source validation remain separate.
+in the [provider catalogue follow-up](task-02-provider-catalogue-followup.md); hosted CI and combined unmerged-source validation remain separate.
+
+### Prefixed free-usage follow-up
+
+Cover the established OpenCode error labels that can prefix `free usage limit
+reached`. Keep the signature limited to OpenCode, outside fenced examples, and
+to one diagnostic line. Preserve line boundaries in the sanitized ACP message
+so a later diagnostic line remains classifiable. Preserve structured and
+earlier account-limit precedence, and do not infer a reset time. The production
+rule was already present in the PR; the
+[prefixed free-usage task 03](task-03-prefixed-free-usage-followup.md) adds regression tests for accepted
+labels, rejected prose and provider cases, sanitized ACP projection, and
+precedence.
 
 ## Operator rule catalog follow-up
 
 [Task 03](task-03-operator-rule-catalog.md) implements requirement 003 on top of
-the keyword/context [task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
+the [keyword context task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
 and before the keyword/context fallback. Unset keeps the built-in behavior.
 
 ## Catalog consolidation follow-up

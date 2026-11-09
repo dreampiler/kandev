@@ -965,7 +965,6 @@ func (m *Manager) createExecutionWithMode(
 		operationCtx,
 		taskID,
 		info,
-		inputs.executionID,
 		inputs.runtime,
 		runtimeInstance,
 		inputs.preparation,
@@ -1043,7 +1042,7 @@ func (m *Manager) registerAndPublishCreatedExecution(
 		}
 		return nil, err
 	}
-	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, inputs.executionID, taskID); err != nil {
+	if err := m.publishCreatedExecution(ctx, runtimeInstance, execution, taskID); err != nil {
 		execution.remoteInstanceLifecycleMu.Unlock()
 		m.rollbackRegisteredLaunch(inputs.runtime, runtimeInstance, execution, "runtime secret persistence failed")
 		return nil, err
@@ -1137,10 +1136,6 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 	}
 
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
-	journalOwnerID := info.SessionID
-	if journalOwnerID == "" {
-		journalOwnerID = info.TaskEnvironmentID
-	}
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1151,7 +1146,7 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 			WorkspaceID:                    info.WorkspaceID,
 			RepositoryIDs:                  repositoryIDsFromWorkspace(info.WorkspaceRepositories),
 			DurableJournalHostRoot:         m.dataDir,
-			DurableJournalOwnerID:          journalOwnerID,
+			DurableJournalOwnerID:          executionJournalOwnerID(info),
 			DeliveryIncarnationID:          info.DeliveryIncarnationID,
 			DeliveryHarnessGeneration:      info.DeliveryHarnessGeneration,
 			DeliveryStreamID:               info.DeliveryStreamID,
@@ -1185,9 +1180,20 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 		},
 		profileInfo: profileInfo,
 	}
+	preparation.request.RetainedBuiltinBinding = workspace.RetainedBuiltinBinding
+	preparation.request.RetainedResourceCircuitIdentity = workspace.RetainedResourceCircuitIdentity
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
+}
+
+// executionJournalOwnerID names the durable journal owner: the session when one
+// exists, otherwise the retained task environment.
+func executionJournalOwnerID(info *WorkspaceInfo) string {
+	if info.SessionID != "" {
+		return info.SessionID
+	}
+	return info.TaskEnvironmentID
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {
@@ -1256,7 +1262,6 @@ func (m *Manager) initializeCreatedExecution(
 	ctx context.Context,
 	taskID string,
 	info *WorkspaceInfo,
-	executionID string,
 	rt ExecutorBackend,
 	runtimeInstance *ExecutorInstance,
 	preparation *executionCreatePreparation,
@@ -1273,7 +1278,7 @@ func (m *Manager) initializeCreatedExecution(
 		execution.ACPSessionID = info.ACPSessionID
 	}
 	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
-	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
+	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, execution.ID)
 	execution.SetSessionSpan(sessionSpan)
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
 		client.SetTraceContext(execution.SessionTraceContext())
@@ -1286,7 +1291,6 @@ func (m *Manager) publishCreatedExecution(
 	ctx context.Context,
 	runtimeInstance *ExecutorInstance,
 	execution *AgentExecution,
-	executionID string,
 	taskID string,
 ) error {
 	m.setRuntimeInterest(execution.SessionID, true)
@@ -1308,7 +1312,7 @@ func (m *Manager) publishCreatedExecution(
 	go m.waitForAgentctlReady(execution)
 
 	m.logger.Info("execution created",
-		zap.String("execution_id", executionID),
+		zap.String("execution_id", execution.ID),
 		zap.String("task_id", taskID),
 		zap.String("workspace_path", execution.WorkspacePath),
 		zap.Stringer("runtime", execution.RuntimeName))
@@ -1330,8 +1334,9 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
 			TaskEnvironmentID: info.TaskEnvironmentID, ReuseRequired: info.TaskEnvironmentID != "",
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
-			IntegrationRef:     repository.IntegrationRef,
-			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
+			BaseBranchFallbackPolicy: repository.BaseBranchFallbackPolicy,
+			IntegrationRef:           repository.IntegrationRef,
+			FallbackBaseBranch:       repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
 			PRNumber: repository.PRNumber, QualifiedPRBase: repository.QualifiedPRBase,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
@@ -1489,9 +1494,11 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
-		m.logger.Warn("failed to release project MCP files during raced launch rollback",
-			zap.String("execution_id", execution.ID), zap.Error(err))
+	if !adoptionPreservesPeer(runtimeInstance, execution) {
+		if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during raced launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
 	}
 	releaseClient()
 	if rt != nil && runtimeInstance != nil {

@@ -1368,10 +1368,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			}
 			return nil
 		}
+		stopWatch.advance(stopWaitPersistence)
 		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
 		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force, stopWatch); handled {
+			return err
+		}
+		if handled, err := m.stopPersistedStandaloneExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1379,6 +1383,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	execution.cancelStartupRecovery()
 	stopCtx := ctx
 	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	preserveAdoptedPeer := adoptionPreservesPeer(nil, execution) && !execution.isSessionInitialized() &&
+		(reason == StopReasonRecoverableAgentFailure || reason == StopReasonAgentBootstrapFailed)
 	if force || preserveRuntime {
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1397,6 +1403,16 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	if m.streamManager != nil {
 		m.streamManager.cancelDeliveryReconciliation(executionID)
+	}
+	if preserveAdoptedPeer {
+		// A failed adoption owns only its attempt-local transport. Keep the
+		// selected peer process, journal handle, durable inventory, and MCP
+		// claims for the next authenticated attempt. This is a nonterminal
+		// detach: no status/finished mark, row repair, removal, or agent.stopped
+		// event. An explicit user Stop still runs the normal termination path.
+		stopWatch.advance(stopWaitDetachClient)
+		releaseAdoptedPeerTransport(execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
 	}
 	backendForce := force
 	if preserveRuntime {
@@ -1492,6 +1508,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.logger.Error("provider turn execution settlement failed", zap.String("execution_id", executionID), zap.Error(err))
 	}
 	stopWatch.advance(stopWaitRuntimeCleanup)
+	if err := m.completeProviderExecution(stopCtx, executionID); err != nil {
+		m.logger.Error("provider turn execution settlement failed", zap.String("execution_id", executionID), zap.Error(err))
+	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
@@ -1545,9 +1564,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID))
 
-	stopWatch.advance(stopWaitPublish)
 	// Office recovery callers settle their own failed or interrupted attempt.
 	// A stopped event would instead finish that run as successfully processed.
+	stopWatch.advance(stopWaitPublish)
 	if reason != stopReasonRunRecovery || execution.Owner.Kind != ExecutionOwnerRun {
 		m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 	}
@@ -1603,6 +1622,20 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 	return nil
 }
 
+// releaseAdoptedPeerTransport closes only the client this attempt opened. It
+// never sends Stop, so the selected peer keeps its process, journal, and MCP
+// claims for the next authenticated attempt or an explicit Stop.
+func releaseAdoptedPeerTransport(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client != nil {
+		client.Close()
+	}
+	releaseClient()
+}
+
 func (m *Manager) stopExecutionAgentctl(
 	ctx context.Context,
 	executionID string,
@@ -1641,6 +1674,9 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
+		if row := m.liveStandaloneExecutionRow(ctx, sessionID); row != nil {
+			return m.StopAgent(ctx, row.AgentExecutionID, force)
+		}
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 
