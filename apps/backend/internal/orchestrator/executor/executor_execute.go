@@ -1912,17 +1912,37 @@ func rejectInheritedEnvironmentExecutorMismatch(
 	if env.TaskID == "" && requestedExecutorType == string(models.ExecutorTypeKubernetes) {
 		return fmt.Errorf("%w: Kubernetes environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
+	if taskUsesInheritedWorkspace(task) && env.TaskID == "" {
+		return fmt.Errorf("%w: inherited environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if taskUsesInheritedWorkspace(task) && env.TaskID == task.ID {
+		environmentType, known := env.EffectiveExecutorType()
+		if !known {
+			return fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+		}
+		if !allowExecutorTransition && string(environmentType) != requestedExecutorType {
+			return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
+				models.ErrWorkspaceExecutorMismatch, environmentType, requestedExecutorType)
+		}
+	}
 	if env.TaskID == "" || env.TaskID == task.ID {
 		return nil
 	}
 	kubernetes := requestedExecutorType == string(models.ExecutorTypeKubernetes)
-	if taskUsesInheritedWorkspace(task) && env.ExecutorType != "" && env.ExecutorType != requestedExecutorType &&
+	environmentType, known := env.EffectiveExecutorType()
+	if taskUsesInheritedWorkspace(task) && !known {
+		return fmt.Errorf("%w: inherited environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if taskUsesInheritedWorkspace(task) && kubernetes && env.ExecutorType == "" {
+		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
+	}
+	if taskUsesInheritedWorkspace(task) && string(environmentType) != requestedExecutorType &&
 		(!allowExecutorTransition || kubernetes) {
 		return fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q",
-			models.ErrWorkspaceReuseUnsafe, env.ExecutorType, requestedExecutorType)
+			models.ErrWorkspaceReuseUnsafe, environmentType, requestedExecutorType)
 	}
 	// Foreign Kubernetes ownership is invalid even for legacy tasks without an inherited-workspace policy.
-	if kubernetes && (env.ExecutorType == "" || env.ExecutorType == requestedExecutorType) {
+	if kubernetes && (!known || string(environmentType) == requestedExecutorType) {
 		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
 	}
 	return nil
@@ -2106,6 +2126,20 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			// workspace default (or an empty config).
 			executorID = strings.TrimSpace(session.ExecutorID)
 		}
+		running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+		if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
+			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
+		}
+		if startAgent && (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
+			((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, sessionID)) {
+			return nil, ErrExecutionAlreadyRunning
+		}
+		if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
+			return nil, ErrExecutionAlreadyRunning
+		}
+		if err := e.claimInheritedEnvironmentTransition(ctx, task, session, executorID, running); err != nil {
+			return nil, err
+		}
 		if opts.McpMode == "" {
 			opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 			if err != nil {
@@ -2120,17 +2154,6 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			opts.McpProfile = &profileContext
 		}
 
-		running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-		if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
-			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
-		}
-		if startAgent && (session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning) &&
-			((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, sessionID)) {
-			return nil, ErrExecutionAlreadyRunning
-		}
-		if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
-			return nil, ErrExecutionAlreadyRunning
-		}
 		if running != nil && running.ExecutionProfileID != "" &&
 			running.ExecutionProfileID != agentProfileID {
 			if running.AgentExecutionID != "" {
@@ -2216,6 +2239,9 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		// transition: the detach below elects a fresh environment on the selected
 		// executor. Kubernetes keeps its unsupported-reuse refusal.
 		if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, true); err != nil {
+			return nil, err
+		}
+		if err := e.retireInheritedRuntimeForTransition(ctx, task, session, existingEnv, req.ExecutorType, running); err != nil {
 			return nil, err
 		}
 		// A non-policy session can still carry a foreign environment reference from
@@ -2907,9 +2933,16 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if taskUsesInheritedWorkspace(task) {
+		var resolveErr error
+		execConfig, resolveErr = e.resolveImplicitExecutorForEnvironment(ctx, existingEnv, execConfig)
+		if resolveErr != nil {
+			return nil, executorConfig{}, resolveErr
+		}
+	}
+	req.ExecutorType = execConfig.ExecutorType
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
-		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
 	}
@@ -3046,6 +3079,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,
 			BaseBranch:                 info.BaseBranch,
+			BaseBranchFallbackPolicy:   info.BaseBranchFallbackPolicy,
 			IntegrationRef:             info.IntegrationRef,
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
@@ -3124,6 +3158,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.WorkspaceRelativePath = repoInfo.WorkspaceRelativePath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.BaseBranchFallbackPolicy = repoInfo.BaseBranchFallbackPolicy
 		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber

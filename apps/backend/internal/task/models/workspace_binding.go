@@ -16,6 +16,7 @@ var (
 	// succeed: the parent is live and has not materialized any environment yet.
 	// It is always returned wrapped together with ErrWorkspaceReuseUnsafe.
 	ErrInheritedWorkspacePending = errors.New("inherited workspace is not materialized yet")
+	ErrWorkspaceExecutorMismatch = fmt.Errorf("%w: selected executor does not match the canonical task workspace", ErrWorkspaceReuseUnsafe)
 	// ErrTaskEnvironmentResetRequired is the reuse refusal for a failed task
 	// environment that still holds workspace resources. A start cannot
 	// re-materialize it; resetting the task environment clears it.

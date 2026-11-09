@@ -1539,16 +1539,23 @@ func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit 
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
 		baseBranch := r.BaseBranch
-		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
-			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
-				baseBranch = repo.DefaultBranch
+		source := models.BaseBranchSelectionSourceExplicit
+		if baseBranch == "" {
+			// Record the omission before filling the repository default so the
+			// automatic selection remains distinguishable from an explicit one.
+			source = models.BaseBranchSelectionSourceRepositoryDefault
+			if r.RepositoryID != "" && h.taskSvc != nil {
+				if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+					baseBranch = repo.DefaultBranch
+				}
 			}
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			LocalPath:    r.LocalPath,
-			GitHubURL:    r.GitHubURL,
-			BaseBranch:   baseBranch,
+			RepositoryID:              r.RepositoryID,
+			LocalPath:                 r.LocalPath,
+			GitHubURL:                 r.GitHubURL,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: source,
 		})
 	}
 	return repos
@@ -1574,8 +1581,9 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:              r.RepositoryID,
+			BaseBranch:                r.BaseBranch,
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
 		})
 	}
 	return repos
@@ -2980,6 +2988,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		if req.ReplyToQuestionID != "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
 		}
+		// A report is not claimed or replayed, so accepting an identity here
+		// would promise a once-only retry that the report path cannot keep.
+		if req.OperationID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				`operation_id is not supported with delivery_mode="report"; nothing was delivered`, nil)
+		}
 		return h.handleWorkspaceCollaborationReport(ctx, msg, req.TaskID, req.SessionID, req.Prompt)
 	}
 	if req.SenderTaskID == "" {
@@ -3019,6 +3033,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
 		return response, nil
 	}
+	if req.OperationID != "" && sendOperationReplayOnly(ctx) {
+		return wsError(msg.ID, msg.Action, SendOperationNotRetainedCode,
+			"no retained operation record exists for this sender and operation_id; nothing was delivered"), nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -3045,11 +3063,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	if parentReply != nil && parentReply.alreadyAnswered {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		// The question claim is the durable record here: repeating this request
+		// returns already_answered again and delivers nothing, so the identity is
+		// echoed rather than claimed for a send that never dispatches.
+		payload := map[string]interface{}{
 			"task_id":              req.TaskID,
 			"reply_to_question_id": req.ReplyToQuestionID,
 			stopTaskStatusKey:      "already_answered",
-		})
+		}
+		if req.OperationID != "" {
+			payload[sendOperationIDKey] = req.OperationID
+		}
+		return ws.NewResponse(msg.ID, msg.Action, payload)
 	}
 
 	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)

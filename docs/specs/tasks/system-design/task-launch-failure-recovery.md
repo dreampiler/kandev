@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-26
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -461,18 +461,18 @@ sessions that reference the row, and recovery claims keep their identity.
 
 Callers:
 
-- The task-local binding re-elects instead of returning `workspace_reuse_unsafe`
-  for an abandoned `creating` row and for an eligible `failed` row. An abandoned
-  row with physical evidence keeps the current behavior: it becomes `failed` and
-  the binding returns `workspace_reuse_unsafe`.
+- The task-local binding re-elects an abandoned `creating` row and an eligible
+  `failed` row. An abandoned row with physical evidence becomes `failed` and the
+  binding returns `workspace_reuse_unsafe`.
 - The shared-group binding applies the same rule to the group's environment.
   The group pointer keeps naming the row, so other members observe
   `workspace_preparing` while the new owner prepares it.
 - `LaunchPreparedSession` re-elects an eligible `failed` environment of the same
   task for the session that it launches. It uses a standalone transaction that
-  takes the task cleanup barrier and the recovery-claim admission. An
-  environment owned by another task, which is the `inherit_parent` case, stays
-  fail-closed.
+  takes the task cleanup barrier and recovery-claim admission. A failed foreign
+  (`inherit_parent`/`shared_group`) environment is never re-elected; a launch
+  meeting `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` claims its own
+  first, and other starts stay fail-closed.
 
 Every caller runs after `taskCleanupBarrierLocked` and
 `recoveryclaim.EnsureAvailableTx`, so a deleting task or a held recovery claim

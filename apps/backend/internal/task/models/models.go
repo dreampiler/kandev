@@ -1956,6 +1956,10 @@ func (w *Workspace) IsImproveKandev() bool {
 // on sessionless WIP slot release gets when it does not choose its own.
 const DefaultWIPSessionlessReleaseGraceMinutes = 10
 
+// MaxWIPSessionlessReleaseGraceMinutes bounds the grace at one year, far below
+// the value whose conversion to time.Duration would overflow.
+const MaxWIPSessionlessReleaseGraceMinutes = 525600
+
 type Workspace struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -3244,6 +3248,27 @@ type TaskEnvironment struct {
 // IsRetired reports whether the environment is retained rather than canonical.
 func (te *TaskEnvironment) IsRetired() bool {
 	return te != nil && te.RetiredAt != nil
+}
+
+// EffectiveExecutorType returns the environment's persisted executor type. A
+// legacy row with no executor identity or runtime handles represents the
+// implicit local executor used before executor profiles existed.
+func (te *TaskEnvironment) EffectiveExecutorType() (ExecutorType, bool) {
+	if te == nil {
+		return "", false
+	}
+	if te.ExecutorType != "" {
+		executorType := ExecutorType(te.ExecutorType)
+		if executorType.Runtime() == agentruntime.RuntimeUnknown {
+			return "", false
+		}
+		return executorType, true
+	}
+	if te.ExecutorID != "" || te.ExecutorProfileID != "" || te.ContainerID != "" || te.SandboxID != "" ||
+		te.ContainerBootstrapNonceSecretID != "" || te.ContainerControlAuthTokenSecretID != "" {
+		return "", false
+	}
+	return ExecutorTypeLocal, true
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.
