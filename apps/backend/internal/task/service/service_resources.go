@@ -236,8 +236,10 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err := validateClarificationUnansweredRetention(req.ClarificationUnansweredRetentionDays); err != nil {
 		return nil, err
 	}
-	if req.WIPSessionlessReleaseGraceMinutes != nil && *req.WIPSessionlessReleaseGraceMinutes <= 0 {
-		return nil, fmt.Errorf("%w: must be greater than zero", ErrWorkspaceWIPReleaseGraceInvalid)
+	if grace := req.WIPSessionlessReleaseGraceMinutes; grace != nil &&
+		(*grace <= 0 || *grace > models.MaxWIPSessionlessReleaseGraceMinutes) {
+		return nil, fmt.Errorf("%w: must be between 1 and %d", ErrWorkspaceWIPReleaseGraceInvalid,
+			models.MaxWIPSessionlessReleaseGraceMinutes)
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {

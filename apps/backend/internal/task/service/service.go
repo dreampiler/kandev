@@ -427,9 +427,9 @@ var (
 	// ErrWorkspaceClarificationRetentionInvalid rejects an unanswered
 	// clarification retention outside the supported day range.
 	ErrWorkspaceClarificationRetentionInvalid = errors.New("workspace unanswered clarification retention must be between 1 and 90 days")
-	// ErrWorkspaceWIPReleaseGraceInvalid rejects a non-positive sessionless
-	// WIP release grace.
-	ErrWorkspaceWIPReleaseGraceInvalid = errors.New("workspace WIP sessionless release grace must be a positive number of minutes")
+	// ErrWorkspaceWIPReleaseGraceInvalid rejects a sessionless WIP release
+	// grace outside 1..models.MaxWIPSessionlessReleaseGraceMinutes.
+	ErrWorkspaceWIPReleaseGraceInvalid = errors.New("workspace WIP sessionless release grace must be a positive number of minutes up to one year")
 )
 
 func validateExecutorConfig(config map[string]string) error {
