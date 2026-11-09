@@ -71,10 +71,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	if err != nil {
 		return preparedAgentEvent{}, err
 	}
-	if event.Type == streams.EventTypeShellOutputUpdate && (!durable || delivery == nil || event.ShellOutput == nil) {
-		return preparedAgentEvent{}, ErrDeliveryRecoveryBlocked
-	}
-	if event.ShellOutput != nil && event.Type != streams.EventTypeShellOutputUpdate {
+	if !shellOutputEventAdmissible(event, durable && delivery != nil) {
 		return preparedAgentEvent{}, ErrDeliveryRecoveryBlocked
 	}
 	if !durable || delivery == nil {
@@ -112,6 +109,16 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		skipCallback:    skipCallback,
 		staleTerminal:   staleTerminal,
 	}, nil
+}
+
+// shellOutputEventAdmissible reports whether shell-output payload and event
+// type agree, and whether a shell-output update has the durable delivery it
+// requires.
+func shellOutputEventAdmissible(event agentctl.AgentEvent, durableDelivery bool) bool {
+	if event.Type == streams.EventTypeShellOutputUpdate {
+		return durableDelivery && event.ShellOutput != nil
+	}
+	return event.ShellOutput == nil
 }
 
 func preparedLegacyAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) preparedAgentEvent {
