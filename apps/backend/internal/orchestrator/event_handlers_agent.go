@@ -4446,7 +4446,7 @@ func quotaProviderDisplayName(agentID string) string {
 		return "OpenCode"
 	case "antigravity-acp":
 		return "Antigravity"
-	case "claude-acp":
+	case claudeACPProviderID:
 		return "Claude"
 	case "codex-acp":
 		return "Codex"
