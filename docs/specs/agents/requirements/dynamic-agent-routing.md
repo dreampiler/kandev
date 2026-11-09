@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-11-02
+updated: 2026-11-08
 owners:
   - cfl
 ---
@@ -53,6 +53,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28:** The workspace automatic-retry toggle shall default off and its limit shall default 1, accept only 1 through 3, persist through HTTP/WS/boot state, and preserve omitted values; invalid limits fail validation. Workspace managers see this toggle and limit independently of mid-turn failover while dynamic routing is enabled.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.29:** An explicit Retry for a FAILED session whose current route is `starting` shall reconcile that generation to `action_required` and retry only with no live runtime and an owned stopped standalone local/worktree executor history row. Preserve that row. Unknown liveness, an absent or different row, stale generation, and other session/route states retain their existing refusal (`dynamic_route_pending` where applicable). The manual relaunch may reopen the session and reschedule its FAILED task; automatic relaunch and stale generations still refuse terminal sessions.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.30:** A continuation package saved for a route generation shall survive later status transitions of that same generation, such as marking the successor active, retrying, or cancelling. A save for a stale generation shall be refused and a failed durable save shall leave the cached route unchanged.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31:** A promoted workspace execution shall persist its resolved concrete profile; Office profiles stay separate.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
