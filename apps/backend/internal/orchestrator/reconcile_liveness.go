@@ -463,6 +463,10 @@ func (s *Service) releaseTerminalStandalone(ctx context.Context, running *models
 }
 
 func (s *Service) canReclaimTerminal(ctx context.Context, running *models.ExecutorRunning) bool {
+	return !s.sessionHasActiveTurn(ctx, running.SessionID) && s.terminalReclaimHasNoOtherWork(ctx, running)
+}
+
+func (s *Service) terminalReclaimHasNoOtherWork(ctx context.Context, running *models.ExecutorRunning) bool {
 	if running.AgentExecutionID == "" || running.UpdatedAt.IsZero() || s.messageQueue == nil {
 		return false
 	}
@@ -472,7 +476,7 @@ func (s *Service) canReclaimTerminal(ctx context.Context, running *models.Execut
 	sessionID := running.SessionID
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
 	if err != nil || block != nil || s.checkInferenceClosureAdmission(ctx, sessionID, false) != nil ||
-		s.sessionHasKnownIdleWork(ctx, sessionID) || s.sessionHasCancellableWork(ctx, sessionID) {
+		s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID) || s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID) {
 		return false
 	}
 	pending, err := s.messageQueue.HasPendingDispatchForSession(ctx, sessionID)
@@ -486,7 +490,22 @@ func (s *Service) reconcileAbsentTerminalRuntime(ctx context.Context, running *m
 	err := s.messageQueue.WithSessionAdmission(ctx, running.SessionID, func(admittedCtx context.Context) error {
 		release := s.acquireSessionLifecycleLock(running.SessionID)
 		defer release()
-		if !s.canReclaimTerminal(admittedCtx, running) {
+		current, err := s.repo.GetExecutorRunningBySessionID(admittedCtx, running.SessionID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.AgentExecutionID != running.AgentExecutionID || !current.UpdatedAt.Equal(running.UpdatedAt) {
+			return nil
+		}
+		if !s.terminalReclaimHasNoOtherWork(admittedCtx, current) || s.turnService == nil {
+			return nil
+		}
+		// The runtime is proved absent and no dispatch or recovery owns the
+		// previous turn. Close the orphan before recording the exact stop.
+		if err := s.turnService.AbandonOpenTurns(admittedCtx, running.SessionID); err != nil {
+			return fmt.Errorf("abandon orphan turn before terminal repair: %w", err)
+		}
+		if s.sessionHasActiveTurn(admittedCtx, running.SessionID) {
 			return nil
 		}
 		return s.repairDeadRowLiveness(admittedCtx, running)
