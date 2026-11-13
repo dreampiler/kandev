@@ -123,10 +123,17 @@ func (g *officeCrossWorkspaceGateway) validateSource(ctx context.Context, runCtx
 		return officeRuntimeDenied()
 	}
 	session, err := g.tasks.GetTaskSession(ctx, runCtx.SessionID)
-	if err != nil || session == nil || session.TaskID != task.ID {
+	if err != nil || session == nil || session.TaskID != task.ID || officeRuntimeSessionEnded(session.State) {
 		return officeRuntimeDenied()
 	}
 	return nil
+}
+
+// A terminated source session (for example after its agent lost the task's
+// role) ends collaboration even while its run row is still claimed.
+func officeRuntimeSessionEnded(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCompleted || state == models.TaskSessionStateFailed ||
+		state == models.TaskSessionStateCancelled
 }
 
 func (g *officeCrossWorkspaceGateway) configured() bool {
@@ -326,18 +333,24 @@ func (g *officeCrossWorkspaceGateway) taskScope(
 	if err != nil {
 		return nil, err
 	}
+	if err := g.authorizeTarget(scoped, runCtx, taskID, action); err != nil {
+		return nil, err
+	}
+	return scoped, nil
+}
+
+func (g *officeCrossWorkspaceGateway) authorizeTarget(
+	scoped context.Context, runCtx officeruntime.RunContext, taskID string, action models.WorkspaceCollaborationAction,
+) error {
 	getTask := g.tasks.GetTask
-	if prompt {
+	if action == models.CollaborationPrompt {
 		getTask = g.tasks.GetTaskForPrompt
 	}
 	task, err := getTask(scoped, taskID)
 	if err != nil || task == nil {
-		return nil, officeRuntimeTargetError(err)
+		return officeRuntimeTargetError(err)
 	}
-	if err := g.authorizeWorkspace(scoped, runCtx, task.WorkspaceID, action); err != nil {
-		return nil, err
-	}
-	return scoped, nil
+	return g.authorizeWorkspace(scoped, runCtx, task.WorkspaceID, action)
 }
 
 func (g *officeCrossWorkspaceGateway) TaskSessions(ctx context.Context, runCtx officeruntime.RunContext, taskID string) (json.RawMessage, error) {
@@ -373,18 +386,33 @@ func (g *officeCrossWorkspaceGateway) TaskPlan(ctx context.Context, runCtx offic
 func (g *officeCrossWorkspaceGateway) SendMessage(
 	ctx context.Context, runCtx officeruntime.RunContext, req officeruntime.CrossWorkspaceMessage,
 ) (json.RawMessage, error) {
-	scoped, err := g.taskScope(ctx, runCtx, req.TaskID, true)
+	scoped, err := g.scope(ctx, runCtx, officeruntime.CapabilityPostComment)
 	if err != nil {
 		return nil, err
 	}
-	scoped, err = mcphandlers.WithOfficeRuntimeMessageAuthority(scoped, runCtx.TaskID, runCtx.SessionID)
+	authorized, err := mcphandlers.WithOfficeRuntimeMessageAuthority(scoped, runCtx.TaskID, runCtx.SessionID)
 	if err != nil {
 		return nil, officeRuntimeDenied()
 	}
-	return g.callRaw(scoped, ws.ActionMCPMessageTask, map[string]interface{}{
+	payload := map[string]interface{}{
 		"task_id": req.TaskID, "prompt": req.Prompt, "operation_id": req.OperationID,
 		"sender_task_id": runCtx.TaskID, "sender_session_id": runCtx.SessionID,
-	})
+	}
+	// A retained receipt belongs to this live sender, not to the target, so it
+	// is read before the target is re-checked: a lost response stays
+	// recoverable after the target is deleted or its prompt grant is revoked.
+	// Only an identity with no retained record continues to a new send.
+	if req.OperationID != "" {
+		raw, err := g.callRaw(mcphandlers.WithSendOperationReplayOnly(authorized), ws.ActionMCPMessageTask, payload)
+		var notRetained *officeruntime.CrossWorkspaceError
+		if !errors.As(err, &notRetained) || notRetained.Code != mcphandlers.SendOperationNotRetainedCode {
+			return raw, err
+		}
+	}
+	if err := g.authorizeTarget(scoped, runCtx, req.TaskID, models.CollaborationPrompt); err != nil {
+		return nil, err
+	}
+	return g.callRaw(authorized, ws.ActionMCPMessageTask, payload)
 }
 
 func (g *officeCrossWorkspaceGateway) callRaw(ctx context.Context, action string, payload interface{}) (json.RawMessage, error) {
@@ -402,7 +430,7 @@ func (g *officeCrossWorkspaceGateway) call(ctx context.Context, action string, p
 	}
 	var backend *mcpserver.BackendError
 	if errors.As(err, &backend) {
-		return &officeruntime.CrossWorkspaceError{Status: officeMCPErrorStatus(backend.Code), Message: backend.Message}
+		return &officeruntime.CrossWorkspaceError{Status: officeMCPErrorStatus(backend.Code), Code: backend.Code, Message: backend.Message}
 	}
 	return fmt.Errorf("office collaboration %s: %w", action, err)
 }
@@ -415,7 +443,7 @@ func officeMCPErrorStatus(code string) int {
 		return http.StatusNotFound
 	case ws.ErrorCodeForbidden, ws.ErrorCodeUnauthorized:
 		return http.StatusForbidden
-	case ws.ErrorCodeConflict:
+	case ws.ErrorCodeConflict, mcphandlers.SendOperationConflictCode:
 		return http.StatusConflict
 	case ws.ErrorCodeUnavailable:
 		return http.StatusServiceUnavailable

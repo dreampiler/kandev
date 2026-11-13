@@ -130,7 +130,10 @@ var succeededCleanupJobEligibilitySQL = `SELECT EXISTS(SELECT 1 FROM task_resour
  WHERE j.id=? AND j.state=?
  AND j.completed_at IS NOT NULL
  AND julianday(j.completed_at) IS NOT NULL
- AND julianday(j.completed_at)>julianday('0001-01-01') AND julianday(j.completed_at)<=julianday(?))`
+ AND julianday(j.completed_at)>julianday('0001-01-01') AND julianday(j.completed_at)<=julianday(?)
+ AND NOT EXISTS(SELECT 1 FROM task_resource_cleanup_jobs p WHERE p.task_id=j.task_id
+  AND (p.workspace_protection IN ('retain','unknown','unclassified')
+  OR (p.workspace_protection='cleanup' AND p.state NOT IN ('succeeded','cancelled')))))`
 
 // ArchivedMessageRow is one candidate transcript row with its stored metadata
 // length, so a batch can be bounded before any body is fetched.
@@ -178,6 +181,15 @@ func SessionUpperMessageRowID(ctx context.Context, q sqlx.QueryerContext, sessio
 	return rowID, err
 }
 
+// HistoryUpperMessageRowID excludes messages appended after a retention pass starts.
+func HistoryUpperMessageRowID(ctx context.Context, q sqlx.QueryerContext) (int64, error) {
+	var rowID int64
+	stmt, cancel := context.WithTimeout(ctx, archivedEligibilityBudget)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &rowID, `SELECT COALESCE(MAX(rowid),0) FROM task_session_messages`)
+	return rowID, err
+}
+
 // NextArchivedMessageRows lists the next page of one archived session's messages.
 func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, sessionID string, afterRowID, upperRowID int64, limit int) ([]ArchivedMessageRow, error) {
 	rows := []ArchivedMessageRow{}
@@ -190,9 +202,10 @@ func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, session
 }
 
 // ArchivedMessageMetadata reads one candidate message's metadata body.
-func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID int64, id string) (string, error) {
+func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID int64, id string, size int64) (string, error) {
 	var raw string
-	err := sqlx.GetContext(ctx, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages WHERE rowid=? AND id=?`, rowID, id)
+	err := sqlx.GetContext(ctx, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages
+	 WHERE rowid=? AND id=? AND COALESCE(LENGTH(CAST(metadata AS BLOB)),0)=?`, rowID, id, size)
 	return raw, err
 }
 
@@ -236,17 +249,18 @@ func SucceededCleanupUpperJobID(ctx context.Context, q sqlx.QueryerContext) (str
 }
 
 // CleanupJobSnapshotRow reads a job's stored snapshot size and value.
-func CleanupJobSnapshotRow(ctx context.Context, q sqlx.QueryerContext, id string) (int64, string, error) {
+func CleanupJobSnapshotBytes(ctx context.Context, q sqlx.QueryerContext, id string) (int64, error) {
 	var bytes int64
+	err := sqlx.GetContext(ctx, q, &bytes, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
+	 FROM task_resource_cleanup_jobs WHERE id=?`, id)
+	return bytes, err
+}
+
+func CleanupJobSnapshotBody(ctx context.Context, q sqlx.QueryerContext, id string, size int64) (string, error) {
 	var snapshot string
-	if err := sqlx.GetContext(ctx, q, &bytes, `SELECT COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)
-	 FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
-		return 0, "", err
-	}
-	if err := sqlx.GetContext(ctx, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id); err != nil {
-		return 0, "", err
-	}
-	return bytes, snapshot, nil
+	err := sqlx.GetContext(ctx, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs
+	 WHERE id=? AND COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)=?`, id, size)
+	return snapshot, err
 }
 
 // WriteReducedCleanupSnapshot replaces a succeeded job's snapshot only while it

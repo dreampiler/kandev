@@ -8,8 +8,7 @@ import (
 )
 
 // markChildTurnCancelled records an explicit user cancellation on a child
-// task's captured turn before the turn is settled, so the child-turn stalled
-// producer treats it as a cancellation rather than a live settlement.
+// task's captured turn, including a completion that has not been classified.
 func (s *Service) markChildTurnCancelled(ctx context.Context, sessionID string, prepared cancelAgentPreparation) {
 	turnID := prepared.capturedTurnID
 	if turnID == "" {
@@ -19,7 +18,10 @@ func (s *Service) markChildTurnCancelled(ctx context.Context, sessionID string, 
 		return
 	}
 	turn, err := s.turnService.GetTurn(ctx, turnID)
-	if err != nil || turn == nil || turn.CompletedAt != nil {
+	if err != nil || turn == nil {
+		return
+	}
+	if _, classified := models.LoadChildStallState(turn.Metadata); turn.CompletedAt != nil && classified {
 		return
 	}
 	if _, isChild := models.LoadChildStallStart(turn.Metadata); !isChild {

@@ -878,6 +878,8 @@
   "archivedData.empty": "이 기간에서 제거할 수 있는 아카이브 데이터가 없습니다.",
   "archivedData.targetMessages": "완료 또는 아카이브된 대화",
   "archivedData.targetCleanupJobs": "완료된 정리 작업",
+  "archivedData.targetEstimated_one": "축소 예상 {{count}}개 행. 예상 저장 바이트 절감: {{size}}",
+  "archivedData.targetEstimated_other": "축소 예상 {{count}}개 행. 예상 저장 바이트 절감: {{size}}",
   "archivedData.targetRemoved_one": "{{count}}개 행 축소. 저장 바이트 절감: {{size}}",
   "archivedData.targetRemoved_other": "{{count}}개 행 축소. 저장 바이트 절감: {{size}}",
   "archivedData.targetScanned": "{{rows}}개 행 검사, 대상 {{eligible}}개, 처리 전 저장량 {{before}}.",

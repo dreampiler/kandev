@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -155,6 +157,150 @@ func (p *ChildStallProducer) sourceStillStalled(ctx context.Context, turnID stri
 		return true
 	default:
 		return false
+	}
+}
+
+// queuedChildStallNudge checks a server reminder before any prompt is recorded.
+func (p *ChildStallProducer) queuedChildStallNudge(ctx context.Context, entry *messagequeue.QueuedMessage) (bool, error) {
+	turnID, _ := entry.Metadata["turn_id"].(string)
+	if turnID == "" {
+		return true, nil
+	}
+	turn, err := p.store.GetTurn(ctx, turnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if turn == nil || turn.TaskID != entry.TaskID {
+		return false, nil
+	}
+	start, ok := models.LoadChildStallStart(turn.Metadata)
+	if !ok {
+		return false, nil
+	}
+	evidence, err := p.gatherEvidence(ctx, turn, start, p.now())
+	if err != nil {
+		return false, err
+	}
+	decision := childstall.Classify(evidence, p.policy)
+	return decision.Outcome == childstall.OutcomeQualified && decision.Cause == childstall.CauseMissingCompletionSignal, nil
+}
+
+func (s *Service) checkQueuedChildStallNotice(ctx context.Context, entry *messagequeue.QueuedMessage, reservation *queuedDispatchReservation) (dispatch, deferDrain bool) {
+	if s.childStallProducer == nil || entry.IsDeliveryAttempted() || entry.IsDurableDelivery() {
+		return true, false
+	}
+	var current bool
+	var err error
+	switch {
+	case messagequeue.IsChildStallNudge(entry):
+		current, err = s.childStallProducer.queuedChildStallNudge(ctx, entry)
+	case messagequeue.IsChildStallAlert(entry):
+		current, err = s.childStallProducer.prepareQueuedChildStallAlert(ctx, entry)
+	default:
+		return true, false
+	}
+	if err == nil && current {
+		return true, false
+	}
+	if err == nil {
+		err = s.messageQueue.AcknowledgeQueued(context.WithoutCancel(ctx), entry)
+		if err == nil {
+			s.publishQueueStatusEvent(ctx, entry.SessionID)
+			return false, false
+		}
+	}
+	s.logger.Warn("deferring child stall notice", zap.String("queue_id", entry.ID), zap.Error(err))
+	s.requeueMessageForReservation(ctx, reservation, entry, entry.QueuedBy)
+	return false, true
+}
+
+func (p *ChildStallProducer) prepareQueuedChildStallAlert(ctx context.Context, entry *messagequeue.QueuedMessage) (bool, error) {
+	descriptors := messagequeue.ChildStallAlertDescriptors(entry)
+	if len(descriptors) == 0 {
+		return true, nil
+	}
+	parent, err := p.store.GetTask(ctx, entry.TaskID)
+	if isTaskNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if parent == nil || parent.ArchivedAt != nil || models.IsTerminalTaskState(parent.State) {
+		return false, nil
+	}
+	kept := make([]messagequeue.ChildStallAlertDescriptor, 0, len(descriptors))
+	changed := false
+	for _, descriptor := range descriptors {
+		current, eligible, err := p.currentChildStallAlert(ctx, parent, descriptor)
+		if err != nil {
+			return false, err
+		}
+		if eligible {
+			kept = append(kept, current)
+		}
+		changed = changed || !eligible || current != descriptor
+	}
+	if len(kept) == 0 {
+		return false, nil
+	}
+	if changed {
+		parts := make([]string, 0, len(kept))
+		for _, item := range kept {
+			parts = append(parts, formatChildStallPrompt(&models.Task{ID: item.ChildTaskID, Title: item.ChildTaskTitle}, &models.Turn{ID: item.TurnID},
+				item.StepName, childstall.Decision{Cause: childstall.Cause(item.Cause), QuestionID: item.QuestionID}))
+		}
+		entry.Content = strings.Join(parts, "\n\n")
+		entry.Metadata = messagequeue.WithChildStallAlertDescriptors(entry.Metadata, kept)
+	}
+	return true, nil
+}
+
+func (p *ChildStallProducer) currentChildStallAlert(ctx context.Context, parent *models.Task, item messagequeue.ChildStallAlertDescriptor) (messagequeue.ChildStallAlertDescriptor, bool, error) {
+	if item.TurnID == "" {
+		return item, true, nil
+	}
+	turn, err := p.store.GetTurn(ctx, item.TurnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return item, false, nil
+	}
+	if err != nil {
+		return item, false, err
+	}
+	if turn == nil || turn.TaskID != item.ChildTaskID {
+		return item, false, nil
+	}
+	start, ok := models.LoadChildStallStart(turn.Metadata)
+	if !ok || start.ParentTaskID != parent.ID || start.WorkspaceID != parent.WorkspaceID {
+		return item, false, nil
+	}
+	decision, err := p.classifyCurrentChildStall(ctx, turn, start)
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		return item, false, nil
+	}
+	if err != nil {
+		return item, false, err
+	}
+	item, eligible := refreshQueuedChildStallAlert(item, decision)
+	return item, eligible, nil
+}
+
+func refreshQueuedChildStallAlert(item messagequeue.ChildStallAlertDescriptor, decision childstall.Decision) (messagequeue.ChildStallAlertDescriptor, bool) {
+	switch decision.Outcome {
+	case childstall.OutcomeQualified:
+		cause := string(decision.Cause)
+		if decision.QuestionID != "" || cause != item.Cause {
+			item.QuestionID = decision.QuestionID
+		}
+		item.Cause = cause
+		return item, true
+	case childstall.OutcomeHeld, childstall.OutcomeSettling:
+		return item, true
+	default:
+		return item, false
 	}
 }
 

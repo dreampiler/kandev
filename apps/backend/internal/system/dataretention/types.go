@@ -58,20 +58,21 @@ type Update struct {
 // progress is the resumable cursor of one pass. Each target keeps its own
 // keyset so finishing one never loses the other's position.
 type progress struct {
-	SchemaVersion int    `json:"schema_version"`
-	Task          string `json:"task"`
-	TaskAfter     string `json:"task_after"`
-	Session       string `json:"session"`
-	SessionAfter  string `json:"session_after"`
-	Message       int64  `json:"message"`
-	UpperTask     string `json:"upper_task"`
-	UpperMessage  int64  `json:"upper_message"`
-	Job           string `json:"job"`
-	JobAfter      string `json:"job_after"`
-	UpperJob      string `json:"upper_job"`
-	Phase         string `json:"phase"`
-	Revision      int64  `json:"revision"`
-	Started       bool   `json:"started"`
+	SchemaVersion   int    `json:"schema_version"`
+	Task            string `json:"task"`
+	TaskAfter       string `json:"task_after"`
+	Session         string `json:"session"`
+	SessionAfter    string `json:"session_after"`
+	Message         int64  `json:"message"`
+	UpperTask       string `json:"upper_task"`
+	UpperMessage    int64  `json:"upper_message"`
+	UpperMessageRow *int64 `json:"upper_message_row,omitempty"`
+	Job             string `json:"job"`
+	JobAfter        string `json:"job_after"`
+	UpperJob        string `json:"upper_job"`
+	Phase           string `json:"phase"`
+	Revision        int64  `json:"revision"`
+	Started         bool   `json:"started"`
 }
 
 const (

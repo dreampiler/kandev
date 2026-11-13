@@ -878,6 +878,8 @@
   "archivedData.empty": "這些時間視窗內沒有可移除的歸檔資料。",
   "archivedData.targetMessages": "已完成或已歸檔的對話",
   "archivedData.targetCleanupJobs": "已完成的清理任務",
+  "archivedData.targetEstimated_one": "預計可縮減 {{count}} 行。預計儲存位元組減少：{{size}}。",
+  "archivedData.targetEstimated_other": "預計可縮減 {{count}} 行。預計儲存位元組減少：{{size}}。",
   "archivedData.targetRemoved_one": "已縮減 {{count}} 行。儲存位元組減少：{{size}}。",
   "archivedData.targetRemoved_other": "已縮減 {{count}} 行。儲存位元組減少：{{size}}。",
   "archivedData.targetScanned": "已掃描 {{rows}} 行，其中 {{eligible}} 行符合條件，本輪之前儲存 {{before}}。",

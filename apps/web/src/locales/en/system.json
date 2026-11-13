@@ -878,6 +878,8 @@
   "archivedData.empty": "No removable archived data found for these windows.",
   "archivedData.targetMessages": "Finished or archived conversations",
   "archivedData.targetCleanupJobs": "Completed cleanup jobs",
+  "archivedData.targetEstimated_one": "Estimated {{count}} row to reduce. Estimated stored-byte reduction: {{size}}.",
+  "archivedData.targetEstimated_other": "Estimated {{count}} rows to reduce. Estimated stored-byte reduction: {{size}}.",
   "archivedData.targetRemoved_one": "Reduced {{count}} row. Stored-byte reduction: {{size}}.",
   "archivedData.targetRemoved_other": "Reduced {{count}} rows. Stored-byte reduction: {{size}}.",
   "archivedData.targetScanned": "Scanned {{rows}} rows, {{eligible}} eligible, {{before}} stored before the pass.",

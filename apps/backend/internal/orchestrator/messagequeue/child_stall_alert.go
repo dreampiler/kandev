@@ -86,11 +86,18 @@ func childStallAlertList(metadata map[string]interface{}) []interface{} {
 }
 
 // ChildStallAlertDescriptor is one child-turn stalled candidate folded into a
-// queued alert entry.
+// queued alert entry. It carries every value the candidate's prompt text was
+// built from, so the text of one candidate can be rebuilt without the other
+// folded candidates.
 type ChildStallAlertDescriptor struct {
-	ChildTaskID string
-	TurnID      string
-	Cause       string
+	ChildTaskID    string
+	ChildTaskTitle string
+	ChildSessionID string
+	TurnID         string
+	StepID         string
+	StepName       string
+	Cause          string
+	QuestionID     string
 }
 
 // ChildStallAlertDescriptors returns the candidate descriptors folded into a
@@ -104,15 +111,63 @@ func ChildStallAlertDescriptors(message *QueuedMessage) []ChildStallAlertDescrip
 	for _, item := range raw {
 		descriptor, _ := item.(map[string]interface{})
 		childID, _ := descriptor["child_task_id"].(string)
+		childTitle, _ := descriptor["child_task_title"].(string)
+		childSessionID, _ := descriptor["child_session_id"].(string)
 		turnID, _ := descriptor["turn_id"].(string)
+		stepID, _ := descriptor["step_id"].(string)
+		stepName, _ := descriptor["step_name"].(string)
 		cause, _ := descriptor["cause"].(string)
+		questionID, _ := descriptor["question_id"].(string)
 		descriptors = append(descriptors, ChildStallAlertDescriptor{
-			ChildTaskID: childID,
-			TurnID:      turnID,
-			Cause:       cause,
+			ChildTaskID:    childID,
+			ChildTaskTitle: childTitle,
+			ChildSessionID: childSessionID,
+			TurnID:         turnID,
+			StepID:         stepID,
+			StepName:       stepName,
+			Cause:          cause,
+			QuestionID:     questionID,
 		})
 	}
 	return descriptors
+}
+
+// WithChildStallAlertDescriptors returns a copy of an alert entry's metadata
+// whose alert list holds exactly descriptors, so the dispatched history item
+// records only the candidates that reached the prompt.
+func WithChildStallAlertDescriptors(
+	metadata map[string]interface{},
+	descriptors []ChildStallAlertDescriptor,
+) map[string]interface{} {
+	merged := copyMessageMetadata(metadata, 0)
+	alerts := make([]interface{}, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		item := map[string]interface{}{
+			"child_task_id":    descriptor.ChildTaskID,
+			"child_task_title": descriptor.ChildTaskTitle,
+			"child_session_id": descriptor.ChildSessionID,
+			"turn_id":          descriptor.TurnID,
+			"step_id":          descriptor.StepID,
+			"step_name":        descriptor.StepName,
+			"cause":            descriptor.Cause,
+		}
+		if descriptor.QuestionID != "" {
+			item["question_id"] = descriptor.QuestionID
+		}
+		alerts = append(alerts, item)
+	}
+	merged[MetadataChildStallAlerts] = alerts
+	return merged
+}
+
+// ChildStallNudgeTurnID returns the source turn a child reminder was queued
+// for, or "" when the entry is not a reminder or carries no turn.
+func ChildStallNudgeTurnID(message *QueuedMessage) string {
+	if !IsChildStallNudge(message) {
+		return ""
+	}
+	turnID, _ := message.Metadata["turn_id"].(string)
+	return turnID
 }
 
 // ChildStallAlertChildIDs returns the distinct child task IDs a child-turn

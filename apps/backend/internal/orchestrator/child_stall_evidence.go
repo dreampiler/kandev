@@ -51,7 +51,7 @@ func (p *ChildStallProducer) gatherEvidence(
 		Archived:           child.ArchivedAt != nil,
 		LatestTransitionID: latestTransition,
 	}
-	if err := p.gatherSessionEvidence(ctx, turn.TaskSessionID, child, &evidence); err != nil {
+	if err := p.gatherSessionEvidence(ctx, turn, child, &evidence); err != nil {
 		return evidence, err
 	}
 	return evidence, nil
@@ -59,10 +59,11 @@ func (p *ChildStallProducer) gatherEvidence(
 
 func (p *ChildStallProducer) gatherSessionEvidence(
 	ctx context.Context,
-	sessionID string,
+	turn *models.Turn,
 	child *models.Task,
 	evidence *childstall.Evidence,
 ) error {
+	sessionID := turn.TaskSessionID
 	session, err := p.store.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -85,7 +86,7 @@ func (p *ChildStallProducer) gatherSessionEvidence(
 	if p.svc != nil {
 		evidence.StepRequiresSignal = p.svc.WorkflowStepRequiresCompletionSignal(ctx, child.WorkflowStepID)
 	}
-	if err := p.gatherCompletionSignalState(ctx, session, child, evidence); err != nil {
+	if err := p.gatherCompletionSignalState(ctx, turn, child, evidence, session); err != nil {
 		return err
 	}
 	return nil
@@ -102,9 +103,10 @@ func (p *ChildStallProducer) gatherSessionEvidence(
 // the same step cannot suppress a genuine stall.
 func (p *ChildStallProducer) gatherCompletionSignalState(
 	ctx context.Context,
-	turnSession *models.TaskSession,
+	turn *models.Turn,
 	child *models.Task,
 	evidence *childstall.Evidence,
+	turnSession *models.TaskSession,
 ) error {
 	candidates := make([]*models.TaskSession, 0, 3)
 	seen := make(map[string]struct{}, 3)
@@ -147,7 +149,7 @@ func (p *ChildStallProducer) gatherCompletionSignalState(
 	entryOccurredAt, entryKnown := p.currentEntryOccurredAt(ctx, child.ID, evidence.Start.TransitionID)
 	var newestRejection time.Time
 	for _, session := range candidates {
-		if err := p.gatherCompletionSessionActivity(ctx, turnSession, session, child.ID, evidence); err != nil {
+		if err := p.gatherCompletionSessionActivity(ctx, turn, session, child.ID, evidence); err != nil {
 			return err
 		}
 		observeCompletionSignalState(session, child.WorkflowStepID, entryOccurredAt, entryKnown, evidence, &newestRejection)
@@ -157,14 +159,22 @@ func (p *ChildStallProducer) gatherCompletionSignalState(
 
 func (p *ChildStallProducer) gatherCompletionSessionActivity(
 	ctx context.Context,
-	turnSession, session *models.TaskSession,
+	turn *models.Turn,
+	session *models.TaskSession,
 	childID string,
 	evidence *childstall.Evidence,
 ) error {
 	if session.TaskID != childID {
 		return fmt.Errorf("child stall signal session owner changed")
 	}
-	if session.ID == turnSession.ID {
+	if !evidence.Superseded {
+		latest, err := p.store.GetLatestCompletedTurnBySessionID(ctx, session.ID)
+		if err != nil {
+			return err
+		}
+		evidence.Superseded = latest != nil && latest.ID != turn.ID && latest.StartedAt.After(turn.StartedAt)
+	}
+	if session.ID == turn.TaskSessionID {
 		return nil
 	}
 	active, err := p.hasActiveTurn(ctx, session.ID)

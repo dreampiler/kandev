@@ -51,6 +51,7 @@ const (
 	ReasonReparented        = "reparented"
 	ReasonWorkspaceChanged  = "workspace_changed"
 	ReasonResumed           = "resumed"
+	ReasonSuperseded        = "superseded"
 	ReasonEntryChanged      = "entry_changed"
 	ReasonSessionClosed     = "session_closed"
 	ReasonSignalUnprocessed = "signal_unprocessed"
@@ -83,6 +84,7 @@ type Evidence struct {
 	SessionState       models.TaskSessionState
 	SessionErrorClass  string
 	SessionActiveTurn  bool
+	Superseded         bool
 	PendingInputs      []PendingInput
 	StepRequiresSignal bool
 	PendingStepSignal  bool
@@ -149,6 +151,8 @@ func staleReason(evidence Evidence) (string, bool) {
 		return ReasonWorkspaceChanged, true
 	case evidence.SessionActiveTurn || sessionExecuting(evidence.SessionState):
 		return ReasonResumed, true
+	case evidence.Superseded:
+		return ReasonSuperseded, true
 	case child.LatestTransitionID != evidence.Start.TransitionID:
 		return ReasonEntryChanged, true
 	}
@@ -156,6 +160,9 @@ func staleReason(evidence Evidence) (string, bool) {
 }
 
 func classifyCause(evidence Evidence, policy Policy) Decision {
+	if evidence.Settlement == models.ChildStallSettlementCancelled {
+		return suppressed(ReasonCancelled)
+	}
 	for _, input := range evidence.PendingInputs {
 		if input.ParentQuestionID != "" {
 			return Decision{Outcome: OutcomeHeld, Cause: CauseInputRequired, QuestionID: input.ParentQuestionID}
@@ -163,9 +170,6 @@ func classifyCause(evidence Evidence, policy Policy) Decision {
 	}
 	if len(evidence.PendingInputs) > 0 {
 		return qualified(CauseInputRequired)
-	}
-	if evidence.Settlement == models.ChildStallSettlementCancelled {
-		return suppressed(ReasonCancelled)
 	}
 	switch evidence.SessionState {
 	case models.TaskSessionStateFailed:

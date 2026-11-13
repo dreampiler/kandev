@@ -27,7 +27,7 @@ func (s *Service) Analyze(ctx context.Context, u Update) (string, error) {
 		return "", err
 	}
 	r, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if r.Operation != nil && r.Operation.State == stateRunning {
+		if operationBusy(r) {
 			return errors.New("busy")
 		}
 		now := s.opts.Now()
@@ -87,7 +87,7 @@ func (s *Service) Cancel(ctx context.Context, id string) (Status, error) {
 		return Status{}, err
 	}
 	r, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if !operationMatches(r, id) || r.Operation.State != stateRunning {
+		if !activeOperation(r, id) {
 			return nil
 		}
 		if r.Operation.Kind == choiceBackup {
@@ -103,6 +103,7 @@ func (s *Service) Cancel(ctx context.Context, id string) (Status, error) {
 			return nil
 		}
 		finishOperation(r, stateCancelled, "cancelled", s.opts.Now())
+		scheduleNextPass(r, s.opts.Now())
 		return nil
 	})
 	if err != nil {

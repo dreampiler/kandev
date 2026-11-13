@@ -31,7 +31,7 @@ func validateWorkspaceInventoryBranchContinuity(
 		}
 		return fmt.Errorf("%w: branch changed without completed repair attestation", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
-	if err := validateWorkspaceInventoryRepairCandidate(env, info, row); err != nil {
+	if err := validateAttestedInventoryCandidate(receipt, env, info, row); err != nil {
 		return err
 	}
 	current, err := worktree.InspectCheckoutIdentity(ctx, worktree.PreservationRequest{
@@ -45,4 +45,11 @@ func validateWorkspaceInventoryBranchContinuity(
 		return fmt.Errorf("%w: current checkout identity differs from completed repair", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return nil
+}
+
+func validateAttestedInventoryCandidate(receipt *models.WorkspaceInventoryRecoveryReceipt, env *models.TaskEnvironment, info *repoInfo, row *models.TaskEnvironmentRepo) error {
+	if receipt.Preservation.Fence != nil && info.Repository != nil && info.Repository.SourceType == sourceTypeLocal {
+		return validateLocalInventoryCandidate(env, info, row)
+	}
+	return validateWorkspaceInventoryRepairCandidate(env, info, row)
 }

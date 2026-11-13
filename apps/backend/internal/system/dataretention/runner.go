@@ -11,6 +11,7 @@ import (
 )
 
 var errMaintenanceBusy = errors.New("maintenance_busy")
+var errBackupVerificationFailed = errors.New("backup_verification_failed")
 
 // stepCleanup runs one mutating batch under the shared maintenance admission, so
 // a pass defers while backup, restore, reset or compaction owns the writer.
@@ -24,7 +25,7 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if !operationMatches(&before, id) {
+	if !activeOperation(&before, id) {
 		return nil
 	}
 	if !approved(&before) {
@@ -36,7 +37,7 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	}
 	var changed []string
 	_, err = s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if !operationMatches(r, id) {
+		if !activeOperation(r, id) {
 			return nil
 		}
 		if !approved(r) || r.Policy.Revision != r.Progress.Revision {
@@ -97,7 +98,7 @@ func (s *Service) checkReceipt(ctx context.Context, r record) error {
 		return errors.New("backup_unavailable")
 	}
 	if err := s.opts.VerifyBackup(ctx, r.Receipt); err != nil {
-		return errors.New("backup_verification_failed")
+		return errBackupVerificationFailed
 	}
 	return nil
 }

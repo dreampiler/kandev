@@ -878,6 +878,8 @@
   "archivedData.empty": "这些时间窗口内没有可移除的归档数据。",
   "archivedData.targetMessages": "已完成或已归档的对话",
   "archivedData.targetCleanupJobs": "已完成的清理任务",
+  "archivedData.targetEstimated_one": "预计可缩减 {{count}} 行。预计存储字节减少：{{size}}。",
+  "archivedData.targetEstimated_other": "预计可缩减 {{count}} 行。预计存储字节减少：{{size}}。",
   "archivedData.targetRemoved_one": "已缩减 {{count}} 行。存储字节减少：{{size}}。",
   "archivedData.targetRemoved_other": "已缩减 {{count}} 行。存储字节减少：{{size}}。",
   "archivedData.targetScanned": "已扫描 {{rows}} 行，其中 {{eligible}} 行符合条件，本轮之前存储 {{before}}。",

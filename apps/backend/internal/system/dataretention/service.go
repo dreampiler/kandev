@@ -256,6 +256,10 @@ func operationMatches(r *record, id string) bool {
 	return r.Operation != nil && r.Operation.ID == id
 }
 
+func activeOperation(r *record, id string) bool {
+	return operationMatches(r, id) && r.Operation.State == stateRunning
+}
+
 func finishOperation(r *record, state, code string, now time.Time) {
 	if r.Operation == nil {
 		return
@@ -283,6 +287,10 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 	if err != nil {
 		return err
 	}
+	upperMessageRow, err := tasksqlite.HistoryUpperMessageRowID(ctx, q)
+	if err != nil {
+		return err
+	}
 	upperJob, err := tasksqlite.SucceededCleanupUpperJobID(ctx, q)
 	if err != nil {
 		return err
@@ -298,12 +306,13 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 		PolicyRevision: r.Policy.Revision,
 	}
 	r.Progress = progress{
-		SchemaVersion: schemaVersion,
-		UpperTask:     upperTask,
-		UpperJob:      upperJob,
-		Phase:         phaseMessages,
-		Revision:      r.Policy.Revision,
-		Started:       true,
+		SchemaVersion:   schemaVersion,
+		UpperTask:       upperTask,
+		UpperMessageRow: &upperMessageRow,
+		UpperJob:        upperJob,
+		Phase:           phaseMessages,
+		Revision:        r.Policy.Revision,
+		Started:         true,
 	}
 	return nil
 }

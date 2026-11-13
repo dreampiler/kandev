@@ -878,6 +878,8 @@
   "archivedData.empty": "Ńō ŕēḿōvàƀĺē àŕćĥĩvēď ďàţà ƒōũńď ƒōŕ ţĥēśē ŵĩńďōŵś.",
   "archivedData.targetMessages": "Ƒĩńĩśĥēď ōŕ àŕćĥĩvēď ćōńvēŕśàţĩōńś",
   "archivedData.targetCleanupJobs": "Ćōḿƥĺēţēď ćĺēàńũƥ ĵōƀś",
+  "archivedData.targetEstimated_one": "Ēśţĩḿàţēď {{count}} ŕōŵ ţō ŕēďũćē. Ēśţĩḿàţēď śţōŕēď-ƀŷţē ŕēďũćţĩōń: {{size}}.",
+  "archivedData.targetEstimated_other": "Ēśţĩḿàţēď {{count}} ŕōŵś ţō ŕēďũćē. Ēśţĩḿàţēď śţōŕēď-ƀŷţē ŕēďũćţĩōń: {{size}}.",
   "archivedData.targetRemoved_one": "Ŕēďũćēď {{count}} ŕōŵ. Śţōŕēď-ƀŷţē ŕēďũćţĩōń: {{size}}.",
   "archivedData.targetRemoved_other": "Ŕēďũćēď {{count}} ŕōŵś. Śţōŕēď-ƀŷţē ŕēďũćţĩōń: {{size}}.",
   "archivedData.targetScanned": "Śćàńńēď {{rows}} ŕōŵś, {{eligible}} ēĺĩĝĩƀĺē, {{before}} śţōŕēď ƀēƒōŕē ţĥē ƥàśś.",

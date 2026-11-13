@@ -15,14 +15,22 @@ const targetLabel = {
 
 // The two targets are reported separately everywhere. Collapsing them into one
 // number would let one target's effect be read as the other's.
-function TargetResult({ target, labelKey }: { target: ArchivedDataTarget; labelKey: string }) {
+function TargetResult({
+  target,
+  labelKey,
+  estimate,
+}: {
+  target: ArchivedDataTarget;
+  labelKey: string;
+  estimate: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="space-y-0.5">
       <p className="text-sm font-medium">{t(labelKey)}</p>
       <p className="text-sm">
-        {t("system:archivedData.targetRemoved", {
-          count: target.reduced,
+        {t(estimate ? "system:archivedData.targetEstimated" : "system:archivedData.targetRemoved", {
+          count: estimate ? target.eligible : target.reduced,
           size: formatBytes(target.bytes),
         })}
       </p>
@@ -47,19 +55,28 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
   if (operation.kind === "backup")
     return <p className="text-sm">{t("system:archivedData.preparing")}</p>;
   const skipped = skippedTotal(operation.skipped);
-  const reduced = operation.messages.reduced + operation.cleanup_jobs.reduced;
+  const estimate = operation.kind === "analysis";
+  const scanned = operation.messages.rows + operation.cleanup_jobs.rows;
   return (
     <div className="space-y-2 break-words text-sm">
       <p className="text-xs text-muted-foreground">
         {t(`system:archivedData.${operation.kind}`)}: {t(`system:archivedData.${operation.state}`)}
         {operation.finished_at && <> · {retentionDate(operation.finished_at)}</>}
       </p>
-      {reduced === 0 && operation.state === "succeeded" ? (
+      {!estimate && scanned === 0 && operation.state === "succeeded" ? (
         <p>{t("system:archivedData.empty")}</p>
       ) : (
         <>
-          <TargetResult target={operation.messages} labelKey={targetLabel.messages} />
-          <TargetResult target={operation.cleanup_jobs} labelKey={targetLabel.cleanup_jobs} />
+          <TargetResult
+            target={operation.messages}
+            labelKey={targetLabel.messages}
+            estimate={estimate}
+          />
+          <TargetResult
+            target={operation.cleanup_jobs}
+            labelKey={targetLabel.cleanup_jobs}
+            estimate={estimate}
+          />
         </>
       )}
       <details className="text-xs text-muted-foreground">

@@ -473,7 +473,8 @@ func workspaceInventoryRetryIdentity(
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
 ) (string, RepoSpec, *repoInfo, *models.TaskEnvironmentRepo, bool) {
-	if existing == nil || !inventoryMetadataFence(ctx).Equal(existing.Preservation.Fence) {
+	// The fence protects the original write; replay must match the repair mode.
+	if existing == nil || (inventoryMetadataFence(ctx) == nil) != (existing.Preservation.Fence == nil) {
 		return "", RepoSpec{}, nil, nil, false
 	}
 	if !workspaceInventoryRetryReceiptMatches(existing, task, session, env) ||

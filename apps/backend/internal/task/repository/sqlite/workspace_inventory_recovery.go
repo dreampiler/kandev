@@ -51,15 +51,15 @@ func (r *Repository) RepairWorkspaceInventory(
 		return nil, err
 	}
 
-	if err := r.validateInventoryFenceTx(ctx, tx, repair); err != nil {
-		return nil, err
-	}
 	existing, err := r.loadWorkspaceInventoryReceiptTx(ctx, tx, repair.TaskID, repair.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
 	if dedup, dedupErr := dedupedWorkspaceInventoryReceipt(existing, repair.RequestHash); dedup != nil || dedupErr != nil {
 		return dedup, dedupErr
+	}
+	if err := r.validateInventoryFenceTx(ctx, tx, repair); err != nil {
+		return nil, err
 	}
 	if err := r.validateWorkspaceInventoryRepairTx(ctx, tx, repair); err != nil {
 		return nil, err

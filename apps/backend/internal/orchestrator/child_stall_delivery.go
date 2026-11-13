@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -129,6 +130,12 @@ func (p *ChildStallProducer) deliverToParent(
 			return false
 		}
 		state.State, state.Reason = string(childstall.OutcomeSuppressed), "parent_unavailable"
+		p.persist(ctx, turn, state, true, now)
+		recordChildStallReason(state.Reason)
+		return false
+	}
+	if parentTask.WorkspaceID != start.WorkspaceID {
+		state.State, state.Reason = string(childstall.OutcomeSuppressed), childstall.ReasonWorkspaceChanged
 		p.persist(ctx, turn, state, true, now)
 		recordChildStallReason(state.Reason)
 		return false
@@ -434,6 +441,25 @@ func (p *ChildStallProducer) recheck(
 	turn *models.Turn,
 	start models.ChildStallStart,
 ) (childstall.Decision, error) {
+	current, err := p.store.GetTurn(ctx, turn.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return childstall.Decision{Outcome: childstall.OutcomeSuppressed, Reason: childstall.ReasonSuperseded}, nil
+	}
+	if err != nil {
+		return childstall.Decision{}, err
+	}
+	if current == nil || current.TaskID != turn.TaskID || current.TaskSessionID != turn.TaskSessionID {
+		return childstall.Decision{Outcome: childstall.OutcomeSuppressed, Reason: childstall.ReasonSuperseded}, nil
+	}
+	currentStart, ok := models.LoadChildStallStart(current.Metadata)
+	if !ok || currentStart.TransitionID != start.TransitionID || currentStart.ParentTaskID != start.ParentTaskID ||
+		currentStart.WorkspaceID != start.WorkspaceID {
+		return childstall.Decision{Outcome: childstall.OutcomeSuppressed, Reason: childstall.ReasonEntryChanged}, nil
+	}
+	return p.classifyCurrentChildStall(ctx, current, currentStart)
+}
+
+func (p *ChildStallProducer) classifyCurrentChildStall(ctx context.Context, turn *models.Turn, start models.ChildStallStart) (childstall.Decision, error) {
 	now := p.now()
 	evidence, err := p.gatherEvidence(ctx, turn, start, now)
 	if err != nil {

@@ -1669,6 +1669,11 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 	if state.dispatchErr = s.validateQueuedPassthroughDelivery(ctx, identity); state.dispatchErr != nil {
 		return
 	}
+	if dispatch, deferDrain := s.checkQueuedChildStallNotice(ctx, queuedMsg, reservation); !dispatch {
+		state.noticeHandled = true
+		state.skipFollowupDrain = deferDrain
+		return
+	}
 	turnReservation, refusal := s.admitQueuedPassthroughTurn(ctx, identity)
 	if refusal != nil {
 		state.dispatchErr = refusal
@@ -1704,6 +1709,8 @@ func (s *Service) admitQueuedPassthroughTurn(
 }
 
 type queuedPassthroughExecutionState struct {
+	noticeHandled                  bool
+	skipFollowupDrain              bool
 	userMessageRecorded            bool
 	deliveryAttempted              bool
 	dispatchErr                    error
@@ -1733,16 +1740,18 @@ func (s *Service) finishQueuedPassthroughExecution(
 			)
 		}
 	}
-	s.finishQueuedMessageExecution(
-		ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
-		isLifecycleAutomationMessage(queuedMsg),
-		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
-	)
+	if !state.noticeHandled {
+		s.finishQueuedMessageExecution(
+			ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
+			isLifecycleAutomationMessage(queuedMsg),
+			state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
+		)
+	}
 	if _, refusedForCapacity := messageTurnCapacityRefusalOf(state.dispatchErr); refusedForCapacity {
 		s.clearQueuedDispatchInFlightForCapacityRefusal(identity.SessionID, reservation)
 	} else {
 		s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-		if !isBuiltinIntentError(state.dispatchErr) {
+		if !state.skipFollowupDrain && !isBuiltinIntentError(state.dispatchErr) {
 			s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
 		}
 	}
@@ -1960,6 +1969,10 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 
+	if dispatch, deferDrain := s.checkQueuedChildStallNotice(promptCtx, queuedMsg, reservation); !dispatch {
+		allowFollowupDrain = !deferDrain
+		return
+	}
 	var intentErr error
 	promptCtx, intentErr = s.prepareQueuedBuiltinIntent(promptCtx, queuedMsg)
 	if intentErr != nil {

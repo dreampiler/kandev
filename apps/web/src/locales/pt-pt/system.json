@@ -878,6 +878,8 @@
   "archivedData.empty": "Não foram encontrados dados arquivados removíveis para estas janelas.",
   "archivedData.targetMessages": "Conversas concluídas ou arquivadas",
   "archivedData.targetCleanupJobs": "Jobs de limpeza concluídos",
+  "archivedData.targetEstimated_one": "Estimativa: {{count}} linha a reduzir. Redução estimada de bytes guardados: {{size}}.",
+  "archivedData.targetEstimated_other": "Estimativa: {{count}} linhas a reduzir. Redução estimada de bytes guardados: {{size}}.",
   "archivedData.targetRemoved_one": "{{count}} linha reduzida. Redução de bytes guardados: {{size}}.",
   "archivedData.targetRemoved_other": "{{count}} linhas reduzidas. Redução de bytes guardados: {{size}}.",
   "archivedData.targetScanned": "{{rows}} linhas analisadas, {{eligible}} elegíveis, {{before}} guardados antes da passagem.",

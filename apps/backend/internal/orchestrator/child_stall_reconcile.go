@@ -49,7 +49,7 @@ func (p *ChildStallProducer) reconcileDelivered(
 		stats.observePending(turn)
 		return
 	}
-	if parentTask == nil || parentTask.ArchivedAt != nil || models.IsTerminalTaskState(parentTask.State) {
+	if parentTask == nil || parentTask.WorkspaceID != start.WorkspaceID || parentTask.ArchivedAt != nil || models.IsTerminalTaskState(parentTask.State) {
 		p.withdrawDeliveredNotice(ctx, turn, start, state, noticeOutcomeParentGone, now)
 		return
 	}

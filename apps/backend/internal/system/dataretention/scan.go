@@ -24,6 +24,7 @@ const (
 const (
 	skipProtectedTasks    = "protected_tasks"
 	skipEligibilityBudget = "eligibility_budget"
+	skipChanged           = "changed"
 )
 
 var (
@@ -56,6 +57,13 @@ func (s *Service) stepScan(ctx context.Context, r record) error {
 // stepAnalysis measures the same candidates a cleanup pass would touch without
 // writing anything, so the settings surface can show the effect before it runs.
 func (s *Service) stepAnalysis(ctx context.Context, r record) error {
+	current, err := readRecord(ctx, s.pool.Reader())
+	if err != nil {
+		return err
+	}
+	if !activeOperation(&current, r.Operation.ID) {
+		return nil
+	}
 	if _, err := s.scanBatch(ctx, s.pool.Reader(), &r, false); err != nil {
 		return err
 	}
@@ -64,7 +72,7 @@ func (s *Service) stepAnalysis(ctx context.Context, r record) error {
 
 func (s *Service) storeScanProgress(ctx context.Context, r record) error {
 	_, err := s.change(ctx, func(current *record, tx *sqlx.Tx) error {
-		if !operationMatches(current, r.Operation.ID) {
+		if !activeOperation(current, r.Operation.ID) {
 			return nil
 		}
 		if r.Operation.Kind == kindCleanup && (!approved(current) || current.Policy.Revision != r.Progress.Revision) {
@@ -92,23 +100,24 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 		return nil, err
 	}
 	used := int64(0)
-	changed, err := s.scanMessageBatch(ctx, q, r, mutate, &used)
+	rows := int64(0)
+	started := time.Now()
+	changed, err := s.scanMessageBatch(ctx, q, r, mutate, &used, &rows, started)
 	if err != nil {
 		return nil, err
 	}
-	if used < batchBytes && r.Progress.Phase == phaseJobs {
-		if _, err := s.scanJobBatch(ctx, q, r, mutate, &used); err != nil {
+	if used < batchBytes && rows < batchRows && r.Progress.Phase == phaseJobs {
+		if _, err := s.scanJobBatch(ctx, q, r, mutate, &used, batchRows-rows, started); err != nil {
 			return nil, err
 		}
 	}
 	return changed, checkScanSchema(ctx, q, r)
 }
 
-func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) ([]string, error) {
+func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used, rows *int64, started time.Time) ([]string, error) {
 	changed := []string{}
 	validated := r.Progress.Task
-	started := time.Now()
-	for i := 0; i < batchRows && *used < batchBytes; i++ {
+	for i := 0; i < batchRows && *rows < batchRows && *used < batchBytes; i++ {
 		if i > 0 && time.Since(started) >= statementBudget {
 			break
 		}
@@ -122,10 +131,12 @@ func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r
 		if !ready {
 			continue
 		}
-		full, err := s.consumeMessagePage(ctx, q, r, mutate, used, &changed, batchRows-i)
+		before := r.Operation.Messages.Rows
+		full, err := s.consumeMessagePage(ctx, q, r, mutate, used, &changed, int(batchRows-*rows), started, *rows > 0)
 		if err != nil {
 			return nil, err
 		}
+		*rows += r.Operation.Messages.Rows - before
 		if full {
 			break
 		}
@@ -209,6 +220,9 @@ func (s *Service) openMessageSession(ctx context.Context, q sqlx.QueryerContext,
 		return err
 	}
 	p.Session = id
+	if p.UpperMessageRow != nil {
+		upper = min(upper, *p.UpperMessageRow)
+	}
 	p.UpperMessage = upper
 	return nil
 }
@@ -216,7 +230,7 @@ func (s *Service) openMessageSession(ctx context.Context, q sqlx.QueryerContext,
 // consumeMessagePage reduces one bounded page of an archived session. The page
 // is stopped before a row that would exceed the batch byte budget, so the row is
 // left for the next batch with its cursor intact.
-func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64, changed *[]string, limit int) (bool, error) {
+func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64, changed *[]string, limit int, started time.Time, progressed bool) (bool, error) {
 	p := &r.Progress
 	rows, err := tasksqlite.NextArchivedMessageRows(ctx, q, p.Session, p.Message, p.UpperMessage, limit)
 	if err != nil {
@@ -226,7 +240,10 @@ func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext,
 		finishSession(p)
 		return false, nil
 	}
-	for _, row := range rows {
+	for i, row := range rows {
+		if (progressed || i > 0) && time.Since(started) >= statementBudget {
+			return true, nil
+		}
 		if row.Bytes <= models.ToolPayloadMaxBytes && *used > 0 && row.Bytes > batchBytes-*used {
 			return true, nil
 		}
@@ -260,7 +277,11 @@ func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext,
 // row the first already handled. Eligibility is re-read inside the writer
 // transaction so a task that becomes active mid-pass keeps its payload.
 func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *record, row tasksqlite.ArchivedMessageRow, mutate bool) (string, error) {
-	raw, err := tasksqlite.ArchivedMessageMetadata(ctx, q, row.RowID, row.ID)
+	raw, err := tasksqlite.ArchivedMessageMetadata(ctx, q, row.RowID, row.ID, row.Bytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		r.Operation.Skipped[skipChanged]++
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -274,8 +295,8 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 	}
 	target := &r.Operation.Messages
 	target.Eligible++
-	target.Bytes += reduced.RemovedBytes
 	if !mutate {
+		target.Bytes += reduced.RemovedBytes
 		// A dry run still reports the candidate so the caller can tell "there is
 		// work to gate on" from "nothing matched in this batch".
 		return row.ID, nil
@@ -291,6 +312,7 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 	if err := tasksqlite.WriteReducedMessageMetadata(ctx, tx, row.ID, raw, string(reduced.Metadata)); err != nil {
 		return "", err
 	}
+	target.Bytes += reduced.RemovedBytes
 	var metadata map[string]any
 	if json.Unmarshal([]byte(raw), &metadata) == nil && models.HasIncrementalShellOutput(metadata) {
 		if err := tasksqlite.RemoveMessageShellOutputTx(ctx, tx, row.ID); err != nil {
@@ -305,10 +327,9 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 // scanJobBatch reduces finished cleanup-job snapshots. It reports no changed
 // message ids: the Changed hook only refreshes message payloads in the UI, and a
 // reduced job snapshot has no reader that needs a notification.
-func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) (bool, error) {
-	started := time.Now()
-	for i := 0; i < batchRows && *used < batchBytes; i++ {
-		if i > 0 && time.Since(started) >= statementBudget {
+func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64, remaining int64, started time.Time) (bool, error) {
+	for i := int64(0); i < remaining && *used < batchBytes; i++ {
+		if (i > 0 || remaining < batchRows) && time.Since(started) >= statementBudget {
 			break
 		}
 		p := &r.Progress
@@ -338,7 +359,7 @@ func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *re
 // succeeded job still serves through GetTaskSourceManifest after task deletion.
 func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) (bool, error) {
 	jobID := r.Progress.Job
-	bytes, snapshot, err := tasksqlite.CleanupJobSnapshotRow(ctx, q, jobID)
+	bytes, err := tasksqlite.CleanupJobSnapshotBytes(ctx, q, jobID)
 	if err != nil {
 		return false, err
 	}
@@ -355,6 +376,23 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 		return true, nil
 	}
 	*used += bytes
+	eligible, err := s.cleanupSnapshotEligible(ctx, q, r, jobID)
+	if err != nil {
+		return false, err
+	}
+	if !eligible {
+		finishCleanupJob(&r.Progress)
+		return false, nil
+	}
+	snapshot, err := tasksqlite.CleanupJobSnapshotBody(ctx, q, jobID, bytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		r.Operation.Skipped[skipChanged]++
+		finishCleanupJob(&r.Progress)
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	reduced, err := models.ReduceCleanupSnapshot(snapshot, r.Operation.StartedAt)
 	if err != nil {
 		return false, err
@@ -373,16 +411,24 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	if !ok {
 		return false, errWriterRequired
 	}
-	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, tx, s.driverName(), jobID, r.Operation.CleanupCutoff)
-	if err != nil || !eligible {
-		return false, err
-	}
 	if err := tasksqlite.WriteReducedCleanupSnapshot(ctx, tx, jobID, snapshot, reduced.Snapshot); err != nil {
 		return false, err
 	}
 	target.Reduced++
 	r.FirstMutation = true
 	return false, nil
+}
+
+func (s *Service) cleanupSnapshotEligible(ctx context.Context, q sqlx.QueryerContext, r *record, id string) (bool, error) {
+	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, q, s.driverName(), id, r.Operation.CleanupCutoff)
+	if errors.Is(err, tasksqlite.ErrCleanupSnapshotEligibilityBudget) {
+		r.Operation.Skipped[skipEligibilityBudget]++
+		return false, nil
+	}
+	if err == nil && !eligible {
+		r.Operation.Skipped[skipProtectedTasks]++
+	}
+	return eligible, err
 }
 
 // checkScanSchema ends the pass when the schema changed under it: the captured
@@ -400,7 +446,7 @@ func checkScanSchema(ctx context.Context, q sqlx.QueryerContext, r *record) erro
 
 func (s *Service) stopChangedScan(ctx context.Context, id string) error {
 	_, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
-		if !operationMatches(r, id) {
+		if !activeOperation(r, id) {
 			return nil
 		}
 		finishOperation(r, statePartial, errDatabaseChanged.Error(), s.opts.Now())

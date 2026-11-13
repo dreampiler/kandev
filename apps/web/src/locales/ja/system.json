@@ -878,6 +878,8 @@
   "archivedData.empty": "これらの期間に削除できるアーカイブ済みデータはありません。",
   "archivedData.targetMessages": "完了またはアーカイブ済みの会話",
   "archivedData.targetCleanupJobs": "完了したクリーンアップジョブ",
+  "archivedData.targetEstimated_one": "縮小対象の見込み: {{count}} 行。保存バイト数の削減見込み: {{size}}",
+  "archivedData.targetEstimated_other": "縮小対象の見込み: {{count}} 行。保存バイト数の削減見込み: {{size}}",
   "archivedData.targetRemoved_one": "{{count}} 行を縮小しました。保存バイト数の削減: {{size}}",
   "archivedData.targetRemoved_other": "{{count}} 行を縮小しました。保存バイト数の削減: {{size}}",
   "archivedData.targetScanned": "{{rows}} 行をスキャン、{{eligible}} 行が対象、処理前の保存量は {{before}} です。",

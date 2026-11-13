@@ -42,20 +42,17 @@ func (e *Executor) RepairWorkspaceInventoryOnly(ctx context.Context, taskID, ses
 	if err != nil {
 		return nil, err
 	}
+	if fence == nil || fence.SessionState != string(session.State) || !fence.SessionUpdatedAt.Equal(session.UpdatedAt) {
+		return nil, models.ErrWorkspaceInventoryRecoveryConflict
+	}
 	req, infos, err := e.metadataInventoryInputs(ctx, task.ToAPI(), env)
 	if err != nil {
 		return nil, err
 	}
 	scoped := context.WithValue(ctx, inventoryMetadataKey{}, fence)
-	receipt, err := e.repairReuseEnvironmentInventory(scoped, task.ToAPI(), session, req, env, infos, key)
-	if err != nil {
-		return nil, err
-	}
-	after, err := store.ReadWorkspaceInventoryRepairFence(ctx, taskID, sessionID)
-	if err != nil || !fence.Equal(after) {
-		return nil, models.ErrWorkspaceInventoryRecoveryConflict
-	}
-	return receipt, nil
+	// The transaction checks the fence before writing. Return the committed
+	// receipt even if the session subsequently changes.
+	return e.repairReuseEnvironmentInventory(scoped, task.ToAPI(), session, req, env, infos, key)
 }
 
 func (e *Executor) metadataInventoryTaskSession(ctx context.Context, taskID, sessionID string) (*models.Task, *models.TaskSession, error) {
@@ -110,6 +107,10 @@ func validateScopedInventoryCandidate(ctx context.Context, env *models.TaskEnvir
 	if info.Repository == nil || info.Repository.SourceType != sourceTypeLocal || inventoryMetadataFence(ctx) == nil {
 		return validateWorkspaceInventoryRepairCandidate(env, info, candidate)
 	}
+	return validateLocalInventoryCandidate(env, info, candidate)
+}
+
+func validateLocalInventoryCandidate(env *models.TaskEnvironment, info *repoInfo, candidate *models.TaskEnvironmentRepo) error {
 	if !repairPathIsTaskScoped(env, candidate.WorktreePath) || !isLocalGitRepo(info.RepositoryPath) {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
