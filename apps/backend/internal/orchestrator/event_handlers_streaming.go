@@ -337,6 +337,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
@@ -537,10 +546,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
-		// Stream AgentID is an execution identity; classification uses the transport type.
-		agentType := payload.AgentType
-		if agentType == "" {
-			agentType = payload.AgentID
+		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
+		agentType := payload.AgentID
+		if s.config.ProviderKeywordContext && payload.AgentType != "" {
+			agentType = payload.AgentType
 		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
@@ -4846,6 +4855,12 @@ func sessionSettingsEventIsStale(
 		return true
 	}
 	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" && rejected == identity.ExecutionID {
+		return true
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
 		return true
 	}
 	// A dynamic session that switched concrete candidates must not accept

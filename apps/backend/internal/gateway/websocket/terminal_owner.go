@@ -16,7 +16,7 @@ func (h *TerminalHandler) resolveEnvironmentTerminalExecution(ctx context.Contex
 	if err := h.lifecycleMgr.CheckEnvironmentExecAccess(ctx, environmentID); err != nil {
 		return nil, err
 	}
-	taskID, err := h.terminalSvc.ShellOwnerTaskID(ctx, environmentID, terminalID)
+	taskID, err := h.terminalSvc.OwnerForTerminal(ctx, environmentID, terminalID)
 	if err != nil {
 		return nil, err
 	}

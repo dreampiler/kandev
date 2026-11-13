@@ -155,20 +155,51 @@ func reuseHandoffCompletionAnchorTx(
 	if comment.Source != "handoff" {
 		return nil
 	}
-	var comments []models.TaskComment
-	if err := tx.SelectContext(ctx, &comments, tx.Rebind(`
-  SELECT * FROM task_comments WHERE task_id = ? AND source = ? ORDER BY created_at, id
- `), comment.TaskID, comment.Source); err != nil {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT id, body FROM task_comments
+		WHERE task_id = ? AND source = ? AND body LIKE ? ESCAPE '!'
+		ORDER BY created_at, id
+	`), comment.TaskID, comment.Source, handoffCompletionAnchorLikePattern(completionKey))
+	if err != nil {
 		return fmt.Errorf("find historical handoff completion comment: %w", err)
 	}
-	anchor := "<!-- handoff-completion:" + completionKey + " -->"
-	for _, existing := range comments {
+	anchor := handoffCompletionMarker(completionKey)
+	for rows.Next() {
+		var existing struct {
+			ID   string `db:"id"`
+			Body string `db:"body"`
+		}
+		if err := rows.StructScan(&existing); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan historical handoff completion comment: %w", err)
+		}
 		if strings.Contains(existing.Body, anchor) {
 			comment.ID = existing.ID
+			if err := rows.Close(); err != nil {
+				return fmt.Errorf("close historical handoff completion comments: %w", err)
+			}
 			return nil
 		}
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate historical handoff completion comments: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close historical handoff completion comments: %w", err)
+	}
 	return nil
+}
+
+func handoffCompletionMarker(completionKey string) string {
+	return "<!-- handoff-completion:" + completionKey + " -->"
+}
+
+func handoffCompletionAnchorLikePattern(completionKey string) string {
+	escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(
+		handoffCompletionMarker(completionKey),
+	)
+	return "%" + escaped + "%"
 }
 
 func ensureHandoffCompletionCommentTx(ctx context.Context, tx *sqlx.Tx, comment *models.TaskComment) error {

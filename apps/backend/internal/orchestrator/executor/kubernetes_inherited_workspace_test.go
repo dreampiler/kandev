@@ -70,8 +70,11 @@ func TestKubernetesInheritedWorkspaceIncompleteOwnership(t *testing.T) {
 		{name: "executor mismatch", owner: "parent", executorType: "local_pc", want: models.ErrWorkspaceReuseUnsafe},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := rejectInheritedEnvironmentExecutorMismatch(task, &models.TaskEnvironment{TaskID: tc.owner, ExecutorType: tc.executorType}, "k8s", false)
-			require.ErrorIs(t, err, tc.want)
+			// Kubernetes refusals do not depend on whether the caller can detach.
+			for _, allowExecutorTransition := range []bool{false, true} {
+				err := rejectInheritedEnvironmentExecutorMismatch(task, &models.TaskEnvironment{TaskID: tc.owner, ExecutorType: tc.executorType}, "k8s", allowExecutorTransition)
+				require.ErrorIs(t, err, tc.want)
+			}
 		})
 	}
 }

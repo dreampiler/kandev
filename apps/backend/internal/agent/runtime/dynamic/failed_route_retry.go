@@ -164,11 +164,11 @@ func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, no
 		if state.Status == routeStatusActionRequired && candidate.ID != state.ExecutionProfileID {
 			continue
 		}
-		if candidate.BindingKey != "" && e.circuits.IsHeld(candidate.BindingKey) {
+		until, recoverable := e.candidateRetryWindow(candidate)
+		if !recoverable {
 			continue
 		}
-		until, open := e.circuits.OpenUntil(candidate.BindingKey)
-		if !open {
+		if until.IsZero() {
 			// A closed candidate is usable now; the minimum delay decides.
 			return notBefore, true
 		}
@@ -184,6 +184,19 @@ func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, no
 		return earliest, true
 	}
 	return notBefore, true
+}
+
+func (e *Engine) candidateRetryWindow(candidate Candidate) (time.Time, bool) {
+	var until time.Time
+	for _, key := range e.candidateCircuitKeys(candidate) {
+		if e.circuits.IsHeld(key) {
+			return time.Time{}, false
+		}
+		if deadline, open := e.circuits.OpenUntil(key); open && deadline.After(until) {
+			until = deadline
+		}
+	}
+	return until, true
 }
 
 // ClaimFailedRouteRetry consumes the schedule recorded for expectedGeneration

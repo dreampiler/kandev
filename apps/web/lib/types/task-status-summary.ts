@@ -13,6 +13,7 @@ export type AgentErrorCause = {
   effective_mode?: string;
   runtime_version?: string;
   prompt_not_sent?: boolean;
+  exit_code?: number;
   storage?: {
     reason?: string;
     location?: string;
@@ -137,6 +138,10 @@ export type TaskStatusSummary = {
     workflow_approval_repository?: string;
     merge_conflict_pr_number?: number;
     merge_conflict_repository?: string;
+    ci_state?: string;
+    ci_pr_number?: number;
+    ci_repository?: string;
+    ci_stale?: boolean;
     aggregate_state?: string;
     state?: string;
     number?: number;

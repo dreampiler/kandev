@@ -197,6 +197,8 @@ func (s *Service) persistDynamicLaunchDecision(
 	sessionID string,
 	decision dynamicruntime.RouteDecision,
 ) error {
+	// Hold the settings lock so a mode or model event from the previous
+	// candidate cannot land between this read and the candidate switch write.
 	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
 	settingsLock.Lock()
 	defer settingsLock.Unlock()
@@ -1322,7 +1324,13 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
-	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
+	// Resume-attempt contexts clear general guard ownership, but this worker
+	// keeps the session guard until its synchronous replacement claim completes.
+	ctx = withExecutionReplacementStopOwnerGuardHeldForSession(ctx, data.SessionID)
+	outcome, launchErr := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+		ctx, data, executionProfileID, launchOriginAutomatic, ceilingEntryBindingFromContext(ctx),
+	)
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return
 	case dynamicRelaunchDeferred:
@@ -1348,7 +1356,8 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
-		zap.String("execution_profile_id", executionProfileID))
+		zap.String("execution_profile_id", executionProfileID),
+		zap.Error(launchErr))
 	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
 }
 

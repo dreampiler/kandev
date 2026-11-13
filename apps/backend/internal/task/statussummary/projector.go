@@ -125,13 +125,13 @@ type ProjectorConfig struct {
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
 	LoadCompletionGate      CompletionGateLoader
+	// LoadSessionUnreadState reads unread ranks for sessions when an event
+	// needs them. Nil keeps the stored unread aggregate as the projection.
+	LoadSessionUnreadState SessionUnreadStateLoader
 	// LoadQuotaWait projects a session parked on a provider limit. It is
 	// refreshed on session lifecycle events, which is when a routing decision
 	// can install or clear such a wait; nil disables the projection.
 	LoadQuotaWait QuotaWaitLoader
-	// LoadSessionUnreadState reads unread ranks for sessions when an event
-	// needs them. Nil keeps the stored unread aggregate as the projection.
-	LoadSessionUnreadState SessionUnreadStateLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -173,8 +173,8 @@ type Projector struct {
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
 	loadCompletionGate      CompletionGateLoader
-	loadQuotaWait           QuotaWaitLoader
 	loadSessionUnreadState  SessionUnreadStateLoader
+	loadQuotaWait           QuotaWaitLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -231,12 +231,12 @@ type projectionState struct {
 	launchQueueObserved    bool
 	completionGate         *CompletionGateSummary
 	completionGateObserved bool
-	quotaWait              *QuotaWaitSummary
-	quotaWaitObserved      bool
 	// unreadObserved means every session's unread ranks come from an
 	// authoritative read; otherwise unreadBaseline is the projected list.
-	unreadObserved bool
-	unreadBaseline []string
+	unreadObserved    bool
+	unreadBaseline    []string
+	quotaWait         *QuotaWaitSummary
+	quotaWaitObserved bool
 }
 
 type sessionObservation struct {
@@ -307,8 +307,8 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		loadCompletionGate:      cfg.LoadCompletionGate,
-		loadQuotaWait:           cfg.LoadQuotaWait,
 		loadSessionUnreadState:  cfg.LoadSessionUnreadState,
+		loadQuotaWait:           cfg.LoadQuotaWait,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -563,11 +563,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		(!state.quotaWaitObserved || isQuotaWaitRefreshEvent(event.Type)) {
 		nextWait, loadErr := p.loadQuotaWait(ctx, taskID)
 		if loadErr != nil {
-			return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, loadErr)
+			p.logger.Warn("failed to refresh task quota wait",
+				zap.String("task_id", taskID),
+				zap.Error(loadErr))
+		} else {
+			// Compare with the persisted summary too: a restored observation can
+			// already match the new read while the stored row still differs.
+			quotaWaitChanged = state.current == nil || !state.quotaWaitObserved ||
+				!equalQuotaWait(state.quotaWait, nextWait) || !equalQuotaWait(state.current.QuotaWait, nextWait)
+			state.quotaWait = cloneQuotaWait(nextWait)
+			state.quotaWaitObserved = true
 		}
-		quotaWaitChanged = !state.quotaWaitObserved || !equalQuotaWait(state.quotaWait, nextWait)
-		state.quotaWait = cloneQuotaWait(nextWait)
-		state.quotaWaitObserved = true
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {

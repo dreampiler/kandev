@@ -119,7 +119,7 @@ func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
 	if r == nil || r.engine == nil {
 		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
 	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID, sessionID)
+	profile, err := r.loadSelectionProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -184,7 +184,7 @@ func (r *ProfileExecutionResolver) ResolveExecution(ctx context.Context, profile
 // returns the same ordered, fail-closed candidate view used by ordinary
 // profile resolution, without claiming a route generation.
 func (r *ProfileExecutionResolver) LoadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
-	return r.loadDynamicProfile(ctx, profileID)
+	return r.loadDynamicProfile(ctx, profileID, "")
 }
 
 // ResolveExecutionForSession resolves one logical profile for a caller that
@@ -411,7 +411,7 @@ func (r *ProfileExecutionResolver) UnclassifiedPolicyEnabled(
 	if r == nil || profileID == "" || candidateID == "" {
 		return false
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfile(ctx, profileID, "")
 	if err != nil {
 		return false
 	}

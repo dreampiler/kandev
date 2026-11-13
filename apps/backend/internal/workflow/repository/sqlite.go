@@ -706,11 +706,14 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
 	if err := r.ensurePromptSourceMutableTx(ctx, tx, step.WorkflowID); err != nil {
 		return nil, err
 	}
@@ -882,11 +885,14 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, []string{step.ID}, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
 	if err := r.ensureStepPromptSourceMutableTx(ctx, tx, step.ID); err != nil {
 		return nil, err
 	}
@@ -1010,11 +1016,14 @@ func (r *Repository) ReorderStepsIfUnchanged(
 		}
 		seen[id] = struct{}{}
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
 	if err := r.ensurePromptSourceMutableTx(ctx, tx, workflowID); err != nil {
 		return err
 	}
@@ -1056,11 +1065,14 @@ func (r *Repository) ReorderStepsIfUnchanged(
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
 	if err := r.ensurePromptSourceMutableTx(ctx, tx, workflowID); err != nil {
 		return err
 	}
@@ -1209,11 +1221,14 @@ func clearGenericStepReferences(events models.StepEvents, stepID string) (models
 
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx, nil, []string{id}, nil); err != nil {
+		return err
+	}
 	if err := r.ensureStepPromptSourceMutableTx(ctx, tx, id); err != nil {
 		return err
 	}

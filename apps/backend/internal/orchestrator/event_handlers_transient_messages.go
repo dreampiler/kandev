@@ -232,7 +232,7 @@ func transientRetryNotices(messages []*models.Message, taskID, sessionID string)
 func classifyKanbanFailure(data watcher.AgentEventData, keywordContext ...routingerr.KeywordContext) *routingerr.Error {
 	providerID, message, _, _ := kanbanFailureDetails(data)
 	input := data.ProviderError.RoutingInput(kanbanFailurePhase(data), providerID, message)
-	if len(keywordContext) > 0 {
+	if len(keywordContext) != 0 {
 		input.KeywordContext = keywordContext[0]
 	}
 	classified := routingerr.Classify(input)

@@ -117,7 +117,7 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 	if !valid {
 		return false, nil
 	}
-	terminalCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
+	terminalCount, unprovenCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
 	if err != nil || !valid {
 		return false, err
 	}
@@ -150,7 +150,7 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 		}
 		count++
 	}
-	return count+terminalCount == len(retired), rows.Err()
+	return count+terminalCount+unprovenCount == len(retired), rows.Err()
 }
 
 func nativeResumeInventoryRowMatches(proof *models.NativeResumeDeliveryEvidence, row models.NativeResumeSubmissionEvidence, submission *models.AgentDeliverySubmission) bool {
@@ -244,6 +244,9 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 	if recovery.HistoryGap != nil || recovery.SessionID != proof.SessionID || recovery.IncarnationID != proof.IncarnationID {
 		return false, nil
 	}
+	if recovery.Phase == models.AgentDeliveryRecoveryRestored && recovery.HarnessGeneration < proof.HarnessGeneration {
+		return r.hasResolvedHistoricalNativeNoticeTx(ctx, tx, recovery, proof)
+	}
 	if recovery.HarnessGeneration < proof.HarnessGeneration {
 		resolved, err := r.hasResolvedContextContinuationNoticeTx(ctx, tx.Tx, recovery, proof)
 		if err != nil || !resolved {
@@ -263,6 +266,33 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 	}
 	recovery.StreamID = proof.StreamID
 	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, &silentRestoreSessionRow{taskID: taskID, state: state, metadata: metadata, current: recovery}, metadataRaw, completedAt, "")
+}
+
+func (r *Repository) hasResolvedHistoricalNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	recovery models.AgentDeliveryRecovery,
+	proof *models.NativeResumeDeliveryEvidence,
+) (bool, error) {
+	if proof.SessionID != recovery.SessionID || proof.IncarnationID != recovery.IncarnationID ||
+		proof.HarnessGeneration <= recovery.HarnessGeneration {
+		return false, nil
+	}
+	if !nativeResumeProofAdmitsHistoricalNotice(proof, recovery) {
+		return false, nil
+	}
+	resolved, err := r.hasResolvedNativeResumeRecoveryTx(ctx, tx, recovery)
+	if err != nil || !resolved {
+		return false, err
+	}
+	var current bool
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM harness_session_generations g WHERE g.session_id = ? AND g.incarnation_id = ?
+		AND g.generation = ? AND g.native_session_id = ? AND NOT EXISTS (
+			SELECT 1 FROM harness_session_generations newer WHERE newer.session_id = g.session_id
+			AND newer.incarnation_id = g.incarnation_id AND newer.generation > g.generation
+		))`), proof.SessionID, proof.IncarnationID, proof.HarnessGeneration, proof.NativeSessionID).Scan(&current)
+	return current, err
 }
 
 func nativeResumeProofCoversNotice(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
@@ -304,6 +334,13 @@ func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[
 	for _, row := range proof.Submissions {
 		if row.ID == "" || row.PayloadHash == "" || row.StreamID == "" || row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration ||
 			(row.HarnessGeneration == proof.HarnessGeneration && row.StreamID != proof.StreamID) {
+			return nil, false
+		}
+		if row.UnprovenCompletion && (row.State != models.DeliverySubmissionCompleted || row.TerminalSequence != 0 ||
+			row.TerminalStreamID != "" || row.Cursor == nil || row.Cursor.StreamID != row.StreamID ||
+			row.Cursor.SessionID != proof.SessionID || row.Cursor.IncarnationID != proof.IncarnationID ||
+			row.Cursor.HarnessGeneration != row.HarnessGeneration ||
+			row.Cursor.ReceivedSequence < row.Cursor.RemoteHighWater) {
 			return nil, false
 		}
 		if _, duplicate := retired[row.ID]; duplicate {

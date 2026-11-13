@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -342,9 +344,9 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
 	state.quotaWait = cloneQuotaWait(summary.QuotaWait)
 	state.quotaWaitObserved = summary.QuotaWait != nil
-	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -464,7 +466,8 @@ func (p *Projector) restoreQuotaWait(ctx context.Context, taskID string, state *
 	}
 	wait, err := p.loadQuotaWait(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, err)
+		p.logger.Warn("failed to restore task quota wait", zap.String("task_id", taskID), zap.Error(err))
+		return nil
 	}
 	state.quotaWait = cloneQuotaWait(wait)
 	state.quotaWaitObserved = true
@@ -515,6 +518,8 @@ func isCompletionGateRefreshEvent(eventType string) bool {
 // durable route row rather than trusting the event to carry the new deadline.
 func isQuotaWaitRefreshEvent(eventType string) bool {
 	switch eventType {
+	// A removed session can no longer own the current quota wait, so its
+	// removal re-reads the wait like a session state change does.
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
 		events.TaskSessionStateChanged, events.SessionRemoved:
 		return true

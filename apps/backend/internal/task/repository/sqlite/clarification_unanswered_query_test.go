@@ -157,18 +157,21 @@ func TestUnansweredLateAnswerClosesOnlyThatQuestion(t *testing.T) {
 	seedUnansweredWorkspace(t, repo, "ws-1", true, 14)
 	seedSupersededQuestion(t, repo, "ws-1", "task-a", "pending-a", unansweredBase)
 	seedSupersededQuestion(t, repo, "ws-1", "task-b", "pending-b", unansweredBase.Add(time.Second))
-	if err := repo.CreateMessage(ctx, &models.Message{
-		ID: "late-message-1", TaskID: "task-a", TaskSessionID: "session-task-a",
-		TurnID: "task-a-turn-090100", AuthorType: models.MessageAuthorUser,
-		Type: models.MessageTypeMessage, Content: "A late answer",
-	}); err != nil {
-		t.Fatalf("CreateMessage(late answer): %v", err)
-	}
 
 	answeredAt := unansweredBase.Add(30 * time.Minute)
+	// A late answer closes the question only with a durable admission receipt:
+	// a user message bound to the question, admitted after it was asked.
+	lateMessageID := "late:pending-a:550e8400-e29b-41d4-a716-446655440001"
+	if _, err := repo.db.Exec(`
+		INSERT INTO task_session_messages
+		(id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, 'session-task-a', 'task-a', 'task-a-turn-090100', 'user', '', 'Postgres', 0, 'message', '{}', ?)`,
+		lateMessageID, answeredAt.Add(-time.Minute)); err != nil {
+		t.Fatalf("insert late answer message: %v", err)
+	}
 	closed, err := repo.CloseUnansweredClarificationBundle(ctx, "pending-a", models.CloseUnansweredClarification{
 		Reason: models.ClarificationClosedAnsweredLate, At: answeredAt,
-		MessageID: "late-message-1", SessionID: "session-task-a",
+		MessageID: lateMessageID, SessionID: "session-task-a", SourceSessionID: "session-task-a",
 	})
 	if err != nil {
 		t.Fatalf("CloseUnansweredClarificationBundle: %v", err)
@@ -178,7 +181,7 @@ func TestUnansweredLateAnswerClosesOnlyThatQuestion(t *testing.T) {
 	}
 	meta := bundleMetadata(t, repo, "pending-a")
 	if meta[models.ClarificationMetaClosedReason] != string(models.ClarificationClosedAnsweredLate) ||
-		meta[models.ClarificationMetaLateAnswerMessageID] != "late-message-1" ||
+		meta[models.ClarificationMetaLateAnswerMessageID] != lateMessageID ||
 		meta[models.ClarificationMetaLateAnsweredAt] != answeredAt.Format(time.RFC3339Nano) ||
 		meta["status"] != "pending" {
 		t.Fatalf("late-answer metadata = %v", meta)

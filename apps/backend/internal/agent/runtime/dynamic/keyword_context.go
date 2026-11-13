@@ -8,6 +8,17 @@ import (
 )
 
 func (e *Engine) acquireCandidateProbes(candidate Candidate, sessionID string, generation int64, _ time.Time) bool {
+	leases, ok := e.circuits.acquireProbes(e.candidateCircuitKeys(candidate), probeLeaseDuration)
+	if !ok {
+		return false
+	}
+	if len(leases) > 0 {
+		e.probes[probeKey(sessionID, generation, candidate.ID)] = leases
+	}
+	return true
+}
+
+func (e *Engine) candidateCircuitKeys(candidate Candidate) []string {
 	keys := []string{candidate.BindingKey}
 	if e.limits != nil {
 		keys = append(keys, limitSuspensionKeys(candidate)...)
@@ -16,14 +27,7 @@ func (e *Engine) acquireCandidateProbes(candidate Candidate, sessionID string, g
 	if candidate.KeywordContextEnabled && candidate.KeywordAccountID != "" {
 		keys = append(keys, keywordAccountCircuitKey(candidate.KeywordAccountID))
 	}
-	leases, ok := e.circuits.acquireProbes(keys, probeLeaseDuration)
-	if !ok {
-		return false
-	}
-	if len(leases) > 0 {
-		e.probes[probeKey(sessionID, generation, candidate.ID)] = leases
-	}
-	return true
+	return keys
 }
 
 func keywordCircuitKeys(candidate Candidate) []string {
@@ -84,7 +88,7 @@ func (e *Engine) openKeywordCircuit(candidate Candidate, failure *routingerr.Err
 	if failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
 		return true
 	}
-	e.circuits.Open(keywordCircuitKey(candidate, failure), keywordCircuitUntil(candidate, failure, e.now()), failure.Code)
+	e.circuits.OpenPreservingDeadline(keywordCircuitKey(candidate, failure), keywordCircuitUntil(candidate, failure, e.now()), failure.Code)
 	return true
 }
 

@@ -17,12 +17,12 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
-import { CompositorSpin } from "@kandev/ui/compositor-spin";
-import { cn } from "@/lib/utils";
 import type {
   TaskStatusSummaryLaunchQueue,
   TaskStatusSummaryQuotaWait,
 } from "@/lib/types/task-status-summary";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
+import { cn } from "@/lib/utils";
 import {
   WaitingReasonTaskIcon,
   waitReasonClass,
@@ -34,6 +34,11 @@ type IconConfig = {
   Icon: ComponentType<{ className?: string }>;
   className: string;
   animated?: boolean;
+  /**
+   * Set when the config stands for a wait reason (lib/ui/waiting-reason)
+   * rather than a state. The renderer routes it through the shared
+   * tooltip-carrying component instead of drawing a bare glyph.
+   */
   waitReason?: TaskWaitReason | null;
 };
 
@@ -182,9 +187,9 @@ export function isWaitingForInputState(state?: TaskState): boolean {
 
 export function shouldUseQuestionTaskIcon(
   state?: TaskState,
-  hasPendingClarification = false,
+  hasPendingClarification: boolean | undefined = false,
 ): boolean {
-  return isWaitingForInputState(state) || hasPendingClarification;
+  return isWaitingForInputState(state) || (hasPendingClarification ?? false);
 }
 
 // Session states where the agent is actively running work. Anything outside
@@ -393,8 +398,17 @@ type TaskStateIconOptions = {
   /** True when this task inherits an archived parent's workspace and can no
    *  longer materialize or start. */
   workspaceOrphaned?: boolean;
+  /**
+   * Why the task is waiting rather than working, resolved by
+   * `resolveWaitReason`. Outranked by pending-input and live activity (an
+   * active task is working, not waiting) and by the restart/auto-start/orphan
+   * markers (an anomaly outranks a wait), and outranks the coarse task state,
+   * which is exactly the ambiguity it exists to remove.
+   */
   waitReason?: TaskWaitReason | null;
+  /** The launch-queue projection behind a `session_ceiling` wait, used for the tooltip's occupancy line. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  /** The limit-wait projection behind a `quota` wait, used for the tooltip's lift time. */
   quotaWait?: TaskStatusSummaryQuotaWait | null;
 };
 
@@ -438,6 +452,7 @@ function getPendingOrActiveTaskIcon(
     foregroundActivity,
     hasPendingPermission,
     parkedOnBackgroundWork,
+    waitReason,
   } = options;
   if (hasPendingPermission ?? false) {
     return PENDING_PERMISSION_ICON;
@@ -451,8 +466,9 @@ function getPendingOrActiveTaskIcon(
   // remaining life is a positively-sampled background process. Pending-input
   // and any live foregroundActivity (above) still outrank it (AC-34).
   if (parkedOnBackgroundWork) return TASK_PARKED_ICON;
-  if (isWaitingForInputState(state) && !options.waitReason)
-    return TASK_STATE_ICONS.WAITING_FOR_INPUT;
+  // A recorded wait outranks the coarse WAITING_FOR_INPUT state, which alone
+  // does not establish that a question needs an answer.
+  if (isWaitingForInputState(state) && !waitReason) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   return undefined;
 }
 
@@ -482,6 +498,9 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     workspaceOrphaned,
   );
   if (markerOverride) return markerOverride;
+  // A wait reason outranks the coarse state: REVIEW plus a queued admission is
+  // not a finished turn, and IN_PROGRESS plus a WIP overflow is not progress.
+  // A terminal task keeps its terminal icon.
   if (waitReason && !TERMINAL_TASK_STATES.has(state)) {
     return {
       Icon: waitReasonGlyph(waitReason),
@@ -511,6 +530,8 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
+  // A wait reason carries its own glyph, tone, accessible label and one-line
+  // reason, so it renders through the shared component rather than a bare icon.
   if (config.waitReason) {
     return (
       <WaitingReasonTaskIcon

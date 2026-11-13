@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -140,7 +141,25 @@ func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedSta
 	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
 		return nil
 	}
+	normalizeManagedStartupEvidence(&evidence)
 	return &evidence
+}
+
+func normalizeManagedStartupEvidence(evidence *types.ManagedStartupEvidence) {
+	if evidence == nil {
+		return
+	}
+	switch evidence.ExitDisposition {
+	case types.ManagedStartupExitOrdinary,
+		types.ManagedStartupExitIntentional,
+		types.ManagedStartupExitSignal,
+		types.ManagedStartupExitUnknown:
+	default:
+		evidence.ExitDisposition = types.ManagedStartupExitUnknown
+	}
+	if evidence.DiagnosticReason != startupdiag.ReasonMiseConfigUntrusted || !evidence.DiagnosticComplete {
+		evidence.DiagnosticReason = ""
+	}
 }
 
 // NewSessionResponse from agentctl
@@ -620,14 +639,28 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 // StreamUpdatesFrom opens the updates stream after a committed delivery
 // sequence. A zero cursor preserves the original first-connect behavior.
 func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
+	return c.StreamUpdatesFromWithOwner(ctx, handler, mcpHandler, onDisconnect, after, nil)
+}
+
+// StreamUpdatesFromWithOwner opens an update stream and reports its accepted
+// connection owner before the stream starts dispatching agent events.
+func (c *Client) StreamUpdatesFromWithOwner(
+	ctx context.Context,
+	handler func(AgentEvent),
+	mcpHandler MCPHandler,
+	onDisconnect func(err error),
+	after uint64,
+	onConnected func(ownerID uint64),
+) error {
 	attempt, streamCtx, err := c.beginUpdatesStreamDial(ctx)
 	if err != nil {
 		return err
 	}
 	const wsRoute = "/api/v1/agent/stream"
-	route := wsRoute
+	// Retained sidecars may predate stage metadata; they ignore this query.
+	route := wsRoute + "?stage=1"
 	if after > 0 {
-		route += "?after=" + strconv.FormatUint(after, 10)
+		route += "&after=" + strconv.FormatUint(after, 10)
 	}
 
 	conn, _, err := c.dialWebSocketWithConn(attempt.ctx, route, c.wsAuthHeaders(), func(conn net.Conn) error {
@@ -638,14 +671,22 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
-	stage := newUpdateStreamStage()
-	stage.connected.Store(true)
-	cancel, err := c.completeUpdatesStreamDial(attempt, conn, stage)
+	cancel, err := c.completeUpdatesStreamDial(attempt, conn)
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
 	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
+	stage := newUpdateStreamStage(attempt.ownerID)
+	stage.connected.Store(true)
+	c.mu.Lock()
+	if c.agentStreamConn == conn {
+		c.updateStage.Store(stage)
+	}
+	c.mu.Unlock()
+	if onConnected != nil {
+		onConnected(attempt.ownerID)
+	}
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {
@@ -700,12 +741,8 @@ func (c *Client) readUpdatesStream(
 	mcpHandler MCPHandler,
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
-	stages ...*updateStreamStage,
+	stage *updateStreamStage,
 ) {
-	stage := newUpdateStreamStage()
-	if len(stages) > 0 && stages[0] != nil {
-		stage = stages[0]
-	}
 	// Ordered, single-worker dispatch preserves per-stream event ordering while
 	// decoupling handler execution from response-frame delivery.
 	events := newAgentEventQueue()
@@ -831,11 +868,7 @@ func (c *Client) readUpdatesStream(
 // pushed onto the queue, preserving arrival order. It is the single consumer of
 // the queue; readUpdatesStream closes the queue on teardown and waits on
 // workerDone so an in-flight handler finishes before disconnect is signaled.
-func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stages ...*updateStreamStage) {
-	stage := newUpdateStreamStage()
-	if len(stages) > 0 && stages[0] != nil {
-		stage = stages[0]
-	}
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stage *updateStreamStage) {
 	defer close(done)
 	for {
 		event, ok := events.dequeue()

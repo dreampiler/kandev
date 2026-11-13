@@ -22,8 +22,9 @@ import (
 type promptAttemptEvidence struct {
 	keywordHistory []keywordObservation
 	mu             sync.Mutex
-	// The state and generation together identify the lifecycle observed at the
-	// start of this attempt; a replacement state can reuse a generation.
+	// retirementState and retirementGeneration identify the notice lifecycle
+	// observed when this attempt began. Reclaimed entries can be replaced by a
+	// state with the same generation, so the counter alone is not unique.
 	retirementState      *transientRetryNoticeState
 	retirementGeneration uint64
 	executionID          string
@@ -290,8 +291,8 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.mu.Lock()
-	defer evidence.mu.Unlock()
 	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		evidence.mu.Unlock()
 		return
 	}
 	evidence.output = evidence.output || output
@@ -302,6 +303,10 @@ func (s *Service) observePromptAttempt(
 		// diagnostic is recorded only by observeProviderDiagnostic below.
 		evidence.providerDiagnosticCode = ""
 		evidence.providerDiagnosticText = ""
+	}
+	evidence.mu.Unlock()
+	if output || effect {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -761,7 +766,22 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message))
+	input := diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message)
+	classified := routingerr.Classify(input)
+	if diagnostic != nil {
+		textClassified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: providerID,
+			Stderr:     message,
+		})
+		if textClassified.Code != classified.Code ||
+			textClassified.Confidence != routingerr.ConfHigh || !textClassified.FallbackAllowed {
+			evidence.output = true
+			evidence.providerDiagnosticCode = ""
+			evidence.providerDiagnosticText = ""
+			return
+		}
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -808,26 +828,20 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
 }
 
-// providerFailureCodeMatches reports whether the terminal failure classifies to
-// the recorded diagnostic code at either fidelity. A stream chunk is recorded
-// from its text alone, while the terminal failure may carry structured signals
-// that refine the code (Codex usage-limit prose is quota_limited, HTTP 429 is
-// rate_limited). Comparing the text-only classification too keeps recovery
-// independent of whether the chunk or the terminal failure arrives first; the
-// text-containment check in outputObservedLocked still ties the two together.
+// providerFailureCodeMatches requires both terminal classifications to match
+// the recorded diagnostic code. Structured metadata cannot be ignored when it
+// conflicts with the diagnostic text.
 func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
 	message := matchingProviderFailureMessage(data)
-	if message == "" {
+	if message == "" || matchingProviderFailureCode(data) != recorded {
 		return false
 	}
-	if matchingProviderFailureCode(data) == recorded {
-		return true
-	}
-	return routingerr.Classify(routingerr.Input{
+	textClassified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhasePromptSend,
 		ProviderID: data.AgentID,
 		Stderr:     message,
-	}).Code == recorded
+	})
+	return textClassified.Code == recorded && textClassified.Confidence == routingerr.ConfHigh && textClassified.FallbackAllowed
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
@@ -863,9 +877,14 @@ func (s *Service) clearPromptAttemptEvidence(sessionID, executionID string, prom
 	}
 	evidence.mu.Lock()
 	matches := evidence.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
+	clearHistory := matches && (evidence.effect || (evidence.output && evidence.providerDiagnosticText == ""))
 	evidence.mu.Unlock()
+	deleted := false
 	if matches {
-		s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+		deleted = s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+	}
+	if clearHistory && deleted {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -1013,6 +1032,7 @@ func (s *Service) taskAllowsUnclassifiedStreakClear(ctx context.Context, taskID 
 }
 
 func (s *Service) clearDynamicUnclassifiedStreakForStop(ctx context.Context, sessionID string) {
+	s.clearKeywordFailureHistory(sessionID)
 	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -20,6 +21,12 @@ import (
 // state when launch fails. The optional launcher keeps focused handler tests
 // able to exercise the durable selection boundary without constructing the
 // full orchestrator.
+// dynamicCandidateSwitchPersister persists a selection that moves the session
+// to a different concrete candidate together with its runtime settings reset.
+type dynamicCandidateSwitchPersister func(
+	context.Context, *models.TaskSession, models.TaskSessionState, time.Time,
+) (bool, error)
+
 func dynamicRouteActionHandler(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
@@ -72,6 +79,17 @@ func applyDynamicRouteAction(
 		return nil, err
 	}
 	if !changed {
+		if session.RouteState == "starting" || session.RouteState == "retrying" {
+			// The route claim is already durable, so a failed projection must
+			// return that generation to manual recovery before reporting conflict.
+			if _, err := resolver.MarkRouteActionRequired(
+				ctx, session.ID, decision.Generation, session.RouteReason,
+			); err != nil {
+				wrappedErr := fmt.Errorf("settle unpersisted dynamic route selection: %w", err)
+				return nil, routeActionPersistenceError(ctx, repo, session, wrappedErr)
+			}
+			return nil, routeActionError(ctx, repo, session, dynamicruntime.ErrStaleGeneration)
+		}
 		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {

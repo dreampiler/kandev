@@ -224,8 +224,19 @@ func deriveLimitTiming(e *Error, in Input) {
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
 		text := in.Stderr + "\n" + in.Stdout
+		if ruleUsesScopedTextReset(e.ClassifierRule) {
+			// The new notice rules reject fenced examples, so their reset
+			// hints must come from the unfenced line that classified, not
+			// from unrelated prose elsewhere in the diagnostic bundle.
+			if scoped, ok := providerRuleMatchedLine(in.ProviderID, e.ClassifierRule, text); ok {
+				text = scoped
+			} else {
+				text = ""
+			}
+		}
 		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+		if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||
+			e.ClassifierRule == ruleClaudeFiveHourLimit) {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
 		}
@@ -262,12 +273,22 @@ func classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		if e.Code == CodeRateLimited {
+			if quota, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok &&
+				quota.Code == CodeQuotaLimited && quota.Confidence == ConfHigh &&
+				hardQuotaRuleOutranksRateStatus(quota.ClassifierRule) {
+				e = quota
+			}
+		}
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		if e.Code == CodeUnknownProvider && catalogMayRefineUnknownHTTP(in, excerpt, rawText) {
 			if catalogResult := classifyExternalCatalog(in, excerpt); catalogResult != nil {
 				return applyInvariants(catalogResult)
 			}
 		}
 		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
 	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
@@ -321,6 +342,27 @@ func classify(in Input) *Error {
 	e := classifyByPhase(in, excerpt)
 	e.ResetHint = in.ResetHint
 	return applyInvariants(e)
+}
+
+// hardQuotaRuleOutranksRateStatus identifies the provider signatures that
+// prove an exhausted quota. Other quota-labeled diagnostics can describe a
+// rate limit, so a structured HTTP 429 remains authoritative for those rules.
+func hardQuotaRuleOutranksRateStatus(rule string) bool {
+	switch rule {
+	case "claude.stderr.quota.v1",
+		ruleClaudeSessionLimit,
+		ruleClaudeWeeklyLimit,
+		ruleClaudeFiveHourLimit,
+		ruleClaudeUsageLimit,
+		"codex.stderr.quota.v1",
+		ruleCodexOutOfCredits,
+		ruleOpenCodeUsageLimit,
+		ruleOpenCodeGoUsageLimit,
+		ruleOpenCodeCredit:
+		return true
+	default:
+		return false
+	}
 }
 
 func classifyInjection(in Input, excerpt string) *Error {

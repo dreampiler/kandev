@@ -37,6 +37,10 @@ func Capture(pid int) (Identity, error) {
 	return identity, nil
 }
 
+func InspectProcStat(Identity, string, []byte) (State, error) {
+	return StateUnknown, ErrUnverifiableIdentity
+}
+
 func Inspect(identity Identity) (State, error) {
 	if err := identity.Validate(); err != nil {
 		return StateUnknown, err
@@ -113,6 +117,12 @@ func parseWindowsBirthToken(token string) (uint64, error) {
 	}
 	return created, nil
 }
+
+// BirthBootMatches fails closed where no kernel boot identity is available.
+func BirthBootMatches(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
+// SessionMembersRemain fails closed where POSIX sessions do not exist.
+func SessionMembersRemain(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
 
 const (
 	windowsJobQuery     = 0x0004

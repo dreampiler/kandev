@@ -72,6 +72,18 @@ function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.has_running_session;
 }
 
+function sheetWaitStatus(task: KanbanState["tasks"][number]) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -100,19 +112,6 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     ),
     turnError: sheetTurnError(summary),
     unreadSessionIds: statusSummaryUnreadSessionIds(summary),
-  };
-}
-
-function sheetWaitStatus(task: KanbanState["tasks"][number], sessionState?: TaskSessionState) {
-  return {
-    quotaWait: task.statusSummary?.quota_wait,
-    waitReason: resolveWaitReason({
-      primarySessionState: sessionState,
-      wipAdmitted: task.wipAdmitted,
-      queuedForStepId: task.queuedForStepId,
-      launchQueue: sheetLaunchQueue(task),
-      quotaWait: task.statusSummary?.quota_wait,
-    }),
   };
 }
 
@@ -169,7 +168,7 @@ export function toSheetItem(
     effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
-    ...sheetWaitStatus(task, status.sessionState),
+    ...sheetWaitStatus(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

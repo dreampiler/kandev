@@ -3,7 +3,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -279,6 +281,12 @@ func (s *Server) setupRoutes() {
 	// Utility agent routes
 	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
 	auxHandler.SetExecutionUsageService(s.executionUsage)
+	if err := s.procMgr.RegisterInstanceCleanupHook(auxHandler.Close); err != nil {
+		s.logger.Error("failed to register utility cleanup hook", zap.Error(err))
+		if closeErr := auxHandler.Close(); closeErr != nil {
+			s.logger.Error("failed to close utility resources", zap.Error(closeErr))
+		}
+	}
 	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.RegisterRoutes(api)
@@ -481,7 +489,7 @@ func (s *Server) handleInfo(c *gin.Context) {
 
 // Start request/response
 type StartRequest struct {
-	// Future: could add options like custom command, env overrides
+	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
 }
 
 type StartResponse struct {
@@ -493,7 +501,24 @@ type StartResponse struct {
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	var req StartRequest
+	if c.Request.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(c.Request.Body, 16<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, StartResponse{Success: false, Error: "invalid start request"})
+			return
+		}
+	}
+	var processGeneration uint64
+	var err error
+	if req.Preparation != nil {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, StartResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+			return
+		}
+		processGeneration, err = s.procMgr.StartWithManagedRuntimePreparation(c.Request.Context(), *req.Preparation)
+	} else {
+		processGeneration, err = s.procMgr.StartWithGeneration(c.Request.Context())
+	}
 	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
@@ -525,6 +550,9 @@ type AgentConfigureRequest struct {
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.
 	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"project_mcp_delivery,omitempty"`
+	// InstallContext carries authenticated installer provenance for reusable
+	// managed npm repairs. Nil disables reuse for this configuration.
+	InstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"install_context,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on
@@ -573,6 +601,10 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
 		return
 	}
+	if req.InstallContext != nil && (!c.GetBool(authenticatedControlContextKey) || !req.InstallContext.Valid()) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated installer provenance is required for reusable repairs"})
+		return
+	}
 
 	if !req.AgentArgs.Present && req.Command == "" {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
@@ -583,9 +615,14 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 	}
 
 	var configureErr error
-	if req.ReplaceEnv {
+	switch {
+	case req.ReplaceEnv && req.InstallContext != nil:
+		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
+	case req.ReplaceEnv:
 		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	} else {
+	case req.InstallContext != nil:
+		configureErr = s.procMgr.ConfigureWithProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
+	default:
 		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
 	}
 	if configureErr == nil {

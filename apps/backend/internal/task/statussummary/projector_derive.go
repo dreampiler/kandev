@@ -26,8 +26,8 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 		CompletionGate:      cloneCompletionGate(state.completionGate),
-		QuotaWait:           cloneQuotaWait(state.quotaWait),
 		UnreadSessionIDs:    deriveUnreadSessionIDs(state),
+		QuotaWait:           cloneQuotaWait(state.quotaWait),
 	}
 }
 

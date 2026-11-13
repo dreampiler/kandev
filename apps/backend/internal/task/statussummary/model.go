@@ -83,8 +83,11 @@ type TaskStatusSummary struct {
 	// UnreadSessionIDs lists, sorted, the task's sessions that have an unread
 	// transcript-visible message. The task is unread when it is non-empty.
 	// Omitted when empty.
-	QuotaWait        *QuotaWaitSummary `json:"quota_wait,omitempty"`
-	UnreadSessionIDs []string          `json:"unread_session_ids,omitempty"`
+	UnreadSessionIDs []string `json:"unread_session_ids,omitempty"`
+	// QuotaWait is the live task-level projection for a session parked on a
+	// provider limit. It carries the reason identity and the instant the limit
+	// lifts, never the policy body or provider payload behind the decision.
+	QuotaWait *QuotaWaitSummary `json:"quota_wait,omitempty"`
 }
 
 // QuotaWaitSummary is the bounded form of one session's deadline-backed limit
@@ -187,10 +190,17 @@ type PullRequestSummary struct {
 	HasMergeConflicts          bool   `json:"has_merge_conflicts,omitempty"`
 	MergeConflictPRNumber      int    `json:"merge_conflict_pr_number,omitempty"`
 	MergeConflictRepository    string `json:"merge_conflict_repository,omitempty"`
-	AggregateState             string `json:"aggregate_state,omitempty"`
-	State                      string `json:"state,omitempty"`
-	Number                     int    `json:"number,omitempty"`
-	URL                        string `json:"url,omitempty"`
+	// CIState is the display-only CI classification for the highest-priority
+	// open pull request. "none" is an explicit clear; an omitted field in a
+	// legacy payload means unknown.
+	CIState        string `json:"ci_state"`
+	CIPRNumber     int    `json:"ci_pr_number,omitempty"`
+	CIRepository   string `json:"ci_repository,omitempty"`
+	CIStale        bool   `json:"ci_stale,omitempty"`
+	AggregateState string `json:"aggregate_state,omitempty"`
+	State          string `json:"state,omitempty"`
+	Number         int    `json:"number,omitempty"`
+	URL            string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -246,26 +256,10 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateUnreadSessionIDs(s.UnreadSessionIDs); err != nil {
 		return err
 	}
+	if err := validateQuotaWait(s.QuotaWait); err != nil {
+		return err
+	}
 	return validateCompletionGate(s.CompletionGate)
-}
-
-func validateQuotaWait(wait *QuotaWaitSummary) error {
-	if wait == nil {
-		return nil
-	}
-	if err := validateUTF8Bytes("quota wait session id", wait.SessionID, maxSessionIDBytes); err != nil {
-		return err
-	}
-	if err := validateUTF8Bytes("quota wait reason", wait.Reason, maxLaunchQueueReasonBytes); err != nil {
-		return err
-	}
-	if wait.Reason != QuotaWaitReasonQuotaLimited {
-		return fmt.Errorf("quota wait has unknown reason")
-	}
-	if wait.Deadline.IsZero() {
-		return fmt.Errorf("quota wait deadline is required")
-	}
-	return nil
 }
 
 func validateTurnError(value *TurnErrorSummary) error {
@@ -303,6 +297,25 @@ func validateUnreadSessionIDs(ids []string) error {
 		if i > 0 && ids[i-1] >= id {
 			return fmt.Errorf("unread session ids must be sorted and unique")
 		}
+	}
+	return nil
+}
+
+func validateQuotaWait(wait *QuotaWaitSummary) error {
+	if wait == nil {
+		return nil
+	}
+	if err := validateUTF8Bytes("quota wait session id", wait.SessionID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("quota wait reason", wait.Reason, maxLaunchQueueReasonBytes); err != nil {
+		return err
+	}
+	if wait.Reason != QuotaWaitReasonQuotaLimited {
+		return fmt.Errorf("quota wait has unknown reason")
+	}
+	if wait.Deadline.IsZero() {
+		return fmt.Errorf("quota wait deadline is required")
 	}
 	return nil
 }
@@ -403,7 +416,7 @@ func validatePullRequest(pr *PullRequestSummary) error {
 		return nil
 	}
 	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 || pr.WorkflowApprovalPRNumber < 0 ||
-		pr.MergeConflictPRNumber < 0 {
+		pr.MergeConflictPRNumber < 0 || pr.CIPRNumber < 0 {
 		return fmt.Errorf("pull request counts and number cannot be negative")
 	}
 	fields := []struct {
@@ -413,9 +426,11 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	}{
 		{"pull request state", pr.State, maxPullRequestStateBytes},
 		{"pull request aggregate state", pr.AggregateState, maxPullRequestStateBytes},
+		{"pull request CI state", pr.CIState, maxPullRequestStateBytes},
 		{"pull request URL", pr.URL, maxPullRequestURLBytes},
 		{"workflow approval repository", pr.WorkflowApprovalRepository, maxPullRequestRepositoryBytes},
 		{"merge conflict repository", pr.MergeConflictRepository, maxPullRequestRepositoryBytes},
+		{"CI repository", pr.CIRepository, maxPullRequestRepositoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
@@ -495,8 +510,8 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
 		CompletionGate:      s.CompletionGate,
-		QuotaWait:           s.QuotaWait,
 		UnreadSessionIDs:    s.UnreadSessionIDs,
+		QuotaWait:           s.QuotaWait,
 	})
 }
 
@@ -515,8 +530,8 @@ type semanticPayload struct {
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
-	QuotaWait           *QuotaWaitSummary      `json:"quota_wait,omitempty"`
 	UnreadSessionIDs    []string               `json:"unread_session_ids,omitempty"`
+	QuotaWait           *QuotaWaitSummary      `json:"quota_wait,omitempty"`
 }
 
 // TurnErrorSummaryFromMetadata projects the current task turn-error attention.

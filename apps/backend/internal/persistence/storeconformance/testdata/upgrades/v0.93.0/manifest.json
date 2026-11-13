@@ -16,7 +16,8 @@
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
           "values": {
-            "allow_agent_edits": "0"
+            "allow_agent_edits": "0",
+            "content": "preserved prompt content"
           }
         },
         {
@@ -326,7 +327,8 @@
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
           "values": {
-            "allow_agent_edits": "0"
+            "allow_agent_edits": "0",
+            "content": "preserved prompt content"
           }
         },
         {

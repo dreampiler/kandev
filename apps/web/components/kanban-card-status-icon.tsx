@@ -1,7 +1,7 @@
 import { IconUsersGroup } from "@tabler/icons-react";
 import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
-import type { Task } from "@/components/kanban-card";
 import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import type { Task } from "@/components/kanban-card";
 
 // Status markers that mask the launch spinner and gate the "resting" no-affordance
 // case. Bundled together so renderTaskStatusIcon's own branching stays under the
@@ -12,6 +12,7 @@ type StatusMaskFlags = {
   showAutoStartFailed: boolean;
   parkedOnBackgroundWork: boolean;
   showWorkspaceOrphaned: boolean;
+  /** A task waiting for a slot or an answer still has something to show. */
   waitReason: boolean;
 };
 
