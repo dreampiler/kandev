@@ -159,10 +159,14 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
     const next = createControlRefreshScheduler({
       run: read,
       isVisible: () => document.visibilityState === "visible",
-      onRetryScheduled: (at) =>
-        setFailure((previous) =>
-          previous ? { ...previous, retryAt: at ? new Date(at).toISOString() : undefined } : null,
-        ),
+      onRetryScheduled: (at) => setFailure((previous) => withControlRetryTime(previous, at)),
+      onReadTimeout: () => {
+        if (
+          committedOwner.current === owner &&
+          stateReadScopeIdentity(store.getState()) === identity
+        )
+          markControlReadTimeout(setLoading, setFailure);
+      },
     });
     scheduler.current = next;
     void next.request();
@@ -170,7 +174,7 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
       next.dispose();
       if (scheduler.current === next) scheduler.current = null;
     };
-  }, [enabled, read]);
+  }, [enabled, identity, owner, read, store]);
   const refresh = useCallback(() => scheduler.current?.request() ?? Promise.resolve(), []);
   useForegroundRefresh(refresh, enabled, identity);
   useEffect(() => {
@@ -184,6 +188,18 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
     enabled && snapshot?.identity === identity && snapshot.owner === owner ? snapshot : undefined;
   const visibleFailure = enabled ? failure : null;
   return { data, loading, error: Boolean(visibleFailure), failure: visibleFailure, refresh };
+}
+
+function markControlReadTimeout(
+  setLoading: (loading: boolean) => void,
+  setFailure: (update: (previous: ControlRefreshFailure | null) => ControlRefreshFailure) => void,
+) {
+  setLoading(false);
+  setFailure((previous) => ({ ...previous, kind: "error" }));
+}
+
+function withControlRetryTime(previous: ControlRefreshFailure | null, at: number | null) {
+  return previous ? { ...previous, retryAt: at ? new Date(at).toISOString() : undefined } : null;
 }
 
 const CONTROL_REFRESH_EVENTS = [
