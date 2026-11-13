@@ -180,7 +180,7 @@ export function taskWaitReason(task: NativeTask): TaskWaitReason | null {
   if (task.state.toUpperCase() === "BLOCKED") return "blocked";
   if (task.queued_messages > 0) {
     if ((task.queued_paused_messages ?? 0) > 0) return "paused";
-    return task.queued_auto_run_messages === undefined ? "queueUnknown" : "queued";
+    return (task.queued_auto_run_messages ?? 0) > 0 ? "queued" : "queueUnknown";
   }
   if (task.session_state === "WAITING_FOR_INPUT") return "waiting";
   return "unknown";

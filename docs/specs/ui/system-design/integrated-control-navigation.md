@@ -238,3 +238,16 @@ information; this slice does not infer conversation state or execution health.
 ## Recorded waiting reasons
 
 `REQ-UI-INTEGRATED-CONTROL-004` reuses the rows `useNativeDashboards` already returned for `REQ-UI-INTEGRATED-CONTROL-003`; it adds no read. `control-wait-reasons.ts` derives four task counts: `waiting_input_tasks`; recorded `BLOCKED` state from `task_stages` (falling back to the state histogram); `stage_type=approval`; and `stage_type=hold`. Terminal states (`COMPLETED`, `CANCELLED`) and `FAILED` are excluded from the stage reasons, and `BLOCKED` takes precedence over the stage reasons, so one task is not counted twice across them. An invalid recorded count makes that reason unknown instead of a partial sum. Input wait and the stage reasons stay independent, so the panel shows no total. Missing stage groups make approval/hold unknown, never zero. `control-wait-reasons-panel.tsx` mounts after the two comparison tables and before the read-state lines, links each workspace to its control workspace view, uses a two-column phone wrap with 44px links, and labels every figure through `sidebar:controlSummary.waitReasons.*`. No capacity or slot wait is inferred; it has no recorded read here.
+
+The workspace comparison shows each workspace's recorded board WIP queue count
+separately from shared execution capacity. Below the comparison, the waiting
+reasons panel also lists stopped tasks using the same task projection and reason
+classifier as the activity board. A selected workspace limits the task read to
+that workspace. The route's existing revision controls these reads, and a
+retained result carries its original receipt time.
+
+The queue policy projection uses the queued message's own session, including
+non-primary sessions. A missing or superseded policy defaults to auto-run. An
+unbound legacy policy keeps its stored value for a known session. A missing
+session or incarnation leaves the policy unknown. A queued task with neither a
+recorded paused count nor a recorded auto-run count keeps an unknown reason.

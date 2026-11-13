@@ -12,6 +12,7 @@ import {
 } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
 import { numberCellClass } from "./control-table";
+import { ControlWaitReasons } from "./control-wait-reasons-panel";
 import {
   TASK_STAGES,
   workflowStepCounts,
@@ -47,6 +48,7 @@ const SESSION_COLUMNS: Column[] = [
 
 const TASK_COLUMNS: Column[] = [
   { key: "waitingInput", label: "sidebar:controlSummary.compare.waitingInput" },
+  { key: "wipWaiting", label: "sidebar:integratedControl.waitingWip" },
   { key: "completed24h", label: "sidebar:controlSummary.compare.completed" },
   { key: "moves24h", label: "sidebar:controlSummary.compare.moves" },
 ];
@@ -304,6 +306,10 @@ export function ControlWorkspaceCompare({
   const workspaces = (control?.data?.workspaces ?? []).filter(
     (workspace) => !workspaceId || workspace.id === workspaceId,
   );
+  const dashboardByWorkspace = new Map(
+    (signals.dashboards.data ?? []).map(({ id, data }) => [id, data]),
+  );
+  const tasksByWorkspace = new Map((signals.taskReads.data ?? []).map((row) => [row.id, row]));
   return (
     <section className="space-y-4" data-testid="control-workspace-compare">
       <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
@@ -319,7 +325,7 @@ export function ControlWorkspaceCompare({
             <div className="rounded-lg border">
               <Table
                 aria-label={label}
-                className={`${kind === "tasks" ? "min-w-[57.5rem]" : "min-w-[39rem]"} table-fixed`}
+                className={`${kind === "tasks" ? "min-w-[63.5rem]" : "min-w-[39rem]"} table-fixed`}
               >
                 <colgroup>
                   <col className="w-44" />
@@ -353,6 +359,13 @@ export function ControlWorkspaceCompare({
           </section>
         );
       })}
+      <ControlWaitReasons
+        rows={workspaces.map((workspace) => ({
+          workspace,
+          data: dashboardByWorkspace.get(workspace.id),
+          taskRead: tasksByWorkspace.get(workspace.id) ?? { status: "loading" },
+        }))}
+      />
     </section>
   );
 }

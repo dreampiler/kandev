@@ -28,12 +28,17 @@ const NO_IDS: string[] = [];
  * and what they derive from them. Pass `tasks`/`history` false to skip reads
  * a surface does not show.
  */
-export function useControlSignals({ tasks = true, history = true } = {}) {
+export function useControlSignals({
+  tasks = true,
+  history = true,
+  workspaceId,
+}: { tasks?: boolean; history?: boolean; workspaceId?: string } = {}) {
   const control = useIntegratedControl();
   const data = control?.data;
   const ids = useMemo(() => data?.workspaces.map((workspace) => workspace.id) ?? NO_IDS, [data]);
   const dashboards = useNativeDashboards(ids, data);
-  const taskReads = useNativeTaskRows(tasks ? ids : NO_IDS, data);
+  const taskIds = workspaceId ? ids.filter((id) => id === workspaceId) : ids;
+  const taskReads = useNativeTaskRows(tasks ? taskIds : NO_IDS, data);
   const historyReads = useNativeHistory(history ? ids : NO_IDS, data);
   const coordinatorEnabled = Boolean(control?.coordinatorEnabled);
   const inbox = useControlInbox()?.byWorkspace;

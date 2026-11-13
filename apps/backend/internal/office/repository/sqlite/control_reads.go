@@ -141,8 +141,9 @@ func (r *Repository) appendControlHolds(ctx context.Context, out *ControlTaskLis
 }
 
 // Read each queued message's own session policy, including non-primary sessions.
-// An absent policy row defaults ON, as in messagequeue.GetAutoRun. An unavailable
-// optional queue source leaves the policy unknown without discarding task facts.
+// An absent or superseded policy defaults ON. A legacy policy without an
+// incarnation still applies to a known session. An unavailable optional queue
+// source leaves the policy unknown without discarding task facts.
 func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *ControlTaskList, wsID string) error {
 	rows := []struct {
 		TaskID      string `db:"task_id"`
@@ -153,10 +154,11 @@ func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *Contro
 	query := `SELECT q.task_id,
 	 SUM(CASE WHEN COALESCE(p.auto_run,1)=0 THEN 1 ELSE 0 END) AS paused,
 	 SUM(CASE WHEN COALESCE(p.auto_run,1)<>0 THEN 1 ELSE 0 END) AS auto_run,
-	 MIN(CASE WHEN s.id IS NULL THEN 0 ELSE 1 END) AS policy_known
+	 MIN(CASE WHEN s.id IS NULL OR COALESCE(s.queue_incarnation_id,'')='' THEN 0 ELSE 1 END) AS policy_known
 	 FROM queued_messages q JOIN tasks t ON t.id=q.task_id
 	 LEFT JOIN task_sessions s ON s.id=q.session_id AND s.task_id=q.task_id
-	 LEFT JOIN queue_session_state p ON p.session_id=s.id AND p.session_incarnation_id=s.queue_incarnation_id
+	 LEFT JOIN queue_session_state p ON p.session_id=s.id
+	  AND (p.session_incarnation_id='' OR p.session_incarnation_id=s.queue_incarnation_id)
 	 WHERE ` + controlTaskScope + ` GROUP BY q.task_id`
 	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), wsID); err != nil {
 		return ctx.Err()

@@ -81,7 +81,7 @@ function ControlActivityView({ rows }: { rows: FactRows }) {
 
 /** The comparison table first; a selected workspace adds its detail card under it. */
 function WorkspacesView({ workspaceId }: { workspaceId?: string }) {
-  const signals = useControlSignals({ tasks: false, history: false });
+  const signals = useControlSignals({ history: false, workspaceId });
   return (
     <>
       <ControlWorkspaceCompare signals={signals} workspaceId={workspaceId} />
