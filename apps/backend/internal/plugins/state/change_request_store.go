@@ -77,7 +77,11 @@ func (s *Store) initChangeRequestSchema() error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(dialect.RenderSchema(s.db.DriverName(), changeRequestSchema)); err != nil {
+	schema, err := dialect.RenderSchema(s.db.DriverName(), changeRequestSchema)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(schema); err != nil {
 		return err
 	}
 	return tx.Commit()

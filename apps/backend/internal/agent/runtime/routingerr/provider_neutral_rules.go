@@ -80,7 +80,7 @@ var providerNeutralRules = append(providerCatalogRules, []rule{
 	),
 }...)
 
-func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
+func matchProviderNeutralRules(providerID, text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
@@ -88,7 +88,14 @@ func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
 			continue
 		}
-		if r.pattern.MatchString(text) {
+		matchText := text
+		if r.id == catalogFreeUsageRule {
+			if HasProviderRules(providerID) {
+				continue
+			}
+			matchText = withoutMarkdownFencedCode(text)
+		}
+		if r.pattern.MatchString(matchText) {
 			return &Error{
 				Code:           r.code,
 				Confidence:     r.confidence,

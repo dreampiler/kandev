@@ -448,6 +448,8 @@ type promptTurnState struct {
 	quotaNoticeText              string
 	quotaNoticeClassified        string
 	quotaNoticeClass             *routingerr.Error
+	quotaNoticeTimer             *time.Timer
+	quotaNoticeDelivered         bool
 	cursorRetriableMsg           string
 	cursorRetriableComplete      bool
 	cursorRetriableAt            time.Time
@@ -536,6 +538,9 @@ func (t *promptTurnState) appendQuotaNoticeText(text string) string {
 	}
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
+	if t.quotaNoticeDelivered {
+		return ""
+	}
 	if len(t.quotaNoticeText) < quotaNoticeBufferBytes {
 		t.quotaNoticeText += text
 		if len(t.quotaNoticeText) > quotaNoticeBufferBytes {

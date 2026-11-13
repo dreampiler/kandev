@@ -258,7 +258,7 @@ func relativeResetHintForInput(e *Error, in Input, text string, observedAt time.
 	if in.ProviderID != "opencode-acp" {
 		return parseRelativeResetHintAt(text, observedAt)
 	}
-	if e.ClassifierRule != openCodePeriodUsageRule || in.OpenCodeRelativeResetUntrusted {
+	if !openCodeRuleSupportsRelativeReset(e.ClassifierRule) || in.OpenCodeRelativeResetUntrusted {
 		return nil
 	}
 	hint := openCodePeriodResetAt(text, in.OccurredAt)
@@ -307,7 +307,7 @@ func classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderNeutralRules(excerpt, in.Phase); ok {
+	if e, ok := matchProviderNeutralRules(in.ProviderID, excerpt, in.Phase); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint

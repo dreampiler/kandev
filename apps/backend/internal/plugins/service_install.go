@@ -454,10 +454,6 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
 	}
-	if err := s.clearTaskChangeRequests(ctx, rec.InstallationID); err != nil {
-		s.reconcileAbortedUninstall(id, wasRunning)
-		return err
-	}
 	if rec.InstallationID != "" {
 		if managed := s.managedAgentConversationDeps(); managed != nil {
 			if err := managed.DetachManagedForInstallation(ctx, rec.InstallationID); err != nil {
@@ -465,6 +461,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 				return fmt.Errorf("plugins: uninstall aborted, could not detach managed conversation transcripts: %w", err)
 			}
 		}
+	}
+	if err := s.clearTaskChangeRequests(ctx, rec.InstallationID); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return err
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)

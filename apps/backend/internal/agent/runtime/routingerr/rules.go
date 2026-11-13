@@ -140,11 +140,11 @@ var providerRules = map[string][]rule{
 		// Keep these provider-scoped signatures on one diagnostic line and
 		// exclude fenced assistant examples from candidate detection.
 		mustRuleOutsideMarkdownFences(
-			"opencode.stderr.free_usage_unlabelled.v1",
+			openCodeFreeUsageUnlabelledRule,
 			`(?im)^[ \t]*free[ \t]+usage[ \t]+limit[ \t]+reached\b`, CodeQuotaLimited, ConfHigh,
 		),
 		mustRuleOutsideMarkdownFences(
-			"opencode.stderr.free_usage_prefixed.v1",
+			openCodeFreeUsagePrefixedRule,
 			`(?im)^[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[ \t]*free[ \t]+usage[ \t]+limit[ \t]+reached\b`,
 			CodeQuotaLimited, ConfHigh,
 		),

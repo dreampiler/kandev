@@ -9,6 +9,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const relativeQuotaNoticeRule = "provider.quota_notice.v1"
+
 // observeUsageLimitNotice correlates a usage-limit notice the agent stated as
 // an ordinary assistant message with the in-flight prompt turn.
 //
@@ -59,6 +61,7 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 	if message == "" {
 		return
 	}
+	event.ProviderDiagnosticCandidate = true
 	diagnostic := providerNoticeDiagnostic{
 		SessionID: sessionID,
 		ProviderError: streams.ProviderError{
@@ -70,15 +73,46 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 			ResetAt:                    quotaNoticeResetHint(buffer, classified.ResetHint),
 		},
 	}
+	if classified.ClassifierRule == relativeQuotaNoticeRule && diagnostic.ProviderError.ResetAt == nil &&
+		!quotaNoticeSentenceComplete(buffer) {
+		turn.waitForQuotaNoticeSuffix(a, diagnostic, classified.ClassifierRule)
+		return
+	}
+	turn.deliverQuotaNotice(a, diagnostic, classified.ClassifierRule)
+}
+
+func (turn *promptTurnState) waitForQuotaNoticeSuffix(a *Adapter, diagnostic providerNoticeDiagnostic, rule string) {
+	turn.evidenceMu.Lock()
+	defer turn.evidenceMu.Unlock()
+	if turn.quotaNoticeDelivered || turn.quotaNoticeTimer != nil {
+		return
+	}
+	turn.quotaNoticeTimer = time.AfterFunc(a.promptCancelTimeout(), func() {
+		if a.currentPromptTurn() == turn {
+			turn.deliverQuotaNotice(a, diagnostic, rule)
+		}
+	})
+}
+
+func (turn *promptTurnState) deliverQuotaNotice(a *Adapter, diagnostic providerNoticeDiagnostic, rule string) {
+	turn.evidenceMu.Lock()
+	defer turn.evidenceMu.Unlock()
+	if turn.quotaNoticeDelivered {
+		return
+	}
+	turn.quotaNoticeDelivered = true
+	if turn.quotaNoticeTimer != nil {
+		turn.quotaNoticeTimer.Stop()
+	}
 	select {
 	case turn.providerErrorCh <- diagnostic:
 		a.logger.Info("usage-limit notice stated as an agent message; ending the prompt turn",
-			zap.String("session_id", sessionID),
+			zap.String("session_id", diagnostic.SessionID),
 			zap.String("agent_id", a.agentID),
-			zap.String("classifier_rule", classified.ClassifierRule))
+			zap.String("classifier_rule", rule))
 	default:
 		a.logger.Debug("dropping usage-limit notice because the prompt diagnostic channel is full",
-			zap.String("session_id", sessionID))
+			zap.String("session_id", diagnostic.SessionID))
 	}
 }
 
@@ -91,11 +125,15 @@ func (a *Adapter) usageLimitNoticeEventAccepted(promptGeneration uint64, event *
 // settles through its typed path, but an unfinished sentence proves no reset
 // deadline; later text could extend it with another duration component.
 func quotaNoticeResetHint(text string, hint *time.Time) *time.Time {
-	text = strings.TrimRight(text, " \t")
-	if hint == nil || text == "" || !strings.ContainsRune(".!?;\r\n", rune(text[len(text)-1])) {
+	if !quotaNoticeSentenceComplete(text) {
 		return nil
 	}
 	return hint
+}
+
+func quotaNoticeSentenceComplete(text string) bool {
+	text = strings.TrimRight(text, " \t")
+	return text != "" && strings.ContainsRune(".!?;\r\n", rune(text[len(text)-1]))
 }
 
 // isUsageLimitNotice reports whether a classification is an exhausted-capacity

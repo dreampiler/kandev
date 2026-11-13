@@ -38,7 +38,7 @@ func isFreeUsageQuota(candidate Candidate, failure *routingerr.Error) bool {
 		return false
 	}
 	const freeUsageRule = "provider.catalog.free_usage.v1"
-	if failure.ClassifierRule == freeUsageRule {
+	if failure.ClassifierRule == freeUsageRule || routingerr.IsOpenCodeFreeUsageRule(failure.ClassifierRule) {
 		return true
 	}
 	if failure.ClassifierRule != "opencode.stderr.usage_limit.v1" || candidate.RemoteExecution {

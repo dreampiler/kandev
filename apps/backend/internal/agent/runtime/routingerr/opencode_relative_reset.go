@@ -6,14 +6,27 @@ import (
 	"time"
 )
 
-const openCodePeriodUsageRule = "opencode.stderr.usage_limit.v1"
+const (
+	openCodePeriodUsageRule         = "opencode.stderr.usage_limit.v1"
+	openCodeFreeUsageUnlabelledRule = "opencode.stderr.free_usage_unlabelled.v1"
+	openCodeFreeUsagePrefixedRule   = "opencode.stderr.free_usage_prefixed.v1"
+)
+
+func openCodeRuleSupportsRelativeReset(rule string) bool {
+	return rule == openCodePeriodUsageRule || IsOpenCodeFreeUsageRule(rule)
+}
+
+// IsOpenCodeFreeUsageRule reports whether a typed OpenCode notice proves free quota exhaustion.
+func IsOpenCodeFreeUsageRule(rule string) bool {
+	return rule == openCodeFreeUsageUnlabelledRule || rule == openCodeFreeUsagePrefixedRule
+}
 
 var openCodeRelativeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`)
 var openCodeRelativeUnitPattern = regexp.MustCompile(`(?i)(\d{1,4})\s*(days?|hours?|hrs?|minutes?|mins?|min|seconds?|secs?)\b`)
 var openCodeRelativeGluedSuffix = regexp.MustCompile(`^[.!?;]+[^\s.!?;]`)
 
 // openCodePeriodResetAt accepts relative timing only on a line that itself
-// matches the classified OpenCode period-limit rule. Multiple different
+// matches a supported OpenCode quota rule. Multiple different
 // deadlines, unrecognized units, and missing observation time stay unknown.
 func openCodePeriodResetAt(text string, observedAt time.Time) *time.Time {
 	if observedAt.IsZero() {
@@ -21,7 +34,7 @@ func openCodePeriodResetAt(text string, observedAt time.Time) *time.Time {
 	}
 	var found *time.Time
 	matched := false
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range strings.Split(withoutMarkdownFencedCode(text), "\n") {
 		if !matchesOpenCodePeriodRule(line) {
 			continue
 		}
@@ -48,8 +61,8 @@ func openCodePeriodResetAt(text string, observedAt time.Time) *time.Time {
 
 func matchesOpenCodePeriodRule(line string) bool {
 	for _, rule := range providerRules["opencode-acp"] {
-		if rule.id == openCodePeriodUsageRule {
-			return rule.pattern.MatchString(line)
+		if openCodeRuleSupportsRelativeReset(rule.id) && rule.pattern.MatchString(line) {
+			return true
 		}
 	}
 	return false
