@@ -783,11 +783,12 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 }
 
 type wsSessionActionRequest struct {
-	AwaitTerminal       bool   `json:"await_terminal,omitempty"`
-	ExpectedExecutionID string `json:"expected_execution_id,omitempty"`
-	SessionID           string `json:"session_id"`
-	Reason              string `json:"reason,omitempty"`
-	Force               bool   `json:"force,omitempty"`
+	CloseInferenceForRestart bool   `json:"close_inference_for_restart,omitempty"`
+	AwaitTerminal            bool   `json:"await_terminal,omitempty"`
+	ExpectedExecutionID      string `json:"expected_execution_id,omitempty"`
+	SessionID                string `json:"session_id"`
+	Reason                   string `json:"reason,omitempty"`
+	Force                    bool   `json:"force,omitempty"`
 }
 
 // parseSessionAction parses a session-scoped action request, returning an error message on failure.
@@ -814,6 +815,9 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if reason == "" {
 		reason = "stopped via API"
 	}
+	if req.CloseInferenceForRestart {
+		return h.wsStopForRestart(ctx, msg, req, reason)
+	}
 	if req.AwaitTerminal {
 		if req.Force || req.ExpectedExecutionID == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "awaited stop requires expected_execution_id and force=false", nil)
@@ -827,6 +831,16 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err := h.service.StopSession(ctx, req.SessionID, reason, req.Force); err != nil {
 		h.logger.Error("failed to stop session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to stop session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func (h *Handlers) wsStopForRestart(ctx context.Context, msg *ws.Message, req *wsSessionActionRequest, reason string) (*ws.Message, error) {
+	if req.Force || req.AwaitTerminal || req.ExpectedExecutionID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "restart stop chooses its own execution and requires force=false", nil)
+	}
+	if err := h.service.StopForRestart(ctx, req.SessionID, reason); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Restart stop incomplete: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

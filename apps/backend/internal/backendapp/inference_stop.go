@@ -9,6 +9,12 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
+func (b *sharedInferenceConsumer) VerifyRestartStopBindings(ctx context.Context, sessionID, executionID string) error {
+	b.refreshMu.Lock()
+	defer b.refreshMu.Unlock()
+	return b.capacity.CheckRestartStopBindings(ctx, sessionID, executionID)
+}
+
 // ObserveInferenceStop retains exact terminal proof in the existing CAS owner before settlement.
 // Snapshot continuity never turns an absent or unrelated child into a released binding.
 func (b *sharedInferenceConsumer) ObserveInferenceStop(ctx context.Context, snapshot *utility.AttemptSnapshot) error {

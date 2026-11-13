@@ -98,7 +98,11 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
     try {
       const client = getWebSocketClient();
       if (!client) throw new Error(t("task:sessionRestartConnectionUnavailable"));
-      await client.request("session.stop", { session_id: sessionId }, 15000);
+      await client.request(
+        "session.stop",
+        { session_id: sessionId, close_inference_for_restart: true },
+        60000,
+      );
       await client.request(
         "session.launch",
         { task_id: taskId, intent: "resume", session_id: sessionId },

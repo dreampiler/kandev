@@ -27,6 +27,16 @@ func (m *Manager) SetInferenceConsumer(consumer agentctl.InferenceConsumer) {
 
 }
 
+func (m *Manager) VerifyRestartStopBindings(ctx context.Context, sessionID, executionID string) error {
+	verifier, ok := m.inferenceConsumer.(interface {
+		VerifyRestartStopBindings(context.Context, string, string) error
+	})
+	if !ok {
+		return fmt.Errorf("session inference ownership observation unavailable")
+	}
+	return verifier.VerifyRestartStopBindings(ctx, sessionID, executionID)
+}
+
 func (m *Manager) executeOwnedInference(ctx context.Context, execution *AgentExecution, client *agentctl.Client, req *utility.PromptRequest, profileID string) (*utility.PromptResponse, error) {
 	if m.providerUsageLimits {
 		copy := *req

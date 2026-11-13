@@ -131,6 +131,9 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 			b.logInferenceFlow(ctx, binding, "inference_admission", "waiting", reason, time.Since(started).Milliseconds())
 			lastReason = reason
 		}
+		if reason == orchestrator.InferenceAdmissionExecutionStopping {
+			return &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
+		}
 		all, finite := b.capacity.InferenceCapacityPolicy()
 		if !all || !finite {
 			return nil
@@ -282,8 +285,11 @@ func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, cl
 		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
 	}
 	b.refreshMu.Lock()
-	_, _, _ = b.capacity.ReserveInferenceCapacity(ctx, binding)
+	_, reason, err := b.capacity.ReserveInferenceCapacity(ctx, binding)
 	b.refreshMu.Unlock()
+	if reason == orchestrator.InferenceAdmissionExecutionStopping {
+		return nil, &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
+	}
 	response, err := client.InferencePrompt(ctx, req)
 	if inferenceFailureNeedsSettlement(response, err) {
 		return response, unconfirmedInferenceFailure(response, err)
