@@ -2,10 +2,39 @@ package dynamic
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/usage"
 )
+
+func candidateWithObservedModel(ctx context.Context, candidate Candidate) Candidate {
+	policy := candidate.UsagePolicy
+	if policy != nil && policy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, policy) && candidate.ModelID != policy.ExpectedModel {
+		candidate.ModelID = policy.ExpectedModel
+		candidate.CatalogFree = false
+	}
+	return candidate
+}
+
+// Failure attribution belongs to the route generation that ran.
+func (e *Engine) failureUsageProfile(ctx context.Context, profile Profile, sessionID string, generation int64, candidateID string) (context.Context, Profile) {
+	state, ok := e.State(sessionID)
+	if !ok || state.Generation != generation || state.ExecutionProfileID != candidateID || state.LogicalProfileID != profile.ID {
+		return ctx, profile
+	}
+	ctx = usage.WithSelectedUsagePolicy(ctx, state.UsagePolicy)
+	profile.Candidates = slices.Clone(profile.Candidates)
+	for i, candidate := range profile.Candidates {
+		if candidate.ID == candidateID {
+			candidate.UsagePolicy = usage.CloneExecutionUsagePolicy(state.UsagePolicy)
+			profile.Candidates[i] = candidateWithObservedModel(ctx, candidate)
+			break
+		}
+	}
+	return ctx, profile
+}
 
 // LimitVerdict is the mutable account capacity of one candidate at a new turn.
 // Empty Reason means the candidate may be admitted.

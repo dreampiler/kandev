@@ -197,7 +197,7 @@ func (e *Engine) selectContext(
 		if !e.candidateHasConfiguredCapacity(ctx, candidate, sessionID, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
-		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
+		if !e.candidateSelectable(candidateWithObservedModel(ctx, candidate), sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
 		decision := RouteDecision{
@@ -468,12 +468,13 @@ func (e *Engine) ApplyFailureContext(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
 		return RouteDecision{}, err
 	}
+	failureCtx, failureProfile := e.failureUsageProfile(ctx, profile, sessionID, expectedGeneration, currentCandidateID)
 	scope := SuspensionBinding
-	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
-		failure, scope = e.resolveLimitFailure(ctx, candidate, failure)
+	if candidate, ok := candidateByID(failureProfile, currentCandidateID); ok {
+		failure, scope = e.resolveLimitFailure(failureCtx, candidate, failure)
 	}
-	e.openCircuitForFailure(profile, currentCandidateID, failure, scope)
-	e.observeLimitFailure(ctx, profile, currentCandidateID, failure)
+	e.openCircuitForFailure(failureProfile, currentCandidateID, failure, scope)
+	e.observeLimitFailure(failureCtx, failureProfile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -670,12 +671,12 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 		if err != nil {
 			return RouteDecision{}, err
 		}
-		successor, found, err = e.firstSelectableOrderedSuccessor(plan, currentCandidateID, state.SessionID, expectedGeneration)
+		successor, found, err = e.firstSelectableOrderedSuccessor(ctx, plan, currentCandidateID, state.SessionID, expectedGeneration)
 		if err != nil {
 			return RouteDecision{}, err
 		}
 	} else {
-		successor, found = e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
+		successor, found = e.firstSelectableUnclassifiedSuccessor(ctx, profile, currentCandidateID, state.SessionID, expectedGeneration)
 	}
 	if !found {
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
@@ -696,6 +697,7 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 }
 
 func (e *Engine) firstSelectableOrderedSuccessor(
+	ctx context.Context,
 	plan orderedPlan,
 	currentCandidateID, sessionID string,
 	generation int64,
@@ -704,7 +706,7 @@ func (e *Engine) firstSelectableOrderedSuccessor(
 		if err != nil {
 			return Candidate{}, false, err
 		}
-		if e.candidateSelectable(candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
+		if e.candidateSelectable(candidateWithObservedModel(ctx, candidate), sessionID, generation+1, currentCandidateID, "", e.now()) {
 			return candidate, true, nil
 		}
 	}
@@ -712,6 +714,7 @@ func (e *Engine) firstSelectableOrderedSuccessor(
 }
 
 func (e *Engine) firstSelectableUnclassifiedSuccessor(
+	ctx context.Context,
 	profile Profile,
 	currentCandidateID, sessionID string,
 	generation int64,
@@ -721,7 +724,7 @@ func (e *Engine) firstSelectableUnclassifiedSuccessor(
 			continue
 		}
 		for _, candidate := range profile.Candidates[index+1:] {
-			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
+			if e.candidateSelectable(candidateWithObservedModel(ctx, candidate), sessionID, generation+1, "", "", e.now()) {
 				return candidate, true
 			}
 		}

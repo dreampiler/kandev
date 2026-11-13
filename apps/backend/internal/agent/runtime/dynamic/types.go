@@ -46,6 +46,7 @@ type Candidate struct {
 	KeywordContextEnabled bool
 	KeywordAccountID      string
 	UsagePolicy           *usage.ExecutionUsagePolicy `json:"-"`
+	RequireExecutionUsage bool                        `json:"-"`
 	ID                    string
 	Enabled               bool
 	BindingKey            string

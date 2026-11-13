@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/usage"
 )
 
 // Failed-route automatic retry is the durable bookkeeping behind the
@@ -131,7 +132,7 @@ func (e *Engine) ScheduleFailedRouteRetry(
 		return PendingFailedRouteRetry{}, false, ErrFailedRouteRetryDeclined
 	}
 	now := e.now()
-	due, recoverable := e.failedRouteRetryDueLocked(profile, state, now.Add(minDelay))
+	due, recoverable := e.failedRouteRetryDueLocked(ctx, profile, state, now.Add(minDelay))
 	if !recoverable {
 		return PendingFailedRouteRetry{}, false, ErrFailedRouteRetryDeclined
 	}
@@ -154,7 +155,7 @@ func (e *Engine) ScheduleFailedRouteRetry(
 // own candidate; a waiting route reselects from every enabled candidate. A
 // candidate held until its owner releases it never recovers by waiting, so a
 // route whose usable candidates are all held is not recoverable.
-func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, notBefore time.Time) (time.Time, bool) {
+func (e *Engine) failedRouteRetryDueLocked(ctx context.Context, profile Profile, state RouteState, notBefore time.Time) (time.Time, bool) {
 	var earliest time.Time
 	usable := false
 	for _, candidate := range profile.Candidates {
@@ -163,6 +164,12 @@ func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, no
 		}
 		if state.Status == routeStatusActionRequired && candidate.ID != state.ExecutionProfileID {
 			continue
+		}
+		if candidate.ID == state.ExecutionProfileID && state.UsagePolicy != nil {
+			candidate.UsagePolicy = state.UsagePolicy
+			candidate = candidateWithObservedModel(usage.WithSelectedUsagePolicy(ctx, state.UsagePolicy), candidate)
+		} else {
+			candidate = candidateWithObservedModel(ctx, candidate)
 		}
 		until, recoverable := e.candidateRetryWindow(candidate)
 		if !recoverable {

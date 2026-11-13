@@ -62,6 +62,9 @@ func (s *providerTierLimitService) refreshOpenRouterCounter(ctx context.Context,
 	if err != nil || observed == nil {
 		return nil, err
 	}
+	if candidate.UsagePolicy != nil && !tierUsageMatchesSelection(observed, candidate.UsagePolicy) {
+		return nil, errTierSelectionUnavailable
+	}
 	return observed.FreeModelDailyRequests, nil
 }
 
@@ -94,6 +97,9 @@ func classifyLimitDimension(c dynamicruntime.Candidate, failure *routingerr.Erro
 // lock, so a near-simultaneous block of another model sees this one when it
 // looks for a same-minute partner.
 func (s *providerTierLimitService) recordObservation(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, observation *sqliterepo.UsageLimitObservation) error {
+	if candidate.RemoteExecution {
+		return nil
+	}
 	s.learningMu.Lock()
 	defer s.learningMu.Unlock()
 	if err := s.enrichObservation(ctx, candidate, failure, observation); err != nil {
@@ -104,23 +110,29 @@ func (s *providerTierLimitService) recordObservation(ctx context.Context, candid
 
 // enrichObservation runs under learningMu (see recordObservation).
 func (s *providerTierLimitService) enrichObservation(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, observation *sqliterepo.UsageLimitObservation) error {
-	if candidate.RemoteExecution {
-		return nil
-	}
-	c, err := s.contextFor(ctx, candidate.ID)
+	c, err := s.contextForCandidate(ctx, candidate)
 	if err != nil {
 		return err
 	}
+	return s.applyObservedLimit(ctx, c, candidate, failure, observation)
+}
+
+func (s *providerTierLimitService) applyObservedLimit(ctx context.Context, c tierLimitContext, candidate dynamicruntime.Candidate, failure *routingerr.Error, observation *sqliterepo.UsageLimitObservation) error {
 	used, err := s.readUsage(ctx, c, "", observation.ObservedAt)
 	unknownModel := errors.Is(err, errModelAttributionUnavailable)
 	if err != nil && !unknownModel {
 		return err
 	}
+	if candidate.UsagePolicy != nil && candidate.ModelID != c.profile.Model {
+		candidate.ModelID = c.profile.Model
+		candidate.CatalogFree = false
+	}
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
-	if candidate.ModelID == c.profile.Model {
-		observation.ModelID = candidate.ModelID
+	observation.AccountKey = c.key
+	if candidate.UsagePolicy != nil || candidate.ModelID == c.profile.Model {
+		observation.ModelID = c.profile.Model
 	}
 	observation.RequestsMinute = used.RequestsMinute
 	observation.RequestsDay = used.RequestsDay
@@ -134,13 +146,7 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	if dimension == limitDimensionModelDaily {
-		if observation.ModelID == "" {
-			return nil
-		}
-		if err := s.learnModelScope(ctx, c, observation.ObservedAt); !errors.Is(err, errModelAttributionUnavailable) {
-			return err
-		}
-		return nil
+		return s.learnObservedModelScope(ctx, c, observation)
 	}
 	if unknownModel && dimension == "minute" && c.effective.RequestsPerModel {
 		return nil
@@ -157,6 +163,16 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	return s.store.SaveAccountTierLearned(ctx, c.key, c.learned)
 }
 
+func (s *providerTierLimitService) learnObservedModelScope(ctx context.Context, c tierLimitContext, observation *sqliterepo.UsageLimitObservation) error {
+	if observation.ModelID == "" {
+		return nil
+	}
+	err := s.learnModelScope(ctx, c, observation.ObservedAt)
+	if errors.Is(err, errModelAttributionUnavailable) {
+		return nil
+	}
+	return err
+}
 func learnedOnly(defaults, prior, learned agentusage.TierLimits) agentusage.TierLimits {
 	if defaults.RequestsPerMinute == nil {
 		prior.RequestsPerMinute = learned.RequestsPerMinute

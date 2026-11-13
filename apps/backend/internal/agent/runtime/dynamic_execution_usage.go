@@ -28,36 +28,42 @@ func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(ctx context.Cont
 
 func (r *ProfileExecutionResolver) loadSelectionProfile(ctx context.Context, profileID, sessionID string) (dynamic.Profile, error) {
 	profile, err := r.loadDynamicProfile(ctx, profileID, sessionID)
-	if err != nil || !r.engine.OrderedTiersEnabled() || sessionID == "" {
+	if err != nil || sessionID == "" {
+		return profile, err
+	}
+	if !r.engine.OrderedTiersEnabled() && r.candidateUsageReader == nil && r.nativeCandidateUsageReader == nil {
 		return profile, err
 	}
 	// This runs before Engine takes its selection mutex. The production reader
 	// only peeks existing observations and cannot create an actor or provider call.
 	for index := range profile.Candidates {
-		candidate := &profile.Candidates[index]
-		if !candidate.Enabled {
-			continue
-		}
-		concrete, readErr := r.profiles.GetAgentProfile(ctx, candidate.ID)
-		if readErr != nil || concrete == nil {
-			continue
-		}
-		report, scoped := usage.ReadCandidateUsage(ctx, concrete.ID, concrete.Model)
-		if !scoped {
-			if nativeInferenceRoute(sessionID) && r.nativeCandidateUsageReader != nil {
-				report = r.nativeCandidateUsageReader(ctx, sessionID, profileID, concrete)
-			} else if r.candidateUsageReader != nil {
-				report = r.candidateUsageReader(ctx, sessionID, concrete)
-			}
-		}
-		model := concrete.Model
-		// A request-scoped producer has composed the real launch model. Persisted
-		// session overrides can legitimately differ from the candidate default.
-		if scoped && report != nil && report.Model != "" {
-			model = report.Model
-		}
-		candidate.UsagePolicy = usage.SelectionPolicyForReport(concrete.ID, model, report)
-		candidate.Usage = dynamic.CandidateUsageFromReport(report, model, time.Now())
+		r.applyCandidateUsage(ctx, &profile.Candidates[index], profileID, sessionID)
 	}
 	return profile, nil
+}
+
+func (r *ProfileExecutionResolver) applyCandidateUsage(ctx context.Context, candidate *dynamic.Candidate, profileID, sessionID string) {
+	if !candidate.Enabled {
+		return
+	}
+	concrete, readErr := r.profiles.GetAgentProfile(ctx, candidate.ID)
+	if readErr != nil || concrete == nil {
+		return
+	}
+	report, scoped := usage.ReadCandidateUsage(ctx, concrete.ID, concrete.Model)
+	if !scoped {
+		if nativeInferenceRoute(sessionID) && r.nativeCandidateUsageReader != nil {
+			report = r.nativeCandidateUsageReader(ctx, sessionID, profileID, concrete)
+		} else if r.candidateUsageReader != nil {
+			report = r.candidateUsageReader(ctx, sessionID, concrete)
+		}
+	}
+	model := concrete.Model
+	// A request-scoped producer has composed the real launch model. Persisted
+	// session overrides can legitimately differ from the candidate default.
+	if scoped && report != nil && report.Model != "" {
+		model = report.Model
+	}
+	candidate.UsagePolicy = usage.SelectionPolicyForReport(concrete.ID, model, report)
+	candidate.Usage = dynamic.CandidateUsageFromReport(report, model, time.Now())
 }

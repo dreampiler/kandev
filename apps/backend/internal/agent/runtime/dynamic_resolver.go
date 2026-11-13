@@ -974,6 +974,7 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 	for _, route := range routes {
 		candidate := dynamic.Candidate{
 			KeywordContextEnabled: r.keywordContextEnabled.Load(),
+			RequireExecutionUsage: r.candidateUsageReader != nil || r.nativeCandidateUsageReader != nil,
 			ID:                    route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}

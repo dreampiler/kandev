@@ -9,6 +9,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,10 @@ func newProviderTierLimitService(usage *usageProviderAdapter, store tierLimitSto
 }
 
 func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (tierLimitContext, error) {
+	return s.contextForSelection(ctx, id, nil)
+}
+
+func (s *providerTierLimitService) contextForSelection(ctx context.Context, id string, selected *agentusage.ExecutionUsagePolicy) (tierLimitContext, error) {
 	var c tierLimitContext
 	profile, agentType, ok := s.usage.loadProfile(ctx, id)
 	if !ok {
@@ -61,6 +66,24 @@ func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (t
 	bound, ok := s.usage.bindingFor(profile, agentType)
 	if !ok {
 		return c, fmt.Errorf("account unavailable")
+	}
+	overridden := selected != nil && selected.ExpectedModel != profile.Model
+	if overridden {
+		var err error
+		profile, bound, err = s.usage.bindSelectedModel(ctx, profile, agentType, bound, selected)
+		if err != nil {
+			return c, err
+		}
+	}
+	observed := s.usage.ProfileUsage(ctx, id)
+	if selected != nil && !tierUsageMatchesSelection(observed.Usage, selected) {
+		return c, errTierSelectionUnavailable
+	}
+	if overridden {
+		observed.ModelClass = agentusage.ModelClassUnknown
+		if observed.Usage != nil && strings.EqualFold(observed.Usage.Plan, "free") {
+			observed.ModelClass = agentusage.ModelClassFree
+		}
 	}
 	c.profile = profile
 	c.key = bound.accountKey
@@ -74,12 +97,14 @@ func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (t
 	if err != nil {
 		return c, err
 	}
-	observed := s.usage.ProfileUsage(ctx, id)
 	c.observed = observed.Usage
 	c.tier = s.effectiveBillingTier(ctx, profile, agentType, observed, c.owner)
 	c.defaults = s.defaultLimits(c)
 	c.effective = agentusage.MergeTierLimits(agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier]), c.owner.Tiers[c.tier])
 	c.ids = s.accountTierProfiles(ctx, c)
+	if overridden && !slices.Contains(c.ids, id) {
+		c.ids = append(c.ids, id)
+	}
 	return c, nil
 }
 
@@ -241,9 +266,13 @@ func providerWindowPeriod(w agentusage.UtilizationWindow) string {
 }
 
 func (s *providerTierLimitService) Check(ctx context.Context, id, exclude string, now time.Time) (agentusage.LimitAdmission, error) {
+	return s.checkCandidate(ctx, dynamicruntime.Candidate{ID: id}, exclude, now)
+}
+
+func (s *providerTierLimitService) checkCandidate(ctx context.Context, candidate dynamicruntime.Candidate, exclude string, now time.Time) (agentusage.LimitAdmission, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, err := s.contextFor(ctx, id)
+	c, err := s.contextForCandidate(ctx, candidate)
 	if err != nil {
 		return agentusage.LimitAdmission{}, err
 	}

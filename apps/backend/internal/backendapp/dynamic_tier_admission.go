@@ -9,6 +9,7 @@ import (
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -33,7 +34,7 @@ func (a *tierLimitAdapter) CheckLimit(
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil || candidate.RemoteExecution {
 		return dynamicruntime.LimitVerdict{}, nil
 	}
-	verdict, err := a.usage.tierLimits.Check(ctx, candidate.ID, sessionID, now)
+	verdict, err := a.usage.tierLimits.checkCandidate(ctx, candidate, sessionID, now)
 	return dynamicruntime.LimitVerdict{Reason: verdict.Reason, RetryAt: verdict.RetryAt}, err
 }
 
@@ -46,13 +47,17 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	if !a.hasTierLimits() {
 		return failure, dynamicruntime.SuspensionBinding
 	}
+	executionBound := candidate.RequireExecutionUsage || candidate.UsagePolicy != nil
+	if executionBound && !a.hasObservedLimitSelection(ctx, candidate, failure) {
+		return failure, dynamicruntime.SuspensionBinding
+	}
 	resolved := a.usage.tierLimits.resolveFailure(ctx, candidate, failure)
 	if resolved == nil {
 		resolved = failure
 	}
 	scope := dynamicruntime.SuspensionBinding
 	switch {
-	case dynamicruntime.IsGoSubscriptionQuota(candidate, resolved) && a.goAccountBound(ctx, candidate.ID):
+	case !executionBound && dynamicruntime.IsGoSubscriptionQuota(candidate, resolved) && a.goAccountBound(ctx, candidate.ID):
 		// Go subscription exhaustion covers its models on this account, while
 		// other providers on the same agent credential binding remain usable.
 		scope = dynamicruntime.SuspensionProvider
@@ -67,16 +72,36 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	// A classified quota limit on a paid model without the provider's own
 	// reset uses the operator-entered monthly reset. The monthly allowance is
 	// provider-scoped.
-	if resolved.Code == routingerr.CodeQuotaLimited && resolved.ResetHint == nil &&
-		a.calendar != nil && !dynamicruntime.IsFreeModel(candidate.ModelID) {
-		now := time.Now()
-		if reset, ok := a.calendar.MonthlyReset(ctx, candidate, now); ok && reset.After(now) {
+	if !executionBound {
+		if reset, ok := a.unboundMonthlyReset(ctx, candidate, resolved); ok {
 			copy := *resolved
 			copy.ResetHint = &reset
 			return &copy, dynamicruntime.SuspensionProvider
 		}
 	}
 	return resolved, scope
+}
+
+func (a *tierLimitAdapter) unboundMonthlyReset(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error) (time.Time, bool) {
+	if failure.Code != routingerr.CodeQuotaLimited || failure.ResetHint != nil || a.calendar == nil || dynamicruntime.IsFreeModel(candidate.ModelID) {
+		return time.Time{}, false
+	}
+	now := time.Now()
+	reset, ok := a.calendar.MonthlyReset(ctx, candidate, now)
+	return reset, ok && reset.After(now)
+}
+
+func (a *tierLimitAdapter) hasObservedLimitSelection(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error) bool {
+	if candidate.RemoteExecution || (failure.Code != routingerr.CodeRateLimited && failure.Code != routingerr.CodeQuotaLimited) {
+		return false
+	}
+	policy := candidate.UsagePolicy
+	if policy == nil || policy.ProfileID != candidate.ID || candidate.ModelID != policy.ExpectedModel ||
+		!agentusage.MatchesSelectedUsage(ctx, policy) {
+		return false
+	}
+	observed, _ := a.usage.svc.CachedUsageObservations(candidate.ID)
+	return tierUsageMatchesSelection(observed, policy)
 }
 
 func (a *tierLimitAdapter) hasTierLimits() bool {
@@ -98,7 +123,7 @@ func (a *tierLimitAdapter) goAccountBound(ctx context.Context, profileID string)
 // ObserveLimit records the classified limit and learns an undisclosed
 // allowance. It runs off the routing path.
 func (a *tierLimitAdapter) ObserveLimit(
-	_ context.Context,
+	ctx context.Context,
 	candidate dynamicruntime.Candidate,
 	failure *routingerr.Error,
 	at time.Time,
@@ -106,24 +131,18 @@ func (a *tierLimitAdapter) ObserveLimit(
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil || failure == nil {
 		return
 	}
+	if failure.Code != routingerr.CodeRateLimited && failure.Code != routingerr.CodeQuotaLimited {
+		return
+	}
+	ctx = agentusage.SnapshotCandidateUsage(context.WithoutCancel(ctx), candidate.ID)
+	candidate.UsagePolicy = agentusage.CloneExecutionUsagePolicy(candidate.UsagePolicy)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		observation := &sqliterepo.UsageLimitObservation{
 			ID: uuid.NewString(), ExecutionProfileID: candidate.ID,
-			AccountKey: a.accountKey(ctx, candidate.ID), Code: string(failure.Code), ObservedAt: at,
+			Code: string(failure.Code), ObservedAt: at,
 		}
 		_ = a.usage.tierLimits.recordObservation(ctx, candidate, failure, observation)
 	}()
-}
-
-func (a *tierLimitAdapter) accountKey(ctx context.Context, profileID string) string {
-	if a != nil && a.usage != nil {
-		if profile, agentType, ok := a.usage.loadProfile(ctx, profileID); ok {
-			if binding, bound := a.usage.bindingFor(profile, agentType); bound && binding.accountKey != "" {
-				return binding.accountKey
-			}
-		}
-	}
-	return "profile:" + profileID
 }
