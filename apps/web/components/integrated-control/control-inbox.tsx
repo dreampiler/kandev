@@ -48,10 +48,18 @@ export function ControlInbox() {
         })}
       </p>
       <InboxSection kind="answerable" groups={groupInboxSection(reads, (read) => read.answerable)}>
-        {(bundle) => <ControlAnswerableRow key={bundle.pending_id} bundle={bundle} />}
+        {(bundle, workspaceId) => (
+          <ControlAnswerableRow key={bundle.pending_id} bundle={bundle} workspaceId={workspaceId} />
+        )}
       </InboxSection>
       <InboxSection kind="earlier" groups={groupInboxSection(reads, (read) => read.earlier)}>
-        {(bundle) => <ControlEarlierQuestionRow key={bundle.pending_id} bundle={bundle} />}
+        {(bundle, workspaceId) => (
+          <ControlEarlierQuestionRow
+            key={bundle.pending_id}
+            bundle={bundle}
+            workspaceId={workspaceId}
+          />
+        )}
       </InboxSection>
       <InboxSection kind="recovery" groups={groupInboxSection(reads, (read) => read.recovery)}>
         {(block) => <ControlRecoveryBlockRow key={block.block_id} block={block} />}
@@ -70,7 +78,7 @@ function InboxSection<T>({
 }: {
   kind: ControlInboxSectionKey;
   groups: ControlInboxGroup<T>[];
-  children: (item: T) => ReactNode;
+  children: (item: T, workspaceId: string) => ReactNode;
 }) {
   const { t } = useTranslation();
   const count = groups.reduce((sum, group) => sum + group.items.length, 0);
@@ -104,7 +112,7 @@ function WorkspaceGroup<T>({
   children,
 }: {
   group: ControlInboxGroup<T>;
-  children: (item: T) => ReactNode;
+  children: (item: T, workspaceId: string) => ReactNode;
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
@@ -127,7 +135,7 @@ function WorkspaceGroup<T>({
       )}
       {group.items.length > 0 && (
         <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
-          {group.items.map((item) => children(item))}
+          {group.items.map((item) => children(item, group.workspaceId))}
         </div>
       )}
       {group.truncated && (

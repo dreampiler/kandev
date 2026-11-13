@@ -17,8 +17,14 @@ import { sessionDeliveryRecoveryReasonMessage } from "@/lib/services/session-rec
 import type { ClarificationInboxBundle, InboxRecoveryBlock } from "@/lib/types/clarification-inbox";
 
 /** The existing Needs-you row, answered in place through the claim path. */
-export function ControlAnswerableRow({ bundle }: { bundle: ClarificationInboxBundle }) {
-  const lateAnswer = useLateClarificationMessage(bundle.messages[0]);
+export function ControlAnswerableRow({
+  bundle,
+  workspaceId,
+}: {
+  bundle: ClarificationInboxBundle;
+  workspaceId: string;
+}) {
+  const lateAnswer = useLateClarificationMessage(bundle.messages[0], { workspaceId });
   return (
     <NeedsYouInboxRow
       bundle={bundle}
@@ -33,11 +39,17 @@ export function ControlAnswerableRow({ bundle }: { bundle: ClarificationInboxBun
  * the answer goes to the session as an ordinary message quoting the question,
  * through the same late-answer path the task transcript uses.
  */
-export function ControlEarlierQuestionRow({ bundle }: { bundle: ClarificationInboxBundle }) {
+export function ControlEarlierQuestionRow({
+  bundle,
+  workspaceId,
+}: {
+  bundle: ClarificationInboxBundle;
+  workspaceId: string;
+}) {
   const { t } = useTranslation();
   const [answering, setAnswering] = useState(false);
   const scopeRef = useRef<HTMLDivElement>(null);
-  const lateAnswer = useLateClarificationMessage(bundle.messages[0]);
+  const lateAnswer = useLateClarificationMessage(bundle.messages[0], { workspaceId });
   const questionCount = rowQuestionCount(bundle);
   return (
     <div
