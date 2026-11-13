@@ -85,8 +85,10 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 }
 
 func relativeQuotaNoticeContainsOutput(text string, complete bool) bool {
-	return routingerr.RelativeQuotaNoticeHasTrailingOutput(text) ||
-		complete && !routingerr.IsCompleteRelativeQuotaNoticeText(text)
+	if complete {
+		return !routingerr.IsCompleteRelativeQuotaNoticeText(text)
+	}
+	return routingerr.RelativeQuotaNoticeHasTrailingOutput(text) || !routingerr.IsRelativeQuotaNoticePrefix(text)
 }
 
 func (turn *promptTurnState) waitForQuotaNoticeSuffix(a *Adapter, diagnostic providerNoticeDiagnostic, rule string) {
@@ -131,6 +133,10 @@ func (turn *promptTurnState) deliverQuotaNotice(a *Adapter, diagnostic providerN
 	turn.evidenceMu.Lock()
 	defer turn.evidenceMu.Unlock()
 	if turn.quotaNoticeDelivered {
+		return
+	}
+	if rule == routingerr.RuleRelativeQuotaNotice &&
+		relativeQuotaNoticeContainsOutput(turn.quotaNoticeText, quotaNoticeSentenceComplete(turn.quotaNoticeText)) {
 		return
 	}
 	turn.quotaNoticeDelivered = true

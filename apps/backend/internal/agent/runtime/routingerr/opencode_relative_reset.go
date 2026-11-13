@@ -114,7 +114,7 @@ func openCodeRelativeSeparatorValid(separator string, initial bool) bool {
 		return separator == ""
 	}
 	switch separator {
-	case "", ",", "and", ", and":
+	case "", ",", relativeDurationAnd, ", and":
 		return true
 	default:
 		return false

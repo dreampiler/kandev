@@ -43,6 +43,46 @@ func IsCompleteRelativeQuotaNoticeText(text string) bool {
 	return !RelativeQuotaNoticeHasTrailingOutput(text) && parseRelativeResetHintAt(text, time.Time{}) != nil
 }
 
+var relativeDurationPartialUnit = regexp.MustCompile(`^[0-9]{1,3}(?:\s*([a-z]+))?$`)
+
+const relativeDurationAnd = "and"
+
+// IsRelativeQuotaNoticePrefix accepts a complete duration or a valid final fragment.
+func IsRelativeQuotaNoticePrefix(text string) bool {
+	match := relativeResetHintPattern.FindStringSubmatch(text)
+	if match == nil {
+		return false
+	}
+	duration := strings.ToLower(strings.TrimSpace(match[1]))
+	position := 0
+	for _, unit := range relativeDurationUnitPattern.FindAllStringIndex(duration, -1) {
+		separator := strings.Join(strings.Fields(duration[position:unit[0]]), " ")
+		if !relativeResetSeparatorValid(separator, position == 0) {
+			return false
+		}
+		position = unit[1]
+	}
+	suffix := strings.Join(strings.Fields(duration[position:]), " ")
+	if position != 0 {
+		suffix = strings.TrimSpace(strings.TrimPrefix(suffix, ","))
+		switch suffix {
+		case "", "a", "an", relativeDurationAnd:
+			return true
+		}
+		suffix = strings.TrimPrefix(suffix, relativeDurationAnd+" ")
+	}
+	partial := relativeDurationPartialUnit.FindStringSubmatch(suffix)
+	if partial == nil {
+		return false
+	}
+	for _, unit := range []string{"days", "hours", "hrs", "minutes", "mins", "seconds", "secs"} {
+		if strings.HasPrefix(unit, partial[1]) {
+			return true
+		}
+	}
+	return false
+}
+
 // relativeDurationUnitPattern splits a captured duration list into value/unit
 // pairs. Longer unit spellings precede their prefixes so "minutes" is not read
 // as "m" followed by trailing text.
@@ -266,7 +306,7 @@ func relativeResetSeparatorValid(separator string, initial bool) bool {
 		return separator == ""
 	}
 	switch strings.ToLower(separator) {
-	case "", ",", "and", ", and":
+	case "", ",", relativeDurationAnd, ", and":
 		return true
 	default:
 		return false

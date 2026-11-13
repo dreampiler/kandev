@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -25,6 +26,7 @@ func TestRelativeQuotaNoticeDoesNotConsumeAssistantOutput(t *testing.T) {
 		{"mixed continuation", []string{opening, ending + answer}},
 		{"mixed notice", []string{opening + ending + answer}},
 		{"undelimited output", []string{opening, answer}},
+		{"undelimited streaming output", []string{opening, strings.TrimSuffix(answer, ".")}},
 		{"output after notice", []string{opening, ending, answer}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +52,30 @@ func TestRelativeQuotaNoticeDoesNotConsumeAssistantOutput(t *testing.T) {
 			}
 		})
 	}
+	t.Run("split duration", func(t *testing.T) {
+		a := newTestAdapter()
+		a.sessionID = sessionID
+		turn := &promptTurnState{promptGeneration: 1, providerErrorCh: make(chan providerNoticeDiagnostic, 1)}
+		a.promptTurn = turn
+		t.Cleanup(turn.closeQuotaNotice)
+
+		for _, chunk := range []string{opening, ", 30 mi", "nutes."} {
+			event := AgentEvent{Type: streams.EventTypeMessageChunk, SessionID: sessionID, Text: chunk}
+			a.observeUsageLimitNotice(turn.promptGeneration, &event)
+			if !event.ProviderDiagnosticCandidate {
+				t.Fatal("valid duration fragment was marked as ordinary output")
+			}
+		}
+		select {
+		case diagnostic := <-turn.providerErrorCh:
+			if diagnostic.ProviderError.ResetAt == nil ||
+				diagnostic.ProviderError.ResetAt.Sub(diagnostic.ProviderError.OccurredAt).Round(time.Second) != 90*time.Minute {
+				t.Fatal("the diagnostic lost the complete reset duration")
+			}
+		default:
+			t.Fatal("the completed notice did not produce a diagnostic")
+		}
+	})
 }
 
 // TestCancelActiveToolCalls_PreservesSubagentTask pins the fix for the
