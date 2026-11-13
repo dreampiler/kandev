@@ -3842,8 +3842,13 @@ func (e *Executor) persistTaskEnvironment(
 			existingEnv.ContainerBootstrapNonceSecretID = ""
 			existingEnv.ContainerControlAuthTokenSecretID = ""
 			existingEnv.SandboxID = ""
-		} else if workspacePath != "" {
-			existingEnv.WorkspacePath = workspacePath
+		} else {
+			if workspacePath != "" {
+				existingEnv.WorkspacePath = workspacePath
+			}
+			if legacyLocalEnvironmentTypeMatchesLaunch(existingEnv, req) {
+				existingEnv.ExecutorType = req.ExecutorType
+			}
 		}
 		if resp.ContainerID != "" {
 			existingEnv.ContainerID = resp.ContainerID
@@ -4138,6 +4143,17 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 		})
 	}
 	return out
+}
+
+// A successful owner launch can fill the missing type for its matching legacy
+// local alias without switching the executor or replacing physical inventory.
+func legacyLocalEnvironmentTypeMatchesLaunch(env *models.TaskEnvironment, req *LaunchAgentRequest) bool {
+	if env.ExecutorType != "" || env.ExecutorID != req.ExecutorType ||
+		env.ExecutorProfileID != "" || env.ContainerID != "" || env.SandboxID != "" ||
+		env.ContainerBootstrapNonceSecretID != "" || env.ContainerControlAuthTokenSecretID != "" {
+		return false
+	}
+	return req.ExecutorType == "local_pc" || req.ExecutorType == string(models.ExecutorTypeLocal)
 }
 
 // persistTaskEnvironmentRepos upserts per-repo rows under an existing env id.

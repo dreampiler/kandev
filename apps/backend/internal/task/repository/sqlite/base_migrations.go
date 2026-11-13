@@ -259,6 +259,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	if err := r.backfillLegacyLocalTaskEnvironmentType(ctx); err != nil {
+		return err
+	}
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
@@ -1664,6 +1667,29 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
 		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
+}
+
+// backfillLegacyLocalTaskEnvironmentType restores the type lost by older
+// local launches. An actual executor record, including a retired one, is
+// authoritative, as are profile and remote-runtime identities.
+func (r *Repository) backfillLegacyLocalTaskEnvironmentType(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE task_environments SET executor_type = executor_id
+		WHERE COALESCE(executor_type, '') = ''
+		  AND executor_id IN ('local', 'local_pc')
+		  AND retired_at IS NULL
+		  AND status IN ('ready', 'stopped')
+		  AND COALESCE(executor_profile_id, '') = ''
+		  AND COALESCE(container_id, '') = ''
+		  AND COALESCE(container_bootstrap_nonce_secret_id, '') = ''
+		  AND COALESCE(container_control_auth_token_secret_id, '') = ''
+		  AND COALESCE(sandbox_id, '') = ''
+		  AND NOT EXISTS (SELECT 1 FROM executors WHERE id = task_environments.executor_id)
+	`)
+	if err != nil {
+		return fmt.Errorf("backfill retained local task environment type: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {

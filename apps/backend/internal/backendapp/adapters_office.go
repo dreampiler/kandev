@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type officeCommentWindowReader interface {
@@ -329,12 +330,20 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflowWithContext(
 		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindSystem),
 		models.MetaKeyOfficeCarrierActorID:        "",
 	}
+	// Project routines are Office tasks and start through assignment. Keep
+	// pending work visible to idle admission and unstarted recovery.
+	var initialState *v1.TaskState
+	if options.ProjectID != "" {
+		state := v1.TaskStateTODO
+		initialState = &state
+	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
 		Title:                  title,
 		Description:            description,
 		ProjectID:              options.ProjectID,
+		State:                  initialState,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Metadata:               metadata,
 		OfficeCarrierMetadata:  carrierMetadata,
