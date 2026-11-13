@@ -311,8 +311,9 @@ type Manager struct {
 	// editor-buffer HTML previews. It is closed with the agentctl instance.
 	workspacePreview *WorkspacePreviewManager
 
-	// Embedded shell session (auto-created when agent starts)
-	shell *shell.Session
+	// Embedded shell session (auto-created when agent starts). Keep reads
+	// independent of the teardown mutex and comparison-target admission.
+	shell atomic.Pointer[shell.Session]
 
 	// Per-terminal shell sessions for remote executor support
 	shellMgr *shell.Manager
@@ -498,7 +499,7 @@ func (m *Manager) CloseAdmissionIfIdle() bool {
 	if shell := m.Shell(); shell != nil && shell.HasUserWork() {
 		return false
 	}
-	if m.hasWorkspaceEditor() {
+	if m.hasWorkspaceEditor() || m.workspacePreview.hasOpenRoots() {
 		return false
 	}
 	for _, process := range m.ListProcesses("") {
@@ -2031,6 +2032,11 @@ func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (Workspac
 	if m.workspacePreview == nil {
 		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
 	}
+	release, err := m.admitStart()
+	if err != nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	defer release()
 	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
 	if err != nil {
 		return WorkspacePreviewResponse{}, err
@@ -2842,7 +2848,7 @@ func (m *Manager) startAgentShell() {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
 		return
 	}
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session auto-created")
 }
 
@@ -3771,12 +3777,12 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 	m.logger.Debug("vscode server stopped")
 
 	m.logger.Debug("stopping shell session")
-	if m.shell != nil {
-		if err := m.shell.Stop(); err != nil {
+	if session := m.shell.Load(); session != nil {
+		if err := session.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
 			errs = append(errs, err)
 		} else {
-			m.shell = nil
+			m.shell.CompareAndSwap(session, nil)
 		}
 	}
 	m.logger.Debug("shell session stopped")
@@ -5001,9 +5007,7 @@ func (m *Manager) CancelPendingPermissions() {
 
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.shell
+	return m.shell.Load()
 }
 
 // WriteWorkspaceShellInput serializes user input with idle instance reclaim.
@@ -5041,7 +5045,7 @@ func (m *Manager) StartShell() error {
 	defer m.mu.Unlock()
 
 	// Already running
-	if m.shell != nil {
+	if m.shell.Load() != nil {
 		return nil
 	}
 
@@ -5058,7 +5062,7 @@ func (m *Manager) StartShell() error {
 		return fmt.Errorf("failed to create shell session: %w", err)
 	}
 
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session started independently")
 	return nil
 }

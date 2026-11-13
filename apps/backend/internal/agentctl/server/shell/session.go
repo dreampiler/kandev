@@ -383,13 +383,12 @@ func (s *Session) Write(data []byte) (int, error) {
 	return s.pty.Write(data)
 }
 
-// HasUserWork distinguishes an auto-created shell from one attached or used.
+// HasUserWork reports input sent to the shell. The default workspace stream
+// subscribes to output even when no terminal has been used.
 func (s *Session) HasUserWork() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	s.subMu.RLock()
-	defer s.subMu.RUnlock()
-	return s.running && (s.inputUsed || len(s.subscribers) != 0)
+	return s.running && s.inputUsed
 }
 
 // Resize changes the terminal dimensions of the shell PTY.
