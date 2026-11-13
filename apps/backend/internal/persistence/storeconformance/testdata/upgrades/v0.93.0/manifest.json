@@ -16,7 +16,6 @@
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
           "values": {
-            "allow_agent_edits": "0",
             "content": "preserved prompt content"
           }
         },
@@ -327,7 +326,6 @@
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
           "values": {
-            "allow_agent_edits": "0",
             "content": "preserved prompt content"
           }
         },
@@ -649,13 +647,13 @@
     "linear",
     "notification",
     "sentry",
-    "azure-devops",
     "workflow-sync",
     "office-config-sync",
     "automation",
     "coordinator"
   ],
   "known_missing_required_tables": {
+    "office": ["office_handoff_completion_outbox"],
     "workflow": ["prompt_source_instances", "prompt_source_templates"],
     "task": [
       "agent_delivery_cursors",
@@ -688,8 +686,7 @@
       "turn_change_contents",
       "turn_change_sets",
       "turn_file_changes",
-      "turn_repository_changes",
-      "workspace_collaboration_grants"
+      "turn_repository_changes"
     ]
   }
 }

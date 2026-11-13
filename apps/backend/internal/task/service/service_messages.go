@@ -853,13 +853,19 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 	}
 
 	turnID := req.TurnID
+	var err error
 	if turnID == "" {
 		var turn *models.Turn
-		var err error
 		if req.CompletedTurn {
 			turn, err = s.createCompletedTurn(ctx, session)
 		} else {
-			turn, err = s.getOrStartTurnWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
+			turn, err = s.getOrStartTurnWithRetry(
+				ctx,
+				req.TaskSessionID,
+				id,
+				messageCreateMaxRetries,
+				messageCreateRetryDelay,
+			)
 		}
 		if err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
