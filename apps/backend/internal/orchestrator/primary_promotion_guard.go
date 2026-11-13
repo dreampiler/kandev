@@ -21,6 +21,9 @@ func (s *Service) sessionAwaitsRecoveryAction(ctx context.Context, session *mode
 	if session.RouteState == dynamicRouteStatusActionRequired {
 		return true
 	}
+	if err := s.checkInferenceClosureAdmission(ctx, session.ID, false); err != nil {
+		return true
+	}
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, session.ID)
 	if err != nil {
 		s.logger.Debug("cannot read session recovery block for primary selection",
@@ -50,7 +53,8 @@ func (s *Service) terminalQueueSourceRetired(ctx context.Context, sessionID stri
 	if err != nil || session == nil {
 		return false
 	}
-	return isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID)
+	return isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID) &&
+		s.checkInferenceClosureAdmission(ctx, sessionID, false) == nil
 }
 
 // terminalQueueReceiverAwaitsRecovery reports whether the session a hand-off

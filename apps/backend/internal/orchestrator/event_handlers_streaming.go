@@ -2172,6 +2172,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	if !isTerminalSessionState(newState) {
 		return
 	}
+	// A restart closure still owns this session while its successor is pending.
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return
+	}
 	if newState == models.TaskSessionStateFailed && s.resumeAttemptInFlight(sessionID) {
 		s.logger.Info("kept primary session after resume rollback",
 			zap.String("task_id", taskID),
