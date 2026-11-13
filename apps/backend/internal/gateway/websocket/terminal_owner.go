@@ -6,6 +6,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	terminalrepository "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
 
@@ -17,6 +18,9 @@ func (h *TerminalHandler) resolveEnvironmentTerminalExecution(ctx context.Contex
 		return nil, err
 	}
 	taskID, err := h.terminalSvc.OwnerForTerminal(ctx, environmentID, terminalID)
+	if errors.Is(err, terminalrepository.ErrNotFound) {
+		return nil, terminalservice.ErrTaskMismatch
+	}
 	if err != nil {
 		return nil, err
 	}
