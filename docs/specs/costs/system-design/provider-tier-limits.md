@@ -46,7 +46,7 @@ Gateway concurrency is requests; admission concurrency is task turns, a conserva
 
 Execution-scoped checks and detached learning carry the selected route generation's model and account. Account-specific values require matching provider, account, and organization evidence. A model override must stay on the configured allowance account. Missing or changed evidence leaves that allowance unknown and does not assign its usage to another account.
 
-Model-class budgets read recorded models. Turn totals count a turn once even when it spans multiple matching models. Provider windows prefer the exact model or a recognized model family before a shared window. A known exhausted allowance remains effective if another model scope has incomplete attribution.
+Model-class budgets read recorded models. Turn totals count a turn once even when it spans multiple matching models. For provider-ledger reset anchors, prefer an exact model or a recognized family, then the shared window. Provider percentages apply both the shared account window and the applicable model windows. When multiple applicable limits are exhausted, use the latest known reset. A known exhausted allowance remains effective if another model scope has incomplete attribution.
 
 Attributed task usage rows provide token/cost totals and response-count lower bounds. A distinct native response counts once; summary-only streams are estimated. Existing agent-stream assistant/response identities supplement in-flight counts. The larger stream/ledger count avoids adding two representations. Missing events and assistant segmentation can undercount or overcount actual HTTP calls. Provider daily counters and subscription percentages remain separate measurements.
 

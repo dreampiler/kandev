@@ -102,18 +102,8 @@ func (s *providerTierLimitService) readRequestCount(ctx context.Context, ids []s
 
 func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, now time.Time) (float64, time.Time, bool, error) {
 	if budget.Unit == "percent" {
-		window, ok := findProviderBudget(c.observed, budget, c.profile.Model)
-		if !ok {
-			return 0, time.Time{}, false, nil
-		}
-		if !window.ResetAt.IsZero() && !window.ResetAt.After(now) {
-			return 0, time.Time{}, false, nil
-		}
-		amount := window.UtilizationPct
-		if window.LimitReached {
-			amount = math.Max(100, amount)
-		}
-		return amount, window.ResetAt, true, nil
+		amount, reset, known := readProviderPercentBudget(c, budget, now)
+		return amount, reset, known, nil
 	}
 	start, reset, ok := agentusage.LimitWindowBounds(now, budget)
 	if budget.Reset == hostSourceProvider {
@@ -130,6 +120,45 @@ func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLi
 	}
 	total, err := s.store.GetManualWindowUsageForProfiles(ctx, c.ids, start, now)
 	return budgetAmount(total, budget.Unit), reset, true, err
+}
+
+func readProviderPercentBudget(c tierLimitContext, b agentusage.LimitBudget, now time.Time) (float64, time.Time, bool) {
+	if c.observed == nil {
+		return 0, time.Time{}, false
+	}
+	var amount float64
+	var reset, exhaustedUntil time.Time
+	known := false
+	for _, w := range c.observed.Windows {
+		if !providerPercentWindowApplies(w, b, c.profile.Model, now) {
+			continue
+		}
+		pct := w.UtilizationPct
+		if w.LimitReached {
+			pct = math.Max(100, pct)
+		}
+		if !known || pct > amount || (pct == amount && w.ResetAt.After(reset)) {
+			amount, reset, known = pct, w.ResetAt, true
+		}
+		if c.effective.WindowBudgetExhausted(b, pct) && w.ResetAt.After(exhaustedUntil) {
+			exhaustedUntil = w.ResetAt
+		}
+	}
+	if !exhaustedUntil.IsZero() {
+		reset = exhaustedUntil
+	}
+	return amount, reset, known
+}
+
+func providerPercentWindowApplies(w agentusage.UtilizationWindow, b agentusage.LimitBudget, model string, now time.Time) bool {
+	if providerWindowPeriod(w) != b.Window || string(w.Scope) != b.Scope ||
+		(!w.ResetAt.IsZero() && !w.ResetAt.After(now)) {
+		return false
+	}
+	if w.ModelID != "" {
+		return exactProviderBudgetModel(w.ModelID, model)
+	}
+	return w.Model == "" || exactProviderBudgetModel(w.Model, model) || knownProviderBudgetFamily(w, model)
 }
 
 func findProviderBudget(observed *agentusage.ProviderUsage, b agentusage.LimitBudget, model string) (agentusage.UtilizationWindow, bool) {
@@ -211,6 +240,9 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 	if err != nil {
 		return time.Time{}, false
 	}
+	if exhaustedOnly {
+		c.effective.Windows = applicableTierBudgets(c)
+	}
 	used, err := s.readUsage(ctx, c, "", now)
 	unknownModel := errors.Is(err, errModelAttributionUnavailable)
 	if err != nil && !unknownModel {
@@ -218,13 +250,7 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 	}
 	var latest time.Time
 	for _, budget := range c.effective.Windows {
-		if unknownModel && budget.Scope != "" {
-			continue
-		}
-		if period != "" && budget.Window != period {
-			continue
-		}
-		if exhaustedOnly && (budget.Value == nil || used.Windows[budget.Key()] < *budget.Value) {
+		if !budgetContributesReset(c.effective, budget, used, period, exhaustedOnly, unknownModel) {
 			continue
 		}
 		reset := used.Resets[budget.Key()]
@@ -236,4 +262,15 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 		}
 	}
 	return latest, latest.After(now)
+}
+
+func budgetContributesReset(limits agentusage.TierLimits, budget agentusage.LimitBudget, used agentusage.LimitUsage, period string, exhaustedOnly, unknownModel bool) bool {
+	if period != "" && budget.Window != period {
+		return false
+	}
+	if exhaustedOnly {
+		amount, known := used.Windows[budget.Key()]
+		return known && limits.WindowBudgetExhausted(budget, amount)
+	}
+	return !unknownModel || budget.Scope == ""
 }

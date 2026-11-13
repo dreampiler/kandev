@@ -87,9 +87,14 @@ func EvaluateTierLimits(limits TierLimits, used LimitUsage, now time.Time) Limit
 		_, reset, _ := DailyLimitWindow(now, limits.DailyReset)
 		return LimitAdmission{Reason: "limit_daily", RetryAt: reset}
 	}
+	return limits.EvaluateWindowBudgets(used, now)
+}
+
+// EvaluateWindowBudgets evaluates known window usage with the configured threshold.
+func (limits TierLimits) EvaluateWindowBudgets(used LimitUsage, now time.Time) LimitAdmission {
 	for _, budget := range limits.Windows {
 		amount, known := used.Windows[budget.Key()]
-		if !known || !positive(budget.Value) || amount < *budget.Value*budgetMargin(budget, limits) {
+		if !known || !limits.WindowBudgetExhausted(budget, amount) {
 			continue
 		}
 		reset := used.Resets[budget.Key()]
@@ -102,6 +107,11 @@ func EvaluateTierLimits(limits TierLimits, used LimitUsage, now time.Time) Limit
 		return LimitAdmission{Reason: "limit_window", RetryAt: reset}
 	}
 	return LimitAdmission{}
+}
+
+// WindowBudgetExhausted includes the reserve for a learned budget.
+func (l TierLimits) WindowBudgetExhausted(b LimitBudget, amount float64) bool {
+	return positive(b.Value) && amount >= *b.Value*budgetMargin(b, l)
 }
 
 func (l TierLimits) margin(field string) float64 {

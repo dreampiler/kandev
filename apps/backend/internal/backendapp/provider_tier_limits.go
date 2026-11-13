@@ -287,7 +287,7 @@ func (s *providerTierLimitService) checkCandidate(ctx context.Context, candidate
 		if admission := agentusage.EvaluateScopeLimits(c.effective.Scopes, c.profile.Model, used, now); admission.Reason != "" {
 			return admission, nil
 		}
-		if admission := agentusage.EvaluateTierLimits(agentusage.TierLimits{Windows: c.effective.Windows}, used, now); admission.Reason != "" {
+		if admission := c.effective.EvaluateWindowBudgets(used, now); admission.Reason != "" {
 			return admission, nil
 		}
 	}
