@@ -146,7 +146,7 @@ func (r *Repository) lockInferenceClosureSession(ctx context.Context, tx *sqlx.T
 	}
 	query := "SELECT COALESCE(er.agent_execution_id, ''), ts.queue_incarnation_id, ts.metadata FROM task_sessions ts LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.id = ?"
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += " FOR UPDATE OF ts"
+		query += taskSessionForUpdateClause
 	}
 	var execution, incarnation string
 	var metadataJSON sql.NullString

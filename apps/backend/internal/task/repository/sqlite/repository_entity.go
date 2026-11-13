@@ -17,6 +17,7 @@ import (
 )
 
 const optimisticUpdatedAtPredicate = " AND updated_at = ?"
+const taskSessionForUpdateClause = " FOR UPDATE OF ts"
 
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {

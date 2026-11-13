@@ -193,7 +193,7 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 		LEFT JOIN task_environments te ON te.id = ts.task_environment_id
 		WHERE ts.id = ? AND t.archived_at IS NULL`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE OF ts`
+		query += taskSessionForUpdateClause
 	}
 	owner := &agentDeliveryReconstructionOwner{}
 	var taskID, incarnationID, executionID string
