@@ -250,28 +250,47 @@ func (b *sharedInferenceConsumer) settle(ctx context.Context, binding sessioncap
 }
 
 func (b *sharedInferenceConsumer) settleLocked(ctx context.Context, binding sessioncapacity.InferenceBinding, status *utility.AttemptStatus) bool {
+	result := b.settleInferenceBinding(ctx, binding, status)
+	return result == inferenceSettlementCompleted ||
+		(result == inferenceSettlementMissing && binding.SettlementKind == inferenceSettlementNone && binding.ProviderKey == "")
+}
+
+type inferenceSettlementResult uint8
+
+const (
+	inferenceSettlementUnresolved inferenceSettlementResult = iota
+	inferenceSettlementMissing
+	inferenceSettlementCompleted
+)
+
+// settleInferenceBinding distinguishes an absent claim from a claim settled by this call.
+// The caller holds refreshMu.
+func (b *sharedInferenceConsumer) settleInferenceBinding(ctx context.Context, binding sessioncapacity.InferenceBinding, status *utility.AttemptStatus) inferenceSettlementResult {
 	if !matchesInferenceProof(binding, status) {
-		return false
+		return inferenceSettlementUnresolved
 	}
 	bindings, err := b.capacity.InferenceCapacityBindings(ctx)
 	if err != nil {
-		return false
+		return inferenceSettlementUnresolved
 	}
 	held, exists := bindings[binding.Key]
 	if !exists {
-		return binding.SettlementKind == inferenceSettlementNone && binding.ProviderKey == ""
+		return inferenceSettlementMissing
 	}
 	if !matchesInferenceProof(held, status) || !sameHeldInference(held, binding) {
-		return false
+		return inferenceSettlementUnresolved
 	}
 	if err := b.retainInferenceTerminal(ctx, held, status); err != nil {
-		return false
+		return inferenceSettlementUnresolved
 	}
 	held.TerminalState, held.TerminalPromptDispatch = status.State, status.PromptDispatch
 	if err := b.finishInferenceClaim(ctx, held); err != nil {
-		return false
+		return inferenceSettlementUnresolved
 	}
-	return b.removeSettledInference(ctx, held) == nil
+	if err := b.removeSettledInference(ctx, held); err != nil {
+		return inferenceSettlementUnresolved
+	}
+	return inferenceSettlementCompleted
 }
 
 func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {

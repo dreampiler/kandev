@@ -74,7 +74,13 @@ function TaskWaitRows({ tasks }: { tasks: NativeTask[] }) {
  * a task count from the same Native dashboard read the comparison uses; a
  * loading, denied or failed read is unknown, not a measured zero.
  */
-export function ControlWaitReasons({ rows }: { rows: WaitReasonRow[] }) {
+export function ControlWaitReasons({
+  rows,
+  openOverview = false,
+}: {
+  rows: WaitReasonRow[];
+  openOverview?: boolean;
+}) {
   const { t } = useTranslation();
   if (rows.length === 0) return null;
   return (
@@ -91,7 +97,7 @@ export function ControlWaitReasons({ rows }: { rows: WaitReasonRow[] }) {
               data-workspace-id={workspace.id}
             >
               <Link
-                href={controlHref("workspaces", workspace.id)}
+                href={controlHref(openOverview ? "overview" : "workspaces", workspace.id)}
                 className="inline-flex min-h-7 cursor-pointer items-center font-medium underline-offset-4 hover:underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
               >
                 {workspace.name}

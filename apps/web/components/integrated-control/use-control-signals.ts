@@ -35,10 +35,15 @@ export function useControlSignals({
 }: { tasks?: boolean; history?: boolean; workspaceId?: string } = {}) {
   const control = useIntegratedControl();
   const data = control?.data;
-  const ids = useMemo(() => data?.workspaces.map((workspace) => workspace.id) ?? NO_IDS, [data]);
+  const ids = useMemo(
+    () =>
+      data?.workspaces
+        .filter((workspace) => !workspaceId || workspace.id === workspaceId)
+        .map((workspace) => workspace.id) ?? NO_IDS,
+    [data, workspaceId],
+  );
   const dashboards = useNativeDashboards(ids, data);
-  const taskIds = workspaceId ? ids.filter((id) => id === workspaceId) : ids;
-  const taskReads = useNativeTaskRows(tasks ? taskIds : NO_IDS, data);
+  const taskReads = useNativeTaskRows(tasks ? ids : NO_IDS, data);
   const historyReads = useNativeHistory(history ? ids : NO_IDS, data);
   const coordinatorEnabled = Boolean(control?.coordinatorEnabled);
   const inbox = useControlInbox()?.byWorkspace;

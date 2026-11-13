@@ -36,7 +36,7 @@ export function IntegratedControlDashboard({
       className="min-h-0 w-full min-w-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6 [scrollbar-gutter:stable] [&_table_a]:inline-flex [&_table_a]:min-h-7 [&_table_a]:items-center [&_table_summary]:inline-flex [&_table_summary]:min-h-7 [&_table_summary]:items-center max-md:[&_table_a]:min-h-11 max-md:[&_table_summary]:min-h-11 [@media(pointer:coarse)]:[&_table_a]:min-h-11 [@media(pointer:coarse)]:[&_table_summary]:min-h-11"
       data-testid={`control-dashboard-${view}`}
     >
-      {view === "overview" && <ControlOverview />}
+      {view === "overview" && <ControlOverview workspaceId={workspaceId} />}
       {view === "inbox" && <ControlInbox />}
       {view === "history" && <ControlHistory workspaceId={workspaceId} />}
       {view === "workspaces" && <WorkspacesView workspaceId={workspaceId} />}
@@ -46,6 +46,7 @@ export function IntegratedControlDashboard({
         <ControlAggregateOverview
           aggregate={control.aggregate}
           controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+          workspaceId={workspaceId}
         />
       )}
       {view === "history" && control.officeEnabled && (

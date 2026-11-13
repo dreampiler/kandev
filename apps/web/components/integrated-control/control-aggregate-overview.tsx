@@ -42,12 +42,20 @@ function officeHref(path: string, workspaceId: string): string {
 export function ControlAggregateOverview({
   aggregate,
   controlWorkspaceIds,
+  workspaceId,
 }: {
   aggregate: ControlAggregateRead;
   controlWorkspaceIds: string[];
+  workspaceId?: string;
 }) {
   const { t } = useTranslation();
-  const entries = aggregate.data?.workspaces;
+  const entries = useMemo(
+    () =>
+      aggregate.data?.workspaces.filter(
+        (entry) => !workspaceId || entry.workspace_id === workspaceId,
+      ),
+    [aggregate.data, workspaceId],
+  );
   const totals = useMemo(() => aggregateTotals(entries ?? []), [entries]);
   const attention = useMemo(() => buildAggregateAttention(entries ?? []), [entries]);
   if (!entries) {
@@ -65,7 +73,8 @@ export function ControlAggregateOverview({
       </p>
     );
   }
-  const uncovered = uncoveredWorkspaceIds(controlWorkspaceIds, entries).length;
+  const visibleWorkspaceIds = workspaceId ? [workspaceId] : controlWorkspaceIds;
+  const uncovered = uncoveredWorkspaceIds(visibleWorkspaceIds, entries).length;
   return (
     <div className="space-y-5" data-testid="control-aggregate-overview">
       <ControlStallBand totals={totals} />

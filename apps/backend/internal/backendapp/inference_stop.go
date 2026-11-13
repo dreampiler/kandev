@@ -55,10 +55,11 @@ func (b *sharedInferenceConsumer) ObserveInferenceStopDetailed(ctx context.Conte
 	}
 	var failures []error
 	for key, status := range proofs {
-		if b.settleLocked(ctx, bindings[key], &status) {
+		switch b.settleInferenceBinding(ctx, bindings[key], &status) {
+		case inferenceSettlementCompleted:
 			report.Settled++
 			report.Unresolved--
-		} else {
+		case inferenceSettlementUnresolved:
 			failures = append(failures, fmt.Errorf("settle final inference attempt %s", key))
 		}
 	}

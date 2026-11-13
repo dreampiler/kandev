@@ -56,11 +56,7 @@ export function IntegratedControlPage() {
           <h1 className="truncate text-sm font-semibold">
             {t("sidebar:integratedControl.title")} / {t(CONTROL_VIEW_LABEL_KEYS[view])}
           </h1>
-          {workspace && coordinator && (
-            <p className="truncate text-xs text-muted-foreground">
-              {workspace.name} / {coordinator.name}
-            </p>
-          )}
+          <ControlSelectionLabel view={view} workspace={workspace} coordinator={coordinator} />
         </div>
         <ControlDbBadge />
         <ControlLastRefresh />
@@ -89,6 +85,20 @@ export function IntegratedControlPage() {
       />
     </div>
   );
+}
+
+function ControlSelectionLabel({
+  view,
+  workspace,
+  coordinator,
+}: {
+  view: ControlView;
+  workspace?: ControlWorkspace;
+  coordinator?: Coordinator;
+}) {
+  if (!workspace || (!coordinator && view !== "overview")) return null;
+  const label = coordinator ? `${workspace.name} / ${coordinator.name}` : workspace.name;
+  return <p className="truncate text-xs text-muted-foreground">{label}</p>;
 }
 
 function ControlBody({
@@ -147,5 +157,9 @@ function workspaceDashboard(
   coordinatorRequested: boolean,
   taskId: string | null,
 ) {
-  return !coordinatorRequested && !taskId && ["workspaces", "history", "providers"].includes(view);
+  return (
+    !coordinatorRequested &&
+    !taskId &&
+    ["overview", "workspaces", "history", "providers"].includes(view)
+  );
 }

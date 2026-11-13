@@ -5,18 +5,22 @@ import { ControlWorkspaceCompare } from "./control-workspace-compare";
 import { useControlSignals } from "./use-control-signals";
 
 /** The summary screen: state sentence, figures, what needs a person, then the comparison. */
-export function ControlOverview() {
+export function ControlOverview({ workspaceId }: { workspaceId?: string }) {
   const control = useIntegratedControl();
-  const signals = useControlSignals();
+  const signals = useControlSignals({ workspaceId });
   const names = Object.fromEntries(
     (control?.data?.workspaces ?? []).map((workspace) => [workspace.id, workspace.name]),
   );
   return (
     <div className="space-y-5" data-testid="control-overview">
-      <ControlStatusStrip signals={signals} />
-      <ControlKpis signals={signals} names={names} />
+      {!workspaceId && <ControlStatusStrip signals={signals} />}
+      {!workspaceId && <ControlKpis signals={signals} names={names} />}
       <ControlAttentionList items={signals.attention} names={names} />
-      <ControlWorkspaceCompare signals={signals} />
+      <ControlWorkspaceCompare
+        signals={signals}
+        workspaceId={workspaceId}
+        openOverview={!workspaceId}
+      />
     </div>
   );
 }

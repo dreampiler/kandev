@@ -238,11 +238,13 @@ function CompareRow({
   signals,
   control,
   kind,
+  openOverview,
 }: {
   workspace: ControlWorkspace;
   signals: ControlSignals;
   control: ReturnType<typeof useIntegratedControl>;
   kind: CompareKind;
+  openOverview: boolean;
 }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -250,7 +252,7 @@ function CompareRow({
   const figures = signals.figures[workspace.id];
   const status: WorkspaceStatus | undefined = signals.statusById[workspace.id];
   const read = signals.dashboards.data?.find((row) => row.id === workspace.id);
-  const href = controlHref("workspaces", workspace.id);
+  const href = controlHref(openOverview ? "overview" : "workspaces", workspace.id);
   return (
     <TableRow
       className="cursor-pointer"
@@ -297,9 +299,11 @@ function CompareRow({
 export function ControlWorkspaceCompare({
   signals,
   workspaceId,
+  openOverview = false,
 }: {
   signals: ControlSignals;
   workspaceId?: string;
+  openOverview?: boolean;
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
@@ -351,6 +355,7 @@ export function ControlWorkspaceCompare({
                       signals={signals}
                       control={control}
                       kind={kind}
+                      openOverview={openOverview}
                     />
                   ))}
                 </TableBody>
@@ -360,6 +365,7 @@ export function ControlWorkspaceCompare({
         );
       })}
       <ControlWaitReasons
+        openOverview={openOverview}
         rows={workspaces.map((workspace) => ({
           workspace,
           data: dashboardByWorkspace.get(workspace.id),

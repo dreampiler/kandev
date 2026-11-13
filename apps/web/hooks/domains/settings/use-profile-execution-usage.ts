@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import {
-  readProfileExecutionUsage,
+  readCachedProfileExecutionUsage,
   type ProfileExecutionUsage,
 } from "@/lib/api/domains/provider-usage-api";
 
@@ -28,7 +28,7 @@ export function useProfileExecutionUsage(profileId: string, autoRead: boolean) {
     setFailed(false);
     setSnapshot(undefined);
     try {
-      const result = await readProfileExecutionUsage(profileId, {
+      const result = await readCachedProfileExecutionUsage(profileId, {
         cache: "no-store",
         init: { signal: controller.signal },
       });
