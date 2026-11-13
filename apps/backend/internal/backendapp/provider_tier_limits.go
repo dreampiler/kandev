@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
@@ -247,6 +248,14 @@ func (s *providerTierLimitService) Check(ctx context.Context, id, exclude string
 		return agentusage.LimitAdmission{}, err
 	}
 	used, err := s.readUsage(ctx, c, exclude, now)
+	if errors.Is(err, errModelAttributionUnavailable) {
+		if admission := provenAccountLimit(c.effective, used, now); admission.Reason != "" {
+			return admission, nil
+		}
+		if admission := agentusage.EvaluateScopeLimits(c.effective.Scopes, c.profile.Model, used, now); admission.Reason != "" {
+			return admission, nil
+		}
+	}
 	if err != nil {
 		return agentusage.LimitAdmission{}, err
 	}
@@ -276,7 +285,11 @@ func (s *providerTierLimitService) ListAccounts(ctx context.Context) (map[string
 			providers[c.key] = c.provider
 		}
 		account.Profiles = append(account.Profiles, controller.ProviderTierProfileDTO{ID: c.profile.ID, Name: c.profile.Name, Tier: c.tier, Model: agentusage.ScopeModelID(c.profile.Model)})
-		used, _ := s.readUsage(ctx, c, "", time.Now())
+		now := time.Now()
+		usageContext := c
+		usageContext.effective.Scopes = nil
+		used, _ := s.readUsage(ctx, usageContext, "", now)
+		_ = s.readScopeUsage(ctx, c, now, &used, "")
 		account.Tiers[c.tier] = controller.ProviderTierLimitDTO{Defaults: c.defaults, Learned: c.learned.Tiers[c.tier], Override: c.owner.Tiers[c.tier], Effective: c.effective, Usage: used}
 		for _, tier := range billingTiers {
 			if _, ok := account.Tiers[tier]; !ok {

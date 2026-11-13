@@ -85,7 +85,7 @@ function ProviderScopeRow({ id, scope, state, override, onValue, onRemove }: Row
       <ScopeSources defaults={defaults} learned={learned} override={override} />
       <ScopeStatus
         scope={scope}
-        used={state.usage.scopes?.[scope.id] ?? 0}
+        used={state.usage.scopes?.[scope.id]}
         provenance={defaults?.provenance}
         provisional={learned?.provisional}
       />
@@ -166,7 +166,7 @@ function ScopeStatus({
   provisional,
 }: {
   scope: RequestScope;
-  used: number;
+  used?: number;
   provenance?: RequestScope["provenance"];
   provisional?: boolean;
 }) {
@@ -174,7 +174,10 @@ function ScopeStatus({
   return (
     <>
       <span className="text-xs text-muted-foreground">
-        {t("agents:providerScopeToday", { used, reset: scope.daily_reset || t(UNKNOWN) })}
+        {t("agents:providerScopeToday", {
+          used: used ?? t(UNKNOWN),
+          reset: scope.daily_reset || t(UNKNOWN),
+        })}
         {provenance
           ? ` ${t("agents:providerLimitProvenance", { provenance: t(PROVENANCE_LABELS[provenance]) })}`
           : ""}

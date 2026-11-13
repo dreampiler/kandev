@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
@@ -111,12 +112,16 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	used, err := s.readUsage(ctx, c, "", observation.ObservedAt)
-	if err != nil {
+	unknownModel := errors.Is(err, errModelAttributionUnavailable)
+	if err != nil && !unknownModel {
 		return err
 	}
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
+	if candidate.ModelID == c.profile.Model {
+		observation.ModelID = candidate.ModelID
+	}
 	observation.RequestsMinute = used.RequestsMinute
 	observation.RequestsDay = used.RequestsDay
 	observation.ActiveTurns = used.ActiveTurns
@@ -129,7 +134,16 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	if dimension == limitDimensionModelDaily {
-		return s.learnModelScope(ctx, c, used, observation.ObservedAt)
+		if observation.ModelID == "" {
+			return nil
+		}
+		if err := s.learnModelScope(ctx, c, observation.ObservedAt); !errors.Is(err, errModelAttributionUnavailable) {
+			return err
+		}
+		return nil
+	}
+	if unknownModel && dimension == "minute" && c.effective.RequestsPerModel {
+		return nil
 	}
 	used.Windows = learningTokenWindows(windows)
 	base := agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier])

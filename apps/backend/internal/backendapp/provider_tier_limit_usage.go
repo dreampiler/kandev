@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"math"
@@ -15,7 +16,8 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 		return used, err
 	}
 	used.ActiveTurns = active
-	if err := s.readRequestUsage(ctx, c, now, &used); err != nil {
+	var attribution error
+	if err := s.readRequestUsage(ctx, c, now, &used, &attribution); err != nil {
 		return used, err
 	}
 	for _, budget := range c.effective.Windows {
@@ -28,17 +30,26 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 			used.Resets[budget.Key()] = reset
 		}
 	}
-	if err := s.readScopeUsage(ctx, c, now, &used); err != nil {
+	if err := deferModelAttribution(&attribution, s.readScopeUsage(ctx, c, now, &used, c.profile.Model)); err != nil {
 		return used, err
 	}
-	return used, nil
+	return used, attribution
 }
 
-func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage) error {
-	ids := s.minuteProfiles(ctx, c)
+func deferModelAttribution(first *error, err error) error {
+	if !errors.Is(err, errModelAttributionUnavailable) {
+		return err
+	}
+	if *first == nil {
+		*first = err
+	}
+	return nil
+}
+
+func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage, attribution *error) error {
 	var err error
-	used.RequestsMinute, err = s.readRequestCount(ctx, ids, now.Add(-time.Minute), now)
-	if err != nil {
+	used.RequestsMinute, err = s.readMinuteRequestCount(ctx, c, now.Add(-time.Minute), now)
+	if err := deferModelAttribution(attribution, err); err != nil {
 		return err
 	}
 	start, reset, err := agentusage.DailyLimitWindow(now, c.effective.DailyReset)
@@ -54,8 +65,8 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 	used.TokensDay = day.TokensTotal
 	used.Resets["day"] = reset
 	if c.effective.RequestWindowSeconds > 0 {
-		used.RequestsWindow, err = s.readRequestCount(ctx, ids, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
-		if err != nil {
+		used.RequestsWindow, err = s.readMinuteRequestCount(ctx, c, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
+		if err := deferModelAttribution(attribution, err); err != nil {
 			return err
 		}
 	}
@@ -69,18 +80,11 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 	return nil
 }
 
-func (s *providerTierLimitService) minuteProfiles(ctx context.Context, c tierLimitContext) []string {
-	if !c.effective.RequestsPerModel {
-		return c.ids
+func (s *providerTierLimitService) readMinuteRequestCount(ctx context.Context, c tierLimitContext, start, end time.Time) (float64, error) {
+	if c.effective.RequestsPerModel {
+		return s.readModelRequestCount(ctx, c.ids, []string{c.profile.Model}, start, end)
 	}
-	var ids []string
-	for _, id := range c.ids {
-		p, _, ok := s.usage.loadProfile(ctx, id)
-		if ok && p.Model == c.profile.Model {
-			ids = append(ids, id)
-		}
-	}
-	return ids
+	return s.readRequestCount(ctx, c.ids, start, end)
 }
 
 func (s *providerTierLimitService) readRequestCount(ctx context.Context, ids []string, start, end time.Time) (float64, error) {
@@ -165,11 +169,15 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 		return time.Time{}, false
 	}
 	used, err := s.readUsage(ctx, c, "", now)
-	if err != nil {
+	unknownModel := errors.Is(err, errModelAttributionUnavailable)
+	if err != nil && !unknownModel {
 		return time.Time{}, false
 	}
 	var latest time.Time
 	for _, budget := range c.effective.Windows {
+		if unknownModel && budget.Scope != "" {
+			continue
+		}
 		if period != "" && budget.Window != period {
 			continue
 		}
