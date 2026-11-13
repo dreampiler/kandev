@@ -8,12 +8,148 @@ import (
 	"strings"
 	"time"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 type modelWindowUsageReader interface {
 	GetManualModelWindowUsageForProfiles(context.Context, []string, time.Time, time.Time) ([]sqliterepo.ManualModelWindowUsage, error)
+}
+
+type selectedModelWindowUsageReader interface {
+	GetManualSelectedModelWindowUsage(context.Context, []string, time.Time, time.Time, func(string, string) (bool, error)) (sqliterepo.ManualWindowUsage, error)
+}
+
+type modelProfileSnapshot struct {
+	profile   settingsmodels.AgentProfile
+	agentType string
+}
+
+func (s *providerTierLimitService) budgetModelClass(ctx context.Context, model string, observed agentusage.ModelClass) agentusage.ModelClass {
+	if dynamicruntime.IsFreeModel(model) {
+		return agentusage.ModelClassFree
+	}
+	if s.freeModels != nil {
+		if free, known := s.freeModels.IsFreeModel(ctx, model); known && free {
+			return agentusage.ModelClassFree
+		}
+	}
+	return observed
+}
+
+func applicableTierBudgets(c tierLimitContext) []agentusage.LimitBudget {
+	windows := make([]agentusage.LimitBudget, 0, len(c.effective.Windows))
+	free := c.tier == agentusage.TierFree || c.modelClass == agentusage.ModelClassFree
+	premium := c.modelClass == agentusage.ModelClassPremium
+	for _, window := range c.effective.Windows {
+		if matchesRecordedModelScope(window.Scope, free, premium) {
+			windows = append(windows, window)
+		}
+	}
+	return windows
+}
+
+// readModelBudgetUsage keeps each recorded model paired with its profile. A
+// turn spanning multiple selected models cannot be summed without double count.
+func (s *providerTierLimitService) readModelBudgetUsage(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, start, end time.Time) (float64, bool, error) {
+	if budget.Unit == "turns" {
+		return s.readDistinctModelBudgetTurns(ctx, c, budget, start, end)
+	}
+	reader, ok := s.store.(modelWindowUsageReader)
+	if !ok {
+		return 0, false, errModelAttributionUnavailable
+	}
+	groups, err := reader.GetManualModelWindowUsageForProfiles(ctx, c.ids, start, end)
+	if err != nil {
+		return 0, false, err
+	}
+	selected := false
+	var amount float64
+	for _, group := range groups {
+		if strings.TrimSpace(group.Model) == "" && group.Usage.EventCount > 0 {
+			return 0, false, errModelAttributionUnavailable
+		}
+		matches, err := s.recordedModelMatchesScope(ctx, c, group.ProfileID, group.Model, budget.Scope)
+		if err != nil {
+			return 0, false, err
+		}
+		if !matches {
+			continue
+		}
+		selected = true
+		amount += budgetAmount(group.Usage, budget.Unit)
+	}
+	return amount, selected, nil
+}
+
+func (s *providerTierLimitService) readDistinctModelBudgetTurns(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, start, end time.Time) (float64, bool, error) {
+	reader, ok := s.store.(selectedModelWindowUsageReader)
+	if !ok {
+		return 0, false, errModelAttributionUnavailable
+	}
+	profiles := make(map[string]modelProfileSnapshot, len(c.ids))
+	for _, id := range c.ids {
+		profile, agentType, found := s.usage.loadProfile(ctx, id)
+		if !found || profile == nil {
+			return 0, false, errModelAttributionUnavailable
+		}
+		profiles[id] = modelProfileSnapshot{profile: *profile, agentType: agentType}
+	}
+	selected := false
+	usage, err := reader.GetManualSelectedModelWindowUsage(ctx, c.ids, start, end, func(id, model string) (bool, error) {
+		profile, found := profiles[id]
+		if !found || strings.TrimSpace(model) == "" {
+			return false, errModelAttributionUnavailable
+		}
+		matches, matchErr := s.modelSnapshotMatchesScope(ctx, c, profile, model, budget.Scope)
+		if matchErr != nil {
+			return false, matchErr
+		}
+		selected = selected || matches
+		return matches, nil
+	})
+	return float64(usage.TurnCount), selected, err
+}
+
+func (s *providerTierLimitService) recordedModelMatchesScope(ctx context.Context, c tierLimitContext, profileID, model, scope string) (bool, error) {
+	profile, agentType, ok := s.usage.loadProfile(ctx, profileID)
+	if !ok || profile == nil {
+		return false, errModelAttributionUnavailable
+	}
+	return s.modelSnapshotMatchesScope(ctx, c, modelProfileSnapshot{profile: *profile, agentType: agentType}, model, scope)
+}
+
+func (s *providerTierLimitService) modelSnapshotMatchesScope(ctx context.Context, c tierLimitContext, snapshot modelProfileSnapshot, model, scope string) (bool, error) {
+	copy := snapshot.profile
+	copy.Model = model
+	bound, ok := s.usage.bindingFor(&copy, snapshot.agentType)
+	if !ok || bound.accountKey != c.key {
+		return false, errModelAttributionUnavailable
+	}
+	class := agentusage.ModelClassUnknown
+	if bound.class != nil {
+		class = bound.class(ctx)
+	}
+	if class == agentusage.ModelClassUnknown && exactProviderBudgetModel(model, c.profile.Model) {
+		class = c.modelClass
+	}
+	class = s.budgetModelClass(ctx, model, class)
+	return matchesRecordedModelScope(scope, class == agentusage.ModelClassFree, class == agentusage.ModelClassPremium), nil
+}
+
+func matchesRecordedModelScope(scope string, free, premium bool) bool {
+	switch scope {
+	case string(agentusage.WindowScopeFreeModels):
+		return free
+	case string(agentusage.WindowScopePremiumModels):
+		return premium
+	case string(agentusage.WindowScopePaidModels):
+		return !free && !premium
+	default:
+		return true
+	}
 }
 
 var errModelAttributionUnavailable = errors.New("model-attributed usage is unavailable")

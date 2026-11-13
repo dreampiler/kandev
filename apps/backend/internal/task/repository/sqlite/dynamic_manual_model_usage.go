@@ -68,3 +68,63 @@ func (r *Repository) readManualModelWindow(ctx context.Context, queryer manualMo
 	}
 	return result, rows.Err()
 }
+
+// GetManualSelectedModelWindowUsage selects and aggregates model/profile pairs
+// in one read snapshot, preserving distinct turns across selected models.
+func (r *Repository) GetManualSelectedModelWindowUsage(ctx context.Context, profileIDs []string, start, end time.Time, selectModel func(string, string) (bool, error)) (ManualWindowUsage, error) {
+	ids := make([]string, 0, len(profileIDs))
+	for _, id := range profileIDs {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 || selectModel == nil {
+		return ManualWindowUsage{}, fmt.Errorf("manual model selection requires profiles and a selector")
+	}
+	if !end.After(start) {
+		return ManualWindowUsage{}, nil
+	}
+	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return ManualWindowUsage{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	groups, err := r.readManualModelWindow(ctx, tx, ids, start, end)
+	if err != nil {
+		return ManualWindowUsage{}, err
+	}
+	pairs := make([]string, 0, len(groups))
+	args := make([]interface{}, 0, len(groups)*2+6)
+	for _, group := range groups {
+		selected, selectErr := selectModel(group.ProfileID, group.Model)
+		if selectErr != nil {
+			return ManualWindowUsage{}, selectErr
+		}
+		if selected {
+			pairs = append(pairs, "(?, ?)")
+			args = append(args, group.ProfileID, group.Model)
+		}
+	}
+	if len(pairs) == 0 {
+		return ManualWindowUsage{}, tx.Commit()
+	}
+	args = append(args, costSourceUnpriced, usageCompletenessComplete, start, end, ids, ids)
+	prefix := "WITH selected_models(profile_id, model) AS (VALUES " + strings.Join(pairs, ", ") + ") "
+	filter := " AND EXISTS (SELECT 1 FROM selected_models sm WHERE sm.profile_id = COALESCE(NULLIF(t.execution_profile_id, ''), e.agent_profile_id) AND sm.model = COALESCE(e.model, ''))"
+	query, args, err := sqlx.In(prefix+manualWindowUsageQuery+filter, args...)
+	if err != nil {
+		return ManualWindowUsage{}, err
+	}
+	var usage ManualWindowUsage
+	var attributed, summaries int64
+	err = tx.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&usage.EventCount, &usage.TokensTotal, &usage.CostSubcents,
+		&usage.UnpricedCount, &usage.IncompleteCount, &attributed, &usage.TurnCount, &summaries)
+	if err != nil {
+		return ManualWindowUsage{}, err
+	}
+	usage.TurnsAttributed = attributed
+	usage.RequestCount = usage.EventCount
+	usage.RequestEstimated = summaries > 0
+	usage.ProfileAttributed = max(0, usage.EventCount-attributed)
+	return usage, tx.Commit()
+}

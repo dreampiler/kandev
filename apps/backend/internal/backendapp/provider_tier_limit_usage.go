@@ -6,6 +6,7 @@ import (
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -20,20 +21,27 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 	if err := s.readRequestUsage(ctx, c, now, &used, &attribution); err != nil {
 		return used, err
 	}
+	if err := s.readUsageBudgets(ctx, c, now, &used, &attribution); err != nil {
+		return used, err
+	}
+	if err := deferModelAttribution(&attribution, s.readScopeUsage(ctx, c, now, &used, c.profile.Model)); err != nil {
+		return used, err
+	}
+	return used, attribution
+}
+
+func (s *providerTierLimitService) readUsageBudgets(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage, attribution *error) error {
 	for _, budget := range c.effective.Windows {
 		amount, reset, known, err := s.readBudgetUsage(ctx, c, budget, now)
-		if err != nil {
-			return used, err
+		if err := deferModelAttribution(attribution, err); err != nil {
+			return err
 		}
 		if known {
 			used.Windows[budget.Key()] = amount
 			used.Resets[budget.Key()] = reset
 		}
 	}
-	if err := deferModelAttribution(&attribution, s.readScopeUsage(ctx, c, now, &used, c.profile.Model)); err != nil {
-		return used, err
-	}
-	return used, attribution
+	return nil
 }
 
 func deferModelAttribution(first *error, err error) error {
@@ -94,7 +102,7 @@ func (s *providerTierLimitService) readRequestCount(ctx context.Context, ids []s
 
 func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, now time.Time) (float64, time.Time, bool, error) {
 	if budget.Unit == "percent" {
-		window, ok := findProviderBudget(c.observed, budget)
+		window, ok := findProviderBudget(c.observed, budget, c.profile.Model)
 		if !ok {
 			return 0, time.Time{}, false, nil
 		}
@@ -109,30 +117,78 @@ func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLi
 	}
 	start, reset, ok := agentusage.LimitWindowBounds(now, budget)
 	if budget.Reset == hostSourceProvider {
-		if window, found := findProviderBudget(c.observed, budget); found && !window.StartAt.IsZero() && window.ResetAt.After(now) {
+		if window, found := findProviderBudget(c.observed, budget, c.profile.Model); found && !window.StartAt.IsZero() && window.ResetAt.After(now) {
 			start, reset, ok = window.StartAt, window.ResetAt, true
 		}
 	}
 	if !ok {
 		return 0, time.Time{}, false, nil
 	}
-	ids := s.budgetProfileIDs(ctx, c, budget)
-	if len(ids) == 0 {
-		return 0, time.Time{}, false, nil
+	if budget.Scope != "" {
+		amount, known, err := s.readModelBudgetUsage(ctx, c, budget, start, now)
+		return amount, reset, known, err
 	}
-	total, err := s.store.GetManualWindowUsageForProfiles(ctx, ids, start, now)
+	total, err := s.store.GetManualWindowUsageForProfiles(ctx, c.ids, start, now)
 	return budgetAmount(total, budget.Unit), reset, true, err
 }
 
-func findProviderBudget(observed *agentusage.ProviderUsage, b agentusage.LimitBudget) (agentusage.UtilizationWindow, bool) {
-	if observed != nil {
-		for _, w := range observed.Windows {
-			if providerWindowPeriod(w) == b.Window && string(w.Scope) == b.Scope {
+func findProviderBudget(observed *agentusage.ProviderUsage, b agentusage.LimitBudget, model string) (agentusage.UtilizationWindow, bool) {
+	if observed == nil {
+		return agentusage.UtilizationWindow{}, false
+	}
+	var shared agentusage.UtilizationWindow
+	foundShared := false
+	var family agentusage.UtilizationWindow
+	foundFamily := false
+	for _, w := range observed.Windows {
+		if providerWindowPeriod(w) != b.Window || string(w.Scope) != b.Scope {
+			continue
+		}
+		if w.ModelID != "" {
+			if exactProviderBudgetModel(w.ModelID, model) {
 				return w, true
 			}
+			continue
+		}
+		if w.Model != "" {
+			if exactProviderBudgetModel(w.Model, model) {
+				return w, true
+			}
+			if !foundFamily && knownProviderBudgetFamily(w, model) {
+				family, foundFamily = w, true
+			}
+			continue
+		}
+		if !foundShared {
+			shared, foundShared = w, true
 		}
 	}
-	return agentusage.UtilizationWindow{}, false
+	if foundFamily {
+		return family, true
+	}
+	return shared, foundShared
+}
+
+func knownProviderBudgetFamily(window agentusage.UtilizationWindow, model string) bool {
+	switch strings.ToLower(strings.TrimSpace(window.Model)) {
+	case "opus", "sonnet", "haiku":
+		return model != "" && agentusage.ExecutionUsageWindowApplies(window, model)
+	default:
+		return false
+	}
+}
+
+func exactProviderBudgetModel(recorded, model string) bool {
+	if model == "" {
+		return false
+	}
+	recordedProvider, _, recordedQualified := strings.Cut(recorded, "/")
+	modelProvider, _, modelQualified := strings.Cut(model, "/")
+	if recordedQualified && modelQualified {
+		return strings.EqualFold(recordedProvider, modelProvider) &&
+			strings.EqualFold(agentusage.ScopeModelID(recorded), agentusage.ScopeModelID(model))
+	}
+	return strings.EqualFold(agentusage.ScopeModelID(recorded), agentusage.ScopeModelID(model))
 }
 
 func budgetAmount(total sqliterepo.ManualWindowUsage, unit string) float64 {
@@ -146,19 +202,6 @@ func budgetAmount(total sqliterepo.ManualWindowUsage, unit string) float64 {
 	default:
 		return float64(total.EventCount)
 	}
-}
-
-func (s *providerTierLimitService) budgetProfileIDs(ctx context.Context, c tierLimitContext, b agentusage.LimitBudget) []string {
-	if b.Scope != string(agentusage.WindowScopePremiumModels) {
-		return c.ids
-	}
-	var ids []string
-	for _, id := range c.ids {
-		if s.usage.ProfileUsage(ctx, id).ModelClass == agentusage.ModelClassPremium {
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 func (s *providerTierLimitService) windowReset(ctx context.Context, id, period string, now time.Time, exhaustedOnly bool) (time.Time, bool) {

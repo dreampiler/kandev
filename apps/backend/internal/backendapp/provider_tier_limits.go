@@ -43,6 +43,7 @@ type tierLimitContext struct {
 	tier                agentusage.BillingTier
 	owner, learned      agentusage.AccountTierConfig
 	observed            *agentusage.ProviderUsage
+	modelClass          agentusage.ModelClass
 	defaults, effective agentusage.TierLimits
 	ids                 []string
 }
@@ -98,6 +99,7 @@ func (s *providerTierLimitService) contextForSelection(ctx context.Context, id s
 		return c, err
 	}
 	c.observed = observed.Usage
+	c.modelClass = s.budgetModelClass(ctx, profile.Model, observed.ModelClass)
 	c.tier = s.effectiveBillingTier(ctx, profile, agentType, observed, c.owner)
 	c.defaults = s.defaultLimits(c)
 	c.effective = agentusage.MergeTierLimits(agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier]), c.owner.Tiers[c.tier])
@@ -276,12 +278,16 @@ func (s *providerTierLimitService) checkCandidate(ctx context.Context, candidate
 	if err != nil {
 		return agentusage.LimitAdmission{}, err
 	}
+	c.effective.Windows = applicableTierBudgets(c)
 	used, err := s.readUsage(ctx, c, exclude, now)
 	if errors.Is(err, errModelAttributionUnavailable) {
 		if admission := provenAccountLimit(c.effective, used, now); admission.Reason != "" {
 			return admission, nil
 		}
 		if admission := agentusage.EvaluateScopeLimits(c.effective.Scopes, c.profile.Model, used, now); admission.Reason != "" {
+			return admission, nil
+		}
+		if admission := agentusage.EvaluateTierLimits(agentusage.TierLimits{Windows: c.effective.Windows}, used, now); admission.Reason != "" {
 			return admission, nil
 		}
 	}
