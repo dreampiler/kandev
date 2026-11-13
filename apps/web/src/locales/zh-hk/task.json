@@ -2992,7 +2992,6 @@
   "waitingReasonAwaitingAnswerHelp": "工作階段正在等待回覆後繼續。",
   "waitingReasonQuota": "等待用量上限",
   "waitingReasonQuotaHelp": "模型已達到用量上限，任務將在上限重置後繼續。",
-  "waitingReasonQuotaClearsAt": "用量上限將於 {{time}} 重置。",
   "turnFinishedAwaitingInstruction": "本輪結束，等待指示",
   "launchQueueRefusalTotal": "最近等候原因：執行總數已達上限。",
   "launchQueueRefusalGrade": "最近等候原因：執行等級已達上限。",

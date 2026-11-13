@@ -322,6 +322,9 @@ func (s *Service) observeProviderDiagnostic(
 		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
+		if s.extendProviderQuotaDiagnostic(sessionID, executionID, promptGeneration, providerID, message) {
+			return
+		}
 		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
 		return
 	}
@@ -344,6 +347,32 @@ func (s *Service) observeProviderDiagnostic(
 	evidence.providerDiagnosticCode = classified.Code
 	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
+}
+
+func (s *Service) extendProviderQuotaDiagnostic(sessionID, executionID string, promptGeneration uint64, providerID, fragment string) bool {
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) || evidence.effect ||
+		evidence.providerDiagnosticCode != routingerr.CodeQuotaLimited || evidence.providerDiagnosticText == "" {
+		return false
+	}
+	message := evidence.providerDiagnosticText + fragment
+	if len(message) > 1024 {
+		return false
+	}
+	classified := routingerr.ClassifyAgentNotice(routingerr.Input{
+		Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: message,
+	})
+	if classified == nil || classified.ClassifierRule != routingerr.RuleRelativeQuotaNotice ||
+		classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
+		return false
+	}
+	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
+	return true
 }
 
 func (s *Service) observeDynamicAttempt(sessionID, executionID string, output, effect bool) {

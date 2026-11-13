@@ -22,7 +22,7 @@ func ClassifyAgentNotice(in Input) *Error {
 	if text == "" {
 		return nil
 	}
-	r, ok := leadingNoticeRule(in.ProviderID, text)
+	r, ok := leadingNoticeRule(in.ProviderID, text, in.Phase)
 	if !ok {
 		return nil
 	}
@@ -34,7 +34,8 @@ func ClassifyAgentNotice(in Input) *Error {
 		ResetHint:      in.ResetHint,
 		RawExcerpt:     Sanitize(text),
 	})
-	deriveLimitTiming(e, Input{Stderr: text, OccurredAt: in.OccurredAt})
+	in.Stderr = text
+	deriveLimitTiming(e, in)
 	return e
 }
 
@@ -45,13 +46,16 @@ var noticeErrorLabel = regexp.MustCompile(`(?i)^[a-z0-9_]*error:\s*`)
 // leadingNoticeRule returns the first catalogue rule whose match starts at the
 // beginning of text, or right after a leading error-type label, honoring the
 // same provider-then-neutral precedence as Classify.
-func leadingNoticeRule(providerID, text string) (rule, bool) {
+func leadingNoticeRule(providerID, text string, phase Phase) (rule, bool) {
 	starts := []int{0}
 	if label := noticeErrorLabel.FindStringIndex(text); label != nil {
 		starts = append(starts, label[1])
 	}
 	for _, rules := range [][]rule{providerRules[providerID], providerNeutralRules} {
 		for _, r := range rules {
+			if !providerNeutralRuleAllowed(providerID, r.id, phase) {
+				continue
+			}
 			if matchesAtAnyStart(r.pattern, text, starts) {
 				return r, true
 			}

@@ -3002,7 +3002,6 @@
   "waitingReasonAwaitingAnswerHelp": "Ţĥē śēśśĩōń ĩś ŵàĩţĩńĝ ƒōŕ àń àńśŵēŕ ƀēƒōŕē ĩţ ćōńţĩńũēś.",
   "waitingReasonQuota": "Ŵàĩţĩńĝ ōń à ũśàĝē ĺĩḿĩţ",
   "waitingReasonQuotaHelp": "Ţĥē ḿōďēĺ ŕēàćĥēď ĩţś ũśàĝē ĺĩḿĩţ, śō ţĥē ţàśķ ŕēśũḿēś ŵĥēń ţĥē ĺĩḿĩţ ŕēśēţś.",
-  "waitingReasonQuotaClearsAt": "Ţĥē ĺĩḿĩţ ŕēśēţś àţ {{time}}.",
   "turnFinishedAwaitingInstruction": "Ţũŕń ƒĩńĩśĥēď, àŵàĩţĩńĝ ĩńśţŕũćţĩōń",
   "launchQueueRefusalTotal": "[!! Ŀåšţ ŵåîţ: öṽéŕåļļ éxéçûţîöñ ļîɱîţ !!]",
   "launchQueueRefusalGrade": "[!! Ŀåšţ ŵåîţ: éẋéçûţîöñ ĝŕåðé ļîɱîţ !!]",

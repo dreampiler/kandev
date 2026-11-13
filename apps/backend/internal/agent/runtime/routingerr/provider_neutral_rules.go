@@ -1,5 +1,8 @@
 package routingerr
 
+// RuleRelativeQuotaNotice identifies the anchored provider notice with a relative reset sentence.
+const RuleRelativeQuotaNotice = "provider.quota_notice.v1"
+
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
@@ -14,7 +17,7 @@ var providerNeutralRules = append(providerCatalogRules, []rule{
 	// keeps such prose classifiable for diagnostics, but at a confidence that
 	// never ends a turn.
 	mustRule(
-		"provider.quota_notice.v1",
+		RuleRelativeQuotaNotice,
 		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d`,
 		CodeQuotaLimited,
 		ConfHigh,
@@ -85,14 +88,11 @@ func matchProviderNeutralRules(providerID, text string, phase Phase) (*Error, bo
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
-		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
+		if !providerNeutralRuleAllowed(providerID, r.id, phase) {
 			continue
 		}
 		matchText := text
 		if r.id == catalogFreeUsageRule {
-			if HasProviderRules(providerID) {
-				continue
-			}
 			matchText = withoutMarkdownFencedCode(text)
 		}
 		if r.pattern.MatchString(matchText) {
@@ -104,4 +104,15 @@ func matchProviderNeutralRules(providerID, text string, phase Phase) (*Error, bo
 		}
 	}
 	return nil, false
+}
+
+func providerNeutralRuleAllowed(providerID, ruleID string, phase Phase) bool {
+	switch ruleID {
+	case catalogFreeUsageRule:
+		return !HasProviderRules(providerID)
+	case "provider.context_length_exceeded.v1":
+		return phase == PhasePromptSend
+	default:
+		return true
+	}
 }

@@ -449,6 +449,8 @@ type promptTurnState struct {
 	quotaNoticeClassified        string
 	quotaNoticeClass             *routingerr.Error
 	quotaNoticeTimer             *time.Timer
+	pendingQuotaNotice           *providerNoticeDiagnostic
+	completedQuotaNotice         *providerNoticeDiagnostic
 	quotaNoticeDelivered         bool
 	cursorRetriableMsg           string
 	cursorRetriableComplete      bool
@@ -566,7 +568,7 @@ func (t *promptTurnState) quotaNoticeClassification(buffer, providerID string) (
 	}
 	t.quotaNoticeClassified = buffer
 	t.quotaNoticeClass = nil
-	input := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: buffer}
+	input := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: buffer, OccurredAt: time.Now().UTC()}
 	if !routingerr.MayClassify(input) {
 		return nil, false
 	}

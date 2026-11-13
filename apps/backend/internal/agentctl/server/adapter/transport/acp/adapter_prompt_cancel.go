@@ -117,11 +117,7 @@ func (a *Adapter) promptTurnWasHandedOff(turn *promptTurnState) bool {
 // finishPromptTurn releases whichever turn still owns the physical gate token.
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
-	turn.evidenceMu.Lock()
-	if turn.quotaNoticeTimer != nil {
-		turn.quotaNoticeTimer.Stop()
-	}
-	turn.evidenceMu.Unlock()
+	turn.closeQuotaNotice()
 	a.promptTurnMu.Lock()
 	a.recordPromptFinishedForSuggestionLocked(turn)
 	if a.promptTurn == turn {
@@ -143,6 +139,7 @@ func (a *Adapter) invalidatePromptTurnOwnership(turn *promptTurnState) {
 	if turn == nil {
 		return
 	}
+	turn.closeQuotaNotice()
 	a.promptTurnMu.Lock()
 	if a.promptTurn != turn {
 		a.promptTurnMu.Unlock()

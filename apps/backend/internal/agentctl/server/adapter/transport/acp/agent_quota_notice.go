@@ -9,8 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const relativeQuotaNoticeRule = "provider.quota_notice.v1"
-
 // observeUsageLimitNotice correlates a usage-limit notice the agent stated as
 // an ordinary assistant message with the in-flight prompt turn.
 //
@@ -73,7 +71,7 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 			ResetAt:                    quotaNoticeResetHint(buffer, classified.ResetHint),
 		},
 	}
-	if classified.ClassifierRule == relativeQuotaNoticeRule && diagnostic.ProviderError.ResetAt == nil &&
+	if classified.ClassifierRule == routingerr.RuleRelativeQuotaNotice && diagnostic.ProviderError.ResetAt == nil &&
 		!quotaNoticeSentenceComplete(buffer) {
 		turn.waitForQuotaNoticeSuffix(a, diagnostic, classified.ClassifierRule)
 		return
@@ -87,11 +85,35 @@ func (turn *promptTurnState) waitForQuotaNoticeSuffix(a *Adapter, diagnostic pro
 	if turn.quotaNoticeDelivered || turn.quotaNoticeTimer != nil {
 		return
 	}
+	turn.pendingQuotaNotice = &diagnostic
 	turn.quotaNoticeTimer = time.AfterFunc(a.promptCancelTimeout(), func() {
 		if a.currentPromptTurn() == turn {
 			turn.deliverQuotaNotice(a, diagnostic, rule)
 		}
 	})
+}
+
+func (turn *promptTurnState) closeQuotaNotice() {
+	turn.evidenceMu.Lock()
+	defer turn.evidenceMu.Unlock()
+	turn.quotaNoticeDelivered = true
+	turn.pendingQuotaNotice = nil
+	turn.completedQuotaNotice = nil
+	if turn.quotaNoticeTimer != nil {
+		turn.quotaNoticeTimer.Stop()
+	}
+}
+
+func (turn *promptTurnState) quotaNoticeOnNormalPromptReturn(sessionID string) error {
+	turn.evidenceMu.Lock()
+	defer turn.evidenceMu.Unlock()
+	if turn.pendingQuotaNotice != nil && turn.pendingQuotaNotice.SessionID == sessionID {
+		return &providerPromptError{ProviderError: turn.pendingQuotaNotice.ProviderError}
+	}
+	if turn.completedQuotaNotice != nil && turn.completedQuotaNotice.SessionID == sessionID {
+		return &providerPromptError{ProviderError: turn.completedQuotaNotice.ProviderError}
+	}
+	return nil
 }
 
 func (turn *promptTurnState) deliverQuotaNotice(a *Adapter, diagnostic providerNoticeDiagnostic, rule string) {
@@ -101,6 +123,10 @@ func (turn *promptTurnState) deliverQuotaNotice(a *Adapter, diagnostic providerN
 		return
 	}
 	turn.quotaNoticeDelivered = true
+	turn.pendingQuotaNotice = nil
+	if rule == routingerr.RuleRelativeQuotaNotice {
+		turn.completedQuotaNotice = &diagnostic
+	}
 	if turn.quotaNoticeTimer != nil {
 		turn.quotaNoticeTimer.Stop()
 	}
