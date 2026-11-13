@@ -487,6 +487,45 @@ func (m *Manager) CloseAdmission() {
 	}
 }
 
+// CloseAdmissionIfIdle closes starts only when no workspace process owns the instance.
+func (m *Manager) CloseAdmissionIfIdle() bool {
+	m.admissionMu.Lock()
+	defer m.admissionMu.Unlock()
+	if m.stopping || m.admissionCount != 0 || m.passthrough.Live() ||
+		(m.shellMgr != nil && m.shellMgr.HasRunningTerminals()) {
+		return false
+	}
+	if shell := m.Shell(); shell != nil && shell.HasUserWork() {
+		return false
+	}
+	if m.hasWorkspaceEditor() {
+		return false
+	}
+	for _, process := range m.ListProcesses("") {
+		switch process.Status {
+		case types.ProcessStatusExited, types.ProcessStatusFailed, types.ProcessStatusStopped:
+		default:
+			return false
+		}
+	}
+	m.stopping = true
+	return true
+}
+
+func (m *Manager) hasWorkspaceEditor() bool {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+	if m.vscode == nil {
+		return false
+	}
+	switch m.vscode.Info().Status {
+	case VscodeStatusRunning, VscodeStatusStarting, VscodeStatusInstalling:
+		return true
+	default:
+		return m.vscode.HasUnreapedOwnership()
+	}
+}
+
 // BeginOwnedOperation admits instance-scoped work and returns a context that
 // is canceled when either the caller ends or instance teardown begins. The
 // release function must be called so StopForTeardown can finish draining.
@@ -4965,6 +5004,20 @@ func (m *Manager) Shell() *shell.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.shell
+}
+
+// WriteWorkspaceShellInput serializes user input with idle instance reclaim.
+func (m *Manager) WriteWorkspaceShellInput(data []byte) (int, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	session := m.Shell()
+	if session == nil {
+		return 0, errors.New("shell not available")
+	}
+	return session.Write(data)
 }
 
 // ShellManager returns the per-terminal shell session manager.

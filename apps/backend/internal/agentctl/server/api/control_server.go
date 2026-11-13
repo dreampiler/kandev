@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -142,6 +143,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/reclaim", m.handleReclaimIdleInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
@@ -318,6 +320,28 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":              "instance stopped successfully",
+		"inference_attempts":   inst.FinalInferenceSnapshot(),
+		"managed_process_stop": inst.FinalManagedStopReceipt(),
+	})
+}
+
+func (m *ControlServer) handleReclaimIdleInstance(c *gin.Context) {
+	inst, found := m.instMgr.GetInstance(c.Param("id"))
+	if !found {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 15*time.Second)
+	defer cancel()
+	if err := m.instMgr.ReclaimIdleInstance(ctx, inst); err != nil {
+		if errors.Is(err, instance.ErrInstanceBusy) {
+			c.Status(http.StatusConflict)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reclaim idle instance"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
 		"inference_attempts":   inst.FinalInferenceSnapshot(),
 		"managed_process_stop": inst.FinalManagedStopReceipt(),
 	})

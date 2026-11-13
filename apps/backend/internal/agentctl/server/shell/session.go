@@ -40,6 +40,7 @@ type Session struct {
 
 	// Output subscribers (WebSocket connections)
 	subscribers map[chan<- []byte]struct{}
+	inputUsed   bool // protected by mu
 	subMu       sync.RWMutex
 
 	// Ring buffer for recent output (for new subscribers)
@@ -371,14 +372,24 @@ func (s *Session) cleanupShellProcessGroup(
 
 // Write sends input to the shell
 func (s *Session) Write(data []byte) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if !s.running || s.pty == nil {
 		return 0, fmt.Errorf("shell not running")
 	}
 
+	s.inputUsed = s.inputUsed || len(data) != 0
 	return s.pty.Write(data)
+}
+
+// HasUserWork distinguishes an auto-created shell from one attached or used.
+func (s *Session) HasUserWork() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+	return s.running && (s.inputUsed || len(s.subscribers) != 0)
 }
 
 // Resize changes the terminal dimensions of the shell PTY.
