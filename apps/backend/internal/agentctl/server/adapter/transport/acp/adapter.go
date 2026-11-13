@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -541,6 +542,9 @@ func (t *promptTurnState) appendQuotaNoticeText(text string) string {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	if t.quotaNoticeDelivered {
+		if strings.TrimSpace(text) != "" {
+			t.completedQuotaNotice = nil
+		}
 		return ""
 	}
 	if len(t.quotaNoticeText) < quotaNoticeBufferBytes {

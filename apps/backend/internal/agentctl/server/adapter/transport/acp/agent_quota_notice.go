@@ -55,6 +55,12 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 	if !isUsageLimitNotice(classified) {
 		return
 	}
+	relative := classified.ClassifierRule == routingerr.RuleRelativeQuotaNotice
+	complete := quotaNoticeSentenceComplete(buffer)
+	if relative && relativeQuotaNoticeContainsOutput(buffer, complete) {
+		turn.closeQuotaNotice()
+		return
+	}
 	message := streams.SanitizeProviderMessage(buffer)
 	if message == "" {
 		return
@@ -71,12 +77,16 @@ func (a *Adapter) observeUsageLimitNotice(promptGeneration uint64, event *AgentE
 			ResetAt:                    quotaNoticeResetHint(buffer, classified.ResetHint),
 		},
 	}
-	if classified.ClassifierRule == routingerr.RuleRelativeQuotaNotice && diagnostic.ProviderError.ResetAt == nil &&
-		!quotaNoticeSentenceComplete(buffer) {
+	if relative && !complete {
 		turn.waitForQuotaNoticeSuffix(a, diagnostic, classified.ClassifierRule)
 		return
 	}
 	turn.deliverQuotaNotice(a, diagnostic, classified.ClassifierRule)
+}
+
+func relativeQuotaNoticeContainsOutput(text string, complete bool) bool {
+	return routingerr.RelativeQuotaNoticeHasTrailingOutput(text) ||
+		complete && !routingerr.IsCompleteRelativeQuotaNoticeText(text)
 }
 
 func (turn *promptTurnState) waitForQuotaNoticeSuffix(a *Adapter, diagnostic providerNoticeDiagnostic, rule string) {
@@ -107,7 +117,8 @@ func (turn *promptTurnState) closeQuotaNotice() {
 func (turn *promptTurnState) quotaNoticeOnNormalPromptReturn(sessionID string) error {
 	turn.evidenceMu.Lock()
 	defer turn.evidenceMu.Unlock()
-	if turn.pendingQuotaNotice != nil && turn.pendingQuotaNotice.SessionID == sessionID {
+	if turn.pendingQuotaNotice != nil && turn.pendingQuotaNotice.SessionID == sessionID &&
+		routingerr.IsCompleteRelativeQuotaNoticeText(turn.quotaNoticeText) {
 		return &providerPromptError{ProviderError: turn.pendingQuotaNotice.ProviderError}
 	}
 	if turn.completedQuotaNotice != nil && turn.completedQuotaNotice.SessionID == sessionID {

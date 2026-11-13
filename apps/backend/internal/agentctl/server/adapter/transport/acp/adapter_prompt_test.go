@@ -13,6 +13,45 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestRelativeQuotaNoticeDoesNotConsumeAssistantOutput(t *testing.T) {
+	const sessionID = "session-1"
+	const opening = "You have reached your current quota for this period. Your limit will reset in 1 hour"
+	const ending = ", 30 minutes."
+	const answer = " Here is the requested answer."
+	for _, tc := range []struct {
+		name   string
+		chunks []string
+	}{
+		{"mixed continuation", []string{opening, ending + answer}},
+		{"mixed notice", []string{opening + ending + answer}},
+		{"undelimited output", []string{opening, answer}},
+		{"output after notice", []string{opening, ending, answer}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.sessionID = sessionID
+			turn := &promptTurnState{
+				promptGeneration: 1,
+				providerErrorCh:  make(chan providerNoticeDiagnostic, 1),
+			}
+			a.promptTurn = turn
+			t.Cleanup(turn.closeQuotaNotice)
+
+			var event AgentEvent
+			for _, chunk := range tc.chunks {
+				event = AgentEvent{Type: streams.EventTypeMessageChunk, SessionID: sessionID, Text: chunk}
+				a.observeUsageLimitNotice(turn.promptGeneration, &event)
+			}
+			if event.ProviderDiagnosticCandidate {
+				t.Fatal("ordinary output was marked as provider diagnostic evidence")
+			}
+			if err := turn.quotaNoticeOnNormalPromptReturn(sessionID); err != nil {
+				t.Fatalf("quota notice overrode a prompt that produced output: %v", err)
+			}
+		})
+	}
+}
+
 // TestCancelActiveToolCalls_PreservesSubagentTask pins the fix for the
 // "main agent finished, subagent keeps working" bug. The Claude Agent SDK
 // (anthropics/claude-code#47936) can return session/prompt with stop_reason

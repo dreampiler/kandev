@@ -321,6 +321,11 @@ func (s *Service) observeProviderDiagnostic(
 		ProviderID: providerID,
 		Stderr:     message,
 	})
+	if classified.ClassifierRule == routingerr.RuleRelativeQuotaNotice &&
+		routingerr.RelativeQuotaNoticeHasTrailingOutput(message) {
+		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
+		return
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		if s.extendProviderQuotaDiagnostic(sessionID, executionID, promptGeneration, providerID, message) {
 			return
@@ -361,7 +366,7 @@ func (s *Service) extendProviderQuotaDiagnostic(sessionID, executionID string, p
 		return false
 	}
 	message := evidence.providerDiagnosticText + fragment
-	if len(message) > 1024 {
+	if len(message) > 1024 || routingerr.RelativeQuotaNoticeHasTrailingOutput(message) {
 		return false
 	}
 	classified := routingerr.ClassifyAgentNotice(routingerr.Input{
@@ -830,9 +835,19 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // failure can classify identically without being the transport diagnostic
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
+	terminalMessage := matchingProviderFailureMessage(data)
+	if e.providerDiagnosticCode == routingerr.CodeQuotaLimited && e.providerDiagnosticText != "" {
+		diagnostic := routingerr.ClassifyAgentNotice(routingerr.Input{
+			Phase: routingerr.PhasePromptSend, ProviderID: data.AgentID, Stderr: e.providerDiagnosticText,
+		})
+		if diagnostic != nil && diagnostic.ClassifierRule == routingerr.RuleRelativeQuotaNotice &&
+			!routingerr.IsCompleteRelativeQuotaNoticeText(terminalMessage) {
+			return true
+		}
+	}
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
 		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
-		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
+		strings.Contains(normalizeDiagnosticText(terminalMessage), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
 		// chunk is diagnostic transport, not generated output.

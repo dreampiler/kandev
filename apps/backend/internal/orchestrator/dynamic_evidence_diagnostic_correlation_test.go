@@ -54,6 +54,23 @@ func TestDynamicAttemptEvidenceCorrelatesFragmentedQuotaNotice(t *testing.T) {
 	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
 		t.Fatal("ordinary output lost the replay fence")
 	}
+
+	service.beginPromptAttempt("session-1", "execution-1", 2, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 2, "codex-acp", first)
+	mixed := last + " Here is the requested answer."
+	service.observeProviderDiagnostic("session-1", "execution-1", 2, "codex-acp", mixed)
+	data.PromptGeneration = 2
+	data.ProviderError.Message = first + mixed
+	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
+		t.Fatal("ordinary output in the quota continuation lost the replay fence")
+	}
+
+	service.beginPromptAttempt("session-1", "execution-1", 3, false)
+	service.observeProviderDiagnostic("session-1", "execution-1", 3, "codex-acp", first+mixed)
+	data.PromptGeneration = 3
+	if got := service.withPromptAttemptEvidence(data); !got.OutputObserved {
+		t.Fatal("ordinary output bundled with a quota notice lost the replay fence")
+	}
 }
 
 // TestDynamicAttemptEvidenceRequiresDiagnosticTextContainment pins

@@ -32,6 +32,17 @@ var relativeResetHintPattern = regexp.MustCompile(
 	`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`,
 )
 
+// RelativeQuotaNoticeHasTrailingOutput identifies content after the reset sentence.
+func RelativeQuotaNoticeHasTrailingOutput(text string) bool {
+	match := relativeResetHintPattern.FindStringSubmatchIndex(text)
+	return match != nil && match[1] < len(text) && strings.TrimSpace(text[match[1]+1:]) != ""
+}
+
+// IsCompleteRelativeQuotaNoticeText checks that the reset phrase contains only a supported duration.
+func IsCompleteRelativeQuotaNoticeText(text string) bool {
+	return !RelativeQuotaNoticeHasTrailingOutput(text) && parseRelativeResetHintAt(text, time.Time{}) != nil
+}
+
 // relativeDurationUnitPattern splits a captured duration list into value/unit
 // pairs. Longer unit spellings precede their prefixes so "minutes" is not read
 // as "m" followed by trailing text.

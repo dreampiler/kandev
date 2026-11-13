@@ -235,8 +235,8 @@ func TestClassify_ProviderCatalogueSignatures(t *testing.T) {
 		{"AI prefix retry later", "opencode-acp", "AI_APICallError: Rate limit exceeded. Please try again later", "provider diagnostic tail", CodeRateLimited, "opencode.rate.try_later.v1"},
 		{"provider label retry later", "opencode-acp", "Error from provider (zen): Rate limit exceeded. Please try again later", "provider diagnostic tail", CodeRateLimited, "opencode.rate.try_later.v1"},
 		{"AI prefix and provider label retry later", "opencode-acp", "AI_APICallError: Error from provider (zen): Rate limit exceeded. Please try again later", "provider diagnostic tail", CodeRateLimited, "opencode.rate.try_later.v1"},
-		// Native's existing usage rule retains priority for the Free consumer.
-		{"unlabelled free usage keeps native priority", "opencode-acp", "free usage limit reached", "provider diagnostic tail", CodeQuotaLimited, "opencode.stderr.usage_limit.v1"},
+		// The native free-usage rule keeps priority over the shared catalogue.
+		{"unlabelled free usage keeps native priority", "opencode-acp", "free usage limit reached", "provider diagnostic tail", CodeQuotaLimited, openCodeFreeUsageUnlabelledRule},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
