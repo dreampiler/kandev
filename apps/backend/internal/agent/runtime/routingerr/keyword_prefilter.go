@@ -101,6 +101,20 @@ func keywordStructuralCode(in Input, text string) (Code, keywordGroup, string) {
 	return code, group, fmt.Sprintf("keyword_context.http.%d.%s.v1", status, group)
 }
 
+// classifyUnmappedHTTPKeyword permits only the prefilter's structural rules.
+func classifyUnmappedHTTPKeyword(in Input, excerpt string) *Error {
+	switch in.HTTPStatus {
+	case 400, 404, 408:
+	default:
+		return nil
+	}
+	result := classifyKeywordContext(in, excerpt)
+	if result == nil || !strings.HasPrefix(result.ClassifierRule, "keyword_context.http.") {
+		return nil
+	}
+	return result
+}
+
 func keywordRequestRule(text string) string {
 	if strings.Contains(text, "context") || strings.Contains(text, "token") || strings.Contains(text, "length") {
 		return "keyword_context.http.400.context.v1"

@@ -81,4 +81,6 @@ type Vocabulary struct {
 	Codes       []string
 	Confidences []string
 	Phases      []string
+	// TermKey normalizes terms as the matching classifier sees them.
+	TermKey func(string) string
 }

@@ -149,14 +149,20 @@ func (rc ruleCompiler) compileTerms(m matchDTO, rule *compiledRule) error {
 		return nil
 	}
 	terms := make([]string, 0, len(m.Terms))
+	keys := make([]string, 0, len(m.Terms))
 	for _, term := range m.Terms {
 		normalized := strings.Join(strings.Fields(strings.ToLower(term)), " ")
-		if normalized == "" {
+		key := normalized
+		if rc.vocab.TermKey != nil {
+			key = rc.vocab.TermKey(term)
+		}
+		if normalized == "" || key == "" {
 			return rc.fail(ReasonInvalidValue, "match.terms")
 		}
 		terms = append(terms, normalized)
+		keys = append(keys, key)
 	}
-	if !unique(terms) {
+	if !unique(keys) {
 		return rc.fail(ReasonInvalidValue, "match.terms")
 	}
 	if m.MinTerms == 0 {
