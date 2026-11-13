@@ -40,6 +40,17 @@ metadata merge. `clear=true` removes it without touching other metadata.
 The target task is authorized before local path validation. The runner uses
 the source only after empty or unavailable workspace collection. Task metadata
 takes precedence over a source carried by the writer session's metadata.
+At collection, the task must still own the checkout or its registered Git
+repository, including a linked gate worktree. A browser operator with
+workspace-management authority can explicitly save a separate checkout
+for that task. The setter stores the operator, canonical checkout, Git common
+directory and refs in a server-owned record, atomically with the existing
+task metadata selection. Collection rechecks the operator's current authority
+and the selected checkout. Ordinary metadata and session metadata cannot
+add approval. A legacy external source stays saved and needs an explicit
+operator selection before reuse.
+Collection verifies the effective Git root and common directory and refuses
+alternate object stores that can refer to a different backend checkout.
 The step-entry callback supplies that writer's session ID, including ledger
 entries whose engine state has no session ID.
 
