@@ -64,6 +64,7 @@ func (c *sessionCeilingController) appendInferenceGradesLocked(ctx context.Conte
 }
 
 const InferenceAdmissionExecutionStopping = "execution_stopping"
+const InferenceAdmissionScopeClosure = "inference_scope_closure"
 
 func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {
 	if s == nil || s.sessionCeiling == nil {
@@ -80,6 +81,9 @@ func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding se
 	if s.hasExecutionTeardownOwner(binding.SessionID, binding.InstanceID) ||
 		s.hasExecutionTeardownOwner(binding.SessionID, binding.ParentExecutionID) {
 		return false, InferenceAdmissionExecutionStopping, errRestartStopBusy
+	}
+	if err := s.checkInferenceClosureBinding(ctx, binding); err != nil {
+		return false, InferenceAdmissionScopeClosure, err
 	}
 	c := s.sessionCeiling
 	c.mu.Lock()

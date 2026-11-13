@@ -13,8 +13,8 @@ var (
 	errRestartStopUnsettled = errors.New("session inference ownership is still unsettled")
 )
 
-// StopForRestart awaits the observed execution before the caller can resume.
-func (s *Service) StopForRestart(ctx context.Context, sessionID, reason string) error {
+// stopLegacyForRestart awaits the observed execution before the caller can resume.
+func (s *Service) stopLegacyForRestart(ctx context.Context, sessionID, reason string) error {
 	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
 		return err
 	}
@@ -32,6 +32,9 @@ func (s *Service) StopForRestart(ctx context.Context, sessionID, reason string) 
 		return errors.Join(errRestartStopBusy, err)
 	}
 	if err := s.CheckRestartStopBindings(ctx, sessionID, executionID); err != nil {
+		return err
+	}
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
 		return err
 	}
 	if absent {

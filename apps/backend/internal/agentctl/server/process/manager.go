@@ -3495,15 +3495,23 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	return m.stopForTeardown(ctx, false)
+}
+
+func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error {
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
+		drainErr := fmt.Errorf("wait for process admission to drain: %w", err)
+		if retainJournal {
+			return errors.Join(passthroughErr, previewErr, drainErr)
+		}
 		// Close durable storage even when an owner misses the drain deadline.
 		// Late readers then fail with a typed closed-journal error, and cannot
 		// mistake shutdown for an empty successful replay.
-		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
+		return errors.Join(previewErr, drainErr, m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
 	if passthroughErr == nil && previewErr == nil && stopErr == nil {
@@ -3511,7 +3519,11 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 	}
 	preparedErr := m.closePreparedRuntimeOwnersAfterTeardown()
 	instanceCleanupErr := m.closeInstanceCleanupHooks()
-	return errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr, m.closeDeliveryJournal())
+	stopResult := errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr)
+	if retainJournal {
+		return stopResult
+	}
+	return errors.Join(stopResult, m.closeDeliveryJournal())
 }
 
 // RegisterInstanceCleanupHook attaches resources whose lifetime is bounded by

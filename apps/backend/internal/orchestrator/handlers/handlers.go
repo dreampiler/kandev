@@ -327,14 +327,15 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	WorkspaceOnly     bool                          `json:"workspace_only,omitempty"`
-	InterruptedResume json.RawMessage               `json:"interrupted_resume,omitempty"`
-	TaskID            string                        `json:"task_id"`
-	SessionID         string                        `json:"session_id"`
-	Action            string                        `json:"action"`
-	IdempotencyKey    string                        `json:"idempotency_key,omitempty"`
-	ErrorStamp        string                        `json:"error_stamp,omitempty"`
-	SettingsPolicy    executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	WorkspaceOnly               bool                          `json:"workspace_only,omitempty"`
+	InterruptedResume           json.RawMessage               `json:"interrupted_resume,omitempty"`
+	TaskID                      string                        `json:"task_id"`
+	SessionID                   string                        `json:"session_id"`
+	Action                      string                        `json:"action"`
+	IdempotencyKey              string                        `json:"idempotency_key,omitempty"`
+	ErrorStamp                  string                        `json:"error_stamp,omitempty"`
+	SettingsPolicy              executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	InferenceClosureOperationID string                        `json:"inference_closure_operation_id,omitempty"`
 }
 
 type wsGetWorkspaceRecoveryStatusRequest struct {
@@ -536,10 +537,11 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
-		WorkspaceOnly:  req.WorkspaceOnly,
-		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
-		SettingsPolicy: req.SettingsPolicy,
-		ErrorStamp:     req.ErrorStamp,
+		WorkspaceOnly:               req.WorkspaceOnly,
+		IdempotencyKey:              strings.TrimSpace(req.IdempotencyKey),
+		SettingsPolicy:              req.SettingsPolicy,
+		ErrorStamp:                  req.ErrorStamp,
+		InferenceClosureOperationID: req.InferenceClosureOperationID,
 	})
 	if err != nil {
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
@@ -783,12 +785,13 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 }
 
 type wsSessionActionRequest struct {
-	CloseInferenceForRestart bool   `json:"close_inference_for_restart,omitempty"`
-	AwaitTerminal            bool   `json:"await_terminal,omitempty"`
-	ExpectedExecutionID      string `json:"expected_execution_id,omitempty"`
-	SessionID                string `json:"session_id"`
-	Reason                   string `json:"reason,omitempty"`
-	Force                    bool   `json:"force,omitempty"`
+	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
+	CloseInferenceForRestart    bool   `json:"close_inference_for_restart,omitempty"`
+	AwaitTerminal               bool   `json:"await_terminal,omitempty"`
+	ExpectedExecutionID         string `json:"expected_execution_id,omitempty"`
+	SessionID                   string `json:"session_id"`
+	Reason                      string `json:"reason,omitempty"`
+	Force                       bool   `json:"force,omitempty"`
 }
 
 // parseSessionAction parses a session-scoped action request, returning an error message on failure.
@@ -818,6 +821,16 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if req.CloseInferenceForRestart {
 		return h.wsStopForRestart(ctx, msg, req, reason)
 	}
+	if req.InferenceClosureOperationID != "" {
+		if req.Force || !req.AwaitTerminal || req.ExpectedExecutionID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "inference closure requires await_terminal, expected_execution_id and force=false", nil)
+		}
+		result, err := h.service.StopSessionForInferenceClosure(ctx, req.SessionID, req.ExpectedExecutionID, req.InferenceClosureOperationID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]any{"closure": result.PublicStatus()})
+		}
+		return ws.NewResponse(msg.ID, msg.Action, result.PublicStatus())
+	}
 	if req.AwaitTerminal {
 		if req.Force || req.ExpectedExecutionID == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "awaited stop requires expected_execution_id and force=false", nil)
@@ -836,13 +849,20 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 func (h *Handlers) wsStopForRestart(ctx context.Context, msg *ws.Message, req *wsSessionActionRequest, reason string) (*ws.Message, error) {
-	if req.Force || req.AwaitTerminal || req.ExpectedExecutionID != "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "restart stop chooses its own execution and requires force=false", nil)
+	if req.Force || req.AwaitTerminal || req.ExpectedExecutionID != "" || req.InferenceClosureOperationID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid restart stop options", nil)
 	}
-	if err := h.service.StopForRestart(ctx, req.SessionID, reason); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Restart stop incomplete: "+err.Error(), nil)
+	result, handled, err := h.service.StopForRestart(ctx, req.SessionID, reason)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]any{"closure": result.PublicStatus()})
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+	if !handled {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "restart stop was not handled", nil)
+	}
+	if result == nil {
+		return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result.PublicStatus())
 }
 
 // wsDeleteSession deletes a session.

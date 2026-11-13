@@ -131,7 +131,7 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 			b.logInferenceFlow(ctx, binding, "inference_admission", "waiting", reason, time.Since(started).Milliseconds())
 			lastReason = reason
 		}
-		if reason == orchestrator.InferenceAdmissionExecutionStopping {
+		if isInferenceClosureRefusal(reason) {
 			return &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
 		}
 		all, finite := b.capacity.InferenceCapacityPolicy()
@@ -147,6 +147,10 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 		case <-wake:
 		}
 	}
+}
+
+func isInferenceClosureRefusal(reason string) bool {
+	return reason == orchestrator.InferenceAdmissionExecutionStopping || reason == orchestrator.InferenceAdmissionScopeClosure
 }
 
 func (b *sharedInferenceConsumer) markWorker(key string, active bool) {
@@ -287,7 +291,7 @@ func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, cl
 	b.refreshMu.Lock()
 	_, reason, err := b.capacity.ReserveInferenceCapacity(ctx, binding)
 	b.refreshMu.Unlock()
-	if reason == orchestrator.InferenceAdmissionExecutionStopping {
+	if isInferenceClosureRefusal(reason) {
 		return nil, &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
 	}
 	response, err := client.InferencePrompt(ctx, req)
