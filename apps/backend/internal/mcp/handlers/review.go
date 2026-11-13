@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -167,6 +168,14 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		if err := h.taskSvc.AuthorizeTaskAccess(ctx, req.TaskID); err != nil {
 			return reviewLaunchError(msg, err)
 		}
+	}
+	if req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != "" {
+		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
+		}
+	}
+	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
+		return denied, nil
 	}
 	origin := h.manualReviewOrigin(ctx, req.TaskID, req.SessionID)
 	if req.SessionID == "" && origin != nil {
