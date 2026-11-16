@@ -249,6 +249,9 @@ type TaskDTO struct {
 	// auto_start_failed metadata key at DTO conversion time (see
 	// FromTaskWithSessionInfo).
 	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// AutoStartFailedReason is the cause code of that failure when known
+	// (for example "agent_profile_not_found"), else empty.
+	AutoStartFailedReason string `json:"auto_start_failed_reason,omitempty"`
 	// WorkspaceOrphaned reports that this task's materialized workspace was
 	// removed when its parent was archived, while workspace.mode is still
 	// inherit_parent. Derived from metadata.workspace at DTO conversion time
@@ -1189,6 +1192,7 @@ func FromTaskWithSessionInfo(
 		Metadata:                    models.PublicTaskMetadata(task.Metadata),
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		AutoStartFailedReason:       models.AutoStartFailedReason(task.Metadata),
 		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
 		// RunnerEditable/RunnerIneligibleReason default fail-closed: a caller
 		// that builds a DTO through this path without running

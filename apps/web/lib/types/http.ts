@@ -464,6 +464,8 @@ export type Task = ActiveSubagentCountFields & {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** Cause code of that failure when known (e.g. "agent_profile_not_found"). */
+  auto_start_failed_reason?: string;
   /** True when this task inherits an archived parent's workspace and can no
    *  longer materialize or start (see internal/task/models WorkspaceOrphaned). */
   workspace_orphaned?: boolean;

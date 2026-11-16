@@ -3234,12 +3234,32 @@ func TestAutoStartFailureDoesNotMarkTaskWithActiveSession(t *testing.T) {
 	))
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.setTaskAutoStartFailedMarker(ctx, "t1", "task.moved")
+	svc.setTaskAutoStartFailedMarker(ctx, "t1", "task.moved", "")
 
 	task, err := repo.GetTask(ctx, "t1")
 	require.NoError(t, err)
 	_, marked := task.Metadata[models.MetaKeyAutoStartFailed]
 	require.False(t, marked, "a late failure must not mark a task with active work")
+}
+
+// A deleted agent profile must surface as the marker's cause, not only in logs.
+func TestAutoStartFailureRecordsMissingProfileReason(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "t1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	svc.handleAutoStartFailure(ctx, "t1", "task.moved", autoStartLaunchTokens{},
+		errors.New("validate profile p1: agent profile not found: sql: no rows in result set"))
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, models.AutoStartFailedReasonAgentProfileNotFound, models.AutoStartFailedReason(task.Metadata))
+
+	svc.handleAutoStartFailure(ctx, "t1", "task.moved", autoStartLaunchTokens{}, errors.New("executor unavailable"))
+	task, err = repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata[models.MetaKeyAutoStartFailed])
+	require.Empty(t, models.AutoStartFailedReason(task.Metadata), "an unclassified failure keeps the plain marker")
 }
 
 // A recovered failure remains available for transcript history, while this

@@ -21,6 +21,7 @@
   "autoApproveAllPermissions": "Aprovar automaticamente todas as permissões",
   "automations": "Automatizações",
   "autoStartFailed": "Início automático falhou",
+  "autoStartFailedAgentProfileNotFound": "Início automático falhou: o perfil do agente já não existe",
   "availableTemplates": "Modelos disponíveis",
   "back": "Voltar",
   "backToTaskOverview": "Voltar à visão geral da tarefa",

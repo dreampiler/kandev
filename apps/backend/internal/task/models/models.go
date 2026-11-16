@@ -262,8 +262,13 @@ const (
 	// task DTO report `auto_start_failed: true` so the failure surfaces on
 	// the card instead of only in backend logs; the orchestrator removes the
 	// key when a session of the task next enters STARTING/RUNNING (mirrors
-	// MetaKeyInterruptedAt).
+	// MetaKeyInterruptedAt). The value is `true`, or one of the
+	// AutoStartFailedReason* codes when the cause is known (see
+	// AutoStartFailedReason).
 	MetaKeyAutoStartFailed = "auto_start_failed"
+	// AutoStartFailedReasonAgentProfileNotFound marks an auto-start that
+	// failed because the task's agent profile no longer exists.
+	AutoStartFailedReasonAgentProfileNotFound = "agent_profile_not_found"
 	// MetaKeyAgentTitlePending marks tasks whose provisional title still needs
 	// the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -344,6 +349,13 @@ const (
 	// task created from it. Mutated via an optimistic compare-and-set.
 	MetaKeyHandoffs = "handoffs"
 )
+
+// AutoStartFailedReason returns the cause code stored on the auto-start
+// failure marker, or "" when the marker is absent or records no known cause.
+func AutoStartFailedReason(metadata map[string]interface{}) string {
+	reason, _ := metadata[MetaKeyAutoStartFailed].(string)
+	return reason
+}
 
 // ManagedToolPolicyFromTask returns the persisted restricted policy only for
 // a retained managed conversation. Incomplete or inactive metadata fails

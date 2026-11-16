@@ -122,6 +122,7 @@ function preserveLiveMarkerFields(
   }
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
+    merged.autoStartFailedReason = existing.autoStartFailedReason;
   }
   if (
     merged.workspaceOrphaned === undefined ||

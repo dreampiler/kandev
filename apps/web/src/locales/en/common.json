@@ -22,6 +22,7 @@
   "automation": "Automation",
   "automations": "Automations",
   "autoStartFailed": "Auto-start failed",
+  "autoStartFailedAgentProfileNotFound": "Auto-start failed: agent profile no longer exists",
   "availableTemplates": "Available templates",
   "back": "Back",
   "backToTaskOverview": "Back to task overview",

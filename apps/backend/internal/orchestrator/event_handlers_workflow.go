@@ -2236,7 +2236,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 				restoreQueuePromotion:    restoreQueuePromotion,
 				queuePromotionToken:      queuePromotionToken,
 				restoreAutoStartOnCreate: restoreAutoStartOnCreate,
-			})
+			}, err)
 			return
 		}
 		if restoreAutoStartOnCreate {
@@ -2299,7 +2299,7 @@ func (s *Service) autoStartOfficeTaskForLoadedStep(ctx context.Context, task *mo
 				restoreQueuePromotion:    restoreQueuePromotion,
 				queuePromotionToken:      queuePromotionToken,
 				restoreAutoStartOnCreate: restoreAutoStartOnCreate,
-			})
+			}, err)
 			return
 		}
 		// Log the outcome only after the attempt actually resolves — the log
@@ -2409,8 +2409,9 @@ func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID str
 // failure before a durable session or run exists leaves the task retryable by
 // the next startup sweep instead of stranded with no marker at all. It also
 // stamps MetaKeyAutoStartFailed so the failure surfaces on the task card
-// instead of only in backend logs.
-func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, tokens autoStartLaunchTokens) {
+// instead of only in backend logs, carrying a cause code when cause names a
+// known reason.
+func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName string, tokens autoStartLaunchTokens, cause error) {
 	if tokens.hasGuard {
 		s.restoreAutoStartClaim(ctx, taskID, eventName)
 	}
@@ -2420,7 +2421,16 @@ func (s *Service) handleAutoStartFailure(ctx context.Context, taskID, eventName 
 	if tokens.restoreAutoStartOnCreate {
 		s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 	}
-	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName)
+	s.setTaskAutoStartFailedMarker(ctx, taskID, eventName, autoStartFailedReason(cause))
+}
+
+// autoStartFailedReason maps an auto-start error to a
+// models.AutoStartFailedReason* code, or "" when the cause is not classified.
+func autoStartFailedReason(err error) string {
+	if err != nil && isMissingProfileResumeError(err) {
+		return models.AutoStartFailedReasonAgentProfileNotFound
+	}
+	return ""
 }
 
 //nolint:cyclop,gocognit,funlen // deferred launches coordinate two durable tokens and async success/failure cleanup
@@ -2595,15 +2605,20 @@ func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName s
 // setTaskAutoStartFailedMarker stamps MetaKeyAutoStartFailed on a task and
 // republishes task.updated so the failure surfaces on the card. Cleared by
 // clearTaskAutoStartFailedMarker when a session for the task next reaches
-// STARTING/RUNNING.
-func (s *Service) setTaskAutoStartFailedMarker(ctx context.Context, taskID, eventName string) {
+// STARTING/RUNNING. A non-empty reason is stored as the marker value so the
+// cause is cleared together with the marker.
+func (s *Service) setTaskAutoStartFailedMarker(ctx context.Context, taskID, eventName, reason string) {
 	setter, ok := s.repo.(taskMetadataKeySetterIfNoActiveSession)
 	if !ok {
 		s.logger.Warn(eventName+": repository cannot conditionally set auto-start-failed marker",
 			zap.String("task_id", taskID))
 		return
 	}
-	written, err := setter.SetTaskMetadataKeyIfNoActiveSession(ctx, taskID, models.MetaKeyAutoStartFailed, true)
+	var marker interface{} = true
+	if reason != "" {
+		marker = reason
+	}
+	written, err := setter.SetTaskMetadataKeyIfNoActiveSession(ctx, taskID, models.MetaKeyAutoStartFailed, marker)
 	if err != nil {
 		s.logger.Warn(eventName+": failed to set auto-start-failed marker",
 			zap.String("task_id", taskID), zap.Error(err))

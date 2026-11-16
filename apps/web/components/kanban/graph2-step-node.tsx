@@ -232,6 +232,7 @@ export function Graph2StepNode({
               hasPendingPermission: pendingInput.permission,
               interrupted: task.interrupted,
               autoStartFailed: task.autoStartFailed,
+              autoStartFailedReason: task.autoStartFailedReason,
               workspaceOrphaned: task.workspaceOrphaned,
             })}
           </div>
