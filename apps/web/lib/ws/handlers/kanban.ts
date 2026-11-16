@@ -114,6 +114,7 @@ function preserveMultiSnapshotFields(
   | "interrupted"
   | "interruptedGeneration"
   | "autoStartFailed"
+  | "autoStartFailedReason"
   | "workspaceOrphaned"
   | "priority"
 > {
@@ -132,6 +133,10 @@ function preserveMultiSnapshotFields(
       fallback?.interruptedGeneration,
     ),
     autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
+    autoStartFailedReason: preserveIfUndefined(
+      t.autoStartFailedReason,
+      fallback?.autoStartFailedReason,
+    ),
     workspaceOrphaned: preserveIfUndefined(t.workspaceOrphaned, fallback?.workspaceOrphaned),
     priority: preserveIfUndefined(t.priority, fallback?.priority),
   };
@@ -361,6 +366,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               interrupted: existing?.interrupted,
               interruptedGeneration: existing?.interruptedGeneration,
               autoStartFailed: existing?.autoStartFailed,
+              autoStartFailedReason: existing?.autoStartFailedReason,
               workspaceOrphaned: existing?.workspaceOrphaned,
               foregroundActivity: existing?.foregroundActivity,
               // A lightweight kanban.update may omit priority entirely; fall

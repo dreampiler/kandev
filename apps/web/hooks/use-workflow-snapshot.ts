@@ -26,7 +26,11 @@ function preserveLiveAutoStartFailed(
       fetchStart === undefined ||
       current.autoStartFailed !== fetchStart.autoStartFailed
     ) {
-      return { ...task, autoStartFailed: current.autoStartFailed };
+      return {
+        ...task,
+        autoStartFailed: current.autoStartFailed,
+        autoStartFailedReason: current.autoStartFailedReason,
+      };
     }
     return task;
   });

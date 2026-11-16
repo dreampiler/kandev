@@ -244,15 +244,26 @@ export function InterruptedTaskIcon({ className }: { className?: string }) {
  * Shared red alert-triangle affordance for a task whose auto_start_agent
  * on_enter action failed to launch a run. Carries the accessible "Auto-start
  * failed" label and tooltip, so every surface that renders this state
- * presents it consistently.
+ * presents it consistently. A known cause (`reason`) replaces the generic
+ * label with one that names it.
  */
-export function AutoStartFailedTaskIcon({ className }: { className?: string }) {
+export function AutoStartFailedTaskIcon({
+  className,
+  reason,
+}: {
+  className?: string;
+  reason?: string;
+}) {
   const { t } = useTranslation();
+  const label =
+    reason === "agent_profile_not_found"
+      ? t("common:autoStartFailedAgentProfileNotFound")
+      : t("common:autoStartFailed");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          aria-label={t("common:autoStartFailed")}
+          aria-label={label}
           tabIndex={0}
           className="flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
         >
@@ -263,7 +274,7 @@ export function AutoStartFailedTaskIcon({ className }: { className?: string }) {
           />
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{t("common:autoStartFailed")}</TooltipContent>
+      <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   );
 }
@@ -375,6 +386,8 @@ type TaskStateIconOptions = {
   interrupted?: boolean;
   /** True when a workflow step's auto_start_agent action failed to launch a run. */
   autoStartFailed?: boolean;
+  /** Cause code of that failure when known (e.g. "agent_profile_not_found"). */
+  autoStartFailedReason?: string;
   /**
    * True when the task is waiting on the operator to notice, not on the
    * operator to act — a settled session with a positively-sampled background
@@ -497,7 +510,12 @@ export function getTaskStateIcon(
     return <InterruptedTaskIcon className={cn("h-4 w-4", className)} />;
   }
   if (config === TASK_AUTO_START_FAILED_ICON) {
-    return <AutoStartFailedTaskIcon className={cn("h-4 w-4", className)} />;
+    return (
+      <AutoStartFailedTaskIcon
+        className={cn("h-4 w-4", className)}
+        reason={options.autoStartFailedReason}
+      />
+    );
   }
   if (config === TASK_PARKED_ICON) {
     return <BackgroundWorkTaskIcon />;

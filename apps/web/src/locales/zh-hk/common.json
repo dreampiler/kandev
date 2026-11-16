@@ -22,6 +22,7 @@
   "automation": "自動化",
   "automations": "自動化",
   "autoStartFailed": "自動啓動失敗",
+  "autoStartFailedAgentProfileNotFound": "自動啓動失敗：智能體設定檔已不存在",
   "availableTemplates": "可用模板",
   "back": "返回",
   "backToTaskOverview": "返回任務概覽",

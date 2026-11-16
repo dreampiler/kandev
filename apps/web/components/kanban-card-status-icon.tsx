@@ -94,6 +94,7 @@ export function renderTaskStatusIcon(
     hasPendingPermission,
     interrupted: flags.showInterrupted,
     autoStartFailed: flags.showAutoStartFailed,
+    autoStartFailedReason: task.autoStartFailedReason,
     parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
     workspaceOrphaned: flags.showWorkspaceOrphaned,
   });

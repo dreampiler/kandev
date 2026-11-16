@@ -51,6 +51,8 @@ export interface Task {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   autoStartFailed?: boolean;
+  /** Cause code of that failure when known (e.g. "agent_profile_not_found"). */
+  autoStartFailedReason?: string;
   /**
    * True when the task is waiting on the operator to notice, not on the
    * operator to act — a settled session with a positively-sampled

@@ -488,6 +488,8 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// omitted key here would make clearTaskAutoStartFailedMarker's publish
 		// as invisible as the set it is meant to undo.
 		"auto_start_failed": task.Metadata[models.MetaKeyAutoStartFailed] != nil,
+		// Explicit for the same reason: "" clears a previously shown cause.
+		"auto_start_failed_reason": models.AutoStartFailedReason(task.Metadata),
 		// Keep the interruption projection explicit on task.updated so a live
 		// client receives the warning immediately after reconciliation writes
 		// the marker; task-merge preserves omitted fields for partial updates.

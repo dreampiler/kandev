@@ -112,6 +112,11 @@ func (r *ProfileExecutionResolver) ValidateProfile(ctx context.Context, profileI
 		return errors.New("profile execution resolver has no profile store")
 	}
 	profile, err := r.profiles.GetAgentProfile(ctx, profileID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Name the missing profile so callers (and the auto-start failure
+		// marker) can tell a deleted profile apart from other launch errors.
+		return fmt.Errorf("validate profile %s: agent profile not found: %w", profileID, err)
+	}
 	if err != nil {
 		return fmt.Errorf("validate profile %s: %w", profileID, err)
 	}

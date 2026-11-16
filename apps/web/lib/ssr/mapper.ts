@@ -143,6 +143,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         taskPendingAction: pickPendingAction(task.task_pending_action),
         foregroundActivity: task.foreground_activity ?? undefined,
         autoStartFailed: resolveAutoStartFailed(task),
+        autoStartFailedReason: task.auto_start_failed_reason,
         parkedOnBackgroundWork: task.parked_on_background_work,
         parkedRevision: task.parked_revision,
         parkedEpoch: task.parked_epoch,

@@ -22,6 +22,7 @@
   "automation": "자동화",
   "automations": "자동화",
   "autoStartFailed": "자동 시작 실패",
+  "autoStartFailedAgentProfileNotFound": "자동 시작 실패: 에이전트 프로필이 없습니다",
   "availableTemplates": "사용 가능한 템플릿",
   "back": "뒤로",
   "backToTaskOverview": "작업 개요로 돌아가기",

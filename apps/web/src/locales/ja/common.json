@@ -22,6 +22,7 @@
   "automation": "自動化",
   "automations": "自動化",
   "autoStartFailed": "自動開始失敗",
+  "autoStartFailedAgentProfileNotFound": "自動開始失敗: エージェントプロファイルが存在しません",
   "availableTemplates": "利用可能テンプレート",
   "back": "戻る",
   "backToTaskOverview": "タスク概要に戻る",

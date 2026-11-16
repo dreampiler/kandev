@@ -868,6 +868,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"autoStartFailed":             task.AutoStartFailed,
+		"autoStartFailedReason":       task.AutoStartFailedReason,
 		"workspaceOrphaned":           task.WorkspaceOrphaned,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,

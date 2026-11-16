@@ -169,6 +169,10 @@ export function mergeTaskUpdate(
     taskField: "autoStartFailed",
   });
   preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "auto_start_failed_reason",
+    taskField: "autoStartFailedReason",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "workspace_orphaned",
     taskField: "workspaceOrphaned",
   });
